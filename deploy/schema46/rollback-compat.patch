@@ -1,0 +1,708 @@
+diff --git a/backend/cmd/schema46-rollback-probe/main.go b/backend/cmd/schema46-rollback-probe/main.go
+new file mode 100644
+index 0000000..f44e0be
+--- /dev/null
++++ b/backend/cmd/schema46-rollback-probe/main.go
+@@ -0,0 +1,350 @@
++//go:build integration
++
++// schema46-rollback-probe exercises the 0fee657 application behaviour against a
++// disposable database that has already been migrated to schema 46.
++//
++// It answers one question: if 0045 and 0046 are applied and the release then has
++// to be rolled back, can the previous application serve that database? The
++// additive claim is not taken on trust — every statement shape the previous build
++// actually issues is run, and the two new objects are checked to be present and
++// ignored rather than absent.
++package main
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++
++	"github.com/jackc/pgx/v5/pgxpool"
++
++	"github.com/Owlah2025/gradex/backend/internal/db"
++)
++
++func main() {
++	if err := run(context.Background()); err != nil {
++		fmt.Fprintln(os.Stderr, "schema46 rollback compatibility:", err)
++		os.Exit(1)
++	}
++	fmt.Println("schema46 rollback compatibility: PASS")
++}
++
++func run(ctx context.Context) error {
++	dsn := os.Getenv("GRADEX_COMPAT46_DSN")
++	if dsn == "" {
++		return errors.New("a disposable schema-46 database DSN is required")
++	}
++	pool, err := pgxpool.New(ctx, dsn)
++	if err != nil {
++		return err
++	}
++	defer pool.Close()
++
++	// 1. The ceiling. This build must accept clean 46; without the compatibility
++	//    patch its supported range ends at 44 and it refuses to start.
++	state, err := db.ReadSchemaState(ctx, pool)
++	if err != nil {
++		return fmt.Errorf("reading schema state: %w", err)
++	}
++	if state.Version != int64(db.LessonPublicPreviewSchemaVersion) || state.Dirty {
++		return fmt.Errorf("database is at %+v, want clean %d", state, db.LessonPublicPreviewSchemaVersion)
++	}
++	if db.MaxSchemaVersion != int64(db.LessonPublicPreviewSchemaVersion) {
++		return fmt.Errorf("compat build ceiling = %d, want 46", db.MaxSchemaVersion)
++	}
++
++	// 2. API readiness, using the floor THIS build declares. It is deliberately
++	//    still 43 — the schema-44 correction belongs to the forward release — and
++	//    a schema-46 database satisfies it.
++	apiFloor := requiredSchemaVersionForProbe()
++	if apiFloor != int64(db.AutoDeviceReplacementSchemaVersion) {
++		return fmt.Errorf("compat API floor = %d, want the unchanged 0fee657 floor %d",
++			apiFloor, db.AutoDeviceReplacementSchemaVersion)
++	}
++	if err := db.CheckSchemaAtLeast(ctx, pool, apiFloor); err != nil {
++		return fmt.Errorf("API readiness against schema 46: %w", err)
++	}
++
++	// 3. Worker readiness. The media floor is unchanged at 42.
++	if err := db.CheckSchemaAtLeast(ctx, pool, int64(db.ActiveProcessingKindSchemaVersion)); err != nil {
++		return fmt.Errorf("worker readiness against schema 46: %w", err)
++	}
++
++	// 4. The new objects exist and this build does not read them. Present-and-
++	//    ignored is the claim; absent would mean the probe was run against the
++	//    wrong database and proves nothing.
++	var hasSchedulerTable, hasAttemptColumn, hasPreviewColumn bool
++	if err := pool.QueryRow(ctx, `
++		SELECT
++		  EXISTS (SELECT 1 FROM information_schema.tables
++		           WHERE table_name = 'media_auto_enhancement_recovery'),
++		  EXISTS (SELECT 1 FROM information_schema.columns
++		           WHERE table_name = 'processing_attempts' AND column_name = 'auto_recovery_intent_id'),
++		  EXISTS (SELECT 1 FROM information_schema.columns
++		           WHERE table_name = 'course_lessons' AND column_name = 'allow_public_preview')
++	`).Scan(&hasSchedulerTable, &hasAttemptColumn, &hasPreviewColumn); err != nil {
++		return fmt.Errorf("inspecting the schema-45/46 additions: %w", err)
++	}
++	if !hasSchedulerTable || !hasAttemptColumn || !hasPreviewColumn {
++		return fmt.Errorf("probe database is not at schema 46: scheduler_table=%t attempt_column=%t preview_column=%t",
++			hasSchedulerTable, hasAttemptColumn, hasPreviewColumn)
++	}
++
++	// 5. Every statement shape the previous build issues against the changed
++	//    relations. Each one omits the new column, which is exactly how the
++	//    previous build writes it, and each must still succeed.
++	fixture, err := seedCompatFixture(ctx, pool)
++	if err != nil {
++		return fmt.Errorf("seeding the compatibility fixture: %w", err)
++	}
++
++	// 5a. A processing attempt written without the attribution column.
++	if _, err := pool.Exec(ctx, `
++		INSERT INTO processing_attempts
++		  (asset_version_id, operation_id, state, attempt_kind, rendition_count, trusted_duration_ms, output_prefix)
++		VALUES ($1::uuid, 'compat46-full', 'SUCCEEDED', 'FULL', 1, 1000, 'media/compat/hls/abc')
++	`, fixture.videoVersionID); err != nil {
++		return fmt.Errorf("previous-build processing attempt insert: %w", err)
++	}
++
++	// 5b. A canonical rendition, and the FULL media assumption that a READY asset
++	//     carries one. Nothing in 45 or 46 touches this path.
++	if _, err := pool.Exec(ctx, `
++		INSERT INTO video_renditions
++		  (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms, processing_operation_id)
++		VALUES ($1::uuid, '720p', 'media/compat/hls/abc/720p/playlist.m3u8', 1280, 720, 2800, 1000, 'compat46-full')
++	`, fixture.videoVersionID); err != nil {
++		return fmt.Errorf("previous-build rendition insert: %w", err)
++	}
++
++	// 5c. The Lesson read the previous build issues, naming its columns. If it had
++	//     used SELECT *, the new BOOLEAN would arrive in a scan it has no field
++	//     for; it does not, and this proves that.
++	var lessonTitle string
++	var videoVersion *string
++	if err := pool.QueryRow(ctx, `
++		SELECT cl.title_en, cl.video_asset_version_id::text
++		  FROM course_lessons cl
++		 WHERE cl.id = $1::uuid
++	`, fixture.lessonID).Scan(&lessonTitle, &videoVersion); err != nil {
++		return fmt.Errorf("previous-build Lesson read: %w", err)
++	}
++	if lessonTitle == "" || videoVersion == nil {
++		return errors.New("previous-build Lesson read returned an empty row")
++	}
++
++	// 5d. The revision clone the previous build performs, which writes
++	//     course_lessons without mentioning allow_public_preview. The NOT NULL
++	//     DEFAULT false must carry it, or every candidate revision the rolled-back
++	//     build creates would fail.
++	var clonedLessonID string
++	var clonedAllows bool
++	if err := pool.QueryRow(ctx, `
++		INSERT INTO course_lessons
++		  (section_id, course_id, section_identity_id, lesson_identity_id,
++		   title_ar, title_en, position, video_asset_version_id)
++		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'درس منسوخ', 'Cloned Lesson', 1, $5::uuid)
++		RETURNING id::text, allow_public_preview
++	`, fixture.sectionID, fixture.courseID, fixture.sectionIdentityID,
++		fixture.clonedLessonIdentityID, fixture.videoVersionID).Scan(&clonedLessonID, &clonedAllows); err != nil {
++		return fmt.Errorf("previous-build revision clone: %w", err)
++	}
++	if clonedAllows {
++		return errors.New("a Lesson written by the previous build defaulted to publicly previewable")
++	}
++
++	// 5e. The legacy course-level preview resolution, which is the preview
++	//     behaviour this build has. The join and every predicate are the ones
++	//     internal/media issues for a public Course preview.
++	var previewVersionID, previewState string
++	if err := pool.QueryRow(ctx, `
++		SELECT mav.id::text, mav.state::text
++		  FROM courses c
++		  JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id
++		  JOIN media_asset_versions mav ON mav.id = cr.preview_asset_version_id
++		  JOIN media_assets ma ON ma.id = mav.logical_asset_id
++		 WHERE c.id = $1::uuid
++		   AND mav.kind = 'PREVIEW' AND ma.kind = 'PREVIEW'
++		   AND mav.content_type = 'video/mp4'
++		   AND ma.visibility = 'PUBLIC_PREVIEW'
++		   AND ma.retired_at IS NULL
++	`, fixture.courseID).Scan(&previewVersionID, &previewState); err != nil {
++		return fmt.Errorf("legacy course preview resolution against schema 46: %w", err)
++	}
++	if previewVersionID != fixture.previewVersionID || previewState != "READY" {
++		return fmt.Errorf("legacy preview resolved to %s/%s, want %s/READY",
++			previewVersionID, previewState, fixture.previewVersionID)
++	}
++
++	// 5f. The direct Course access grant, which IS 0fee657 behaviour: an
++	//     Entitlement with a purchase request and no invitation, and a COURSE
++	//     request granted with no invitation. Schema 46 must still accept both.
++	if _, err := pool.Exec(ctx, `
++		UPDATE purchase_requests
++		   SET state = 'ACCESS_GRANTED', payment_confirmed_by_account_id = $1::uuid,
++		       payment_confirmed_at = now(), access_ends_at_snapshot = now() + interval '30 days',
++		       access_granted_at = now()
++		 WHERE id = $2::uuid
++	`, fixture.adminID, fixture.purchaseRequestID); err != nil {
++		return fmt.Errorf("previous-build direct COURSE grant transition: %w", err)
++	}
++	if _, err := pool.Exec(ctx, `
++		INSERT INTO entitlements
++		  (student_account_id, scope_kind, scope_id, course_id, grant_source,
++		   source_invitation_id, source_purchase_request_id,
++		   original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
++		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'PURCHASE_REQUEST',
++		        NULL, $3::uuid, now() + interval '30 days', now() + interval '30 days',
++		        now() + interval '60 days', 'ACTIVE')
++	`, fixture.studentID, fixture.courseID, fixture.purchaseRequestID); err != nil {
++		return fmt.Errorf("previous-build direct Entitlement insert: %w", err)
++	}
++
++	// 6. And the negative: this build writes nothing to the scheduler table, so
++	//    it runs no automatic recovery. That is the behaviour a rollback is for.
++	var schedulerRows int
++	if err := pool.QueryRow(ctx,
++		"SELECT count(*) FROM media_auto_enhancement_recovery").Scan(&schedulerRows); err != nil {
++		return fmt.Errorf("counting scheduler rows: %w", err)
++	}
++	if schedulerRows != 0 {
++		return fmt.Errorf("the previous build wrote %d automatic recovery rows", schedulerRows)
++	}
++	var previewableLessons int
++	if err := pool.QueryRow(ctx,
++		"SELECT count(*) FROM course_lessons WHERE allow_public_preview").Scan(&previewableLessons); err != nil {
++		return fmt.Errorf("counting previewable Lessons: %w", err)
++	}
++	if previewableLessons != 0 {
++		return fmt.Errorf("the previous build marked %d Lessons publicly previewable", previewableLessons)
++	}
++	return nil
++}
++
++// requiredSchemaVersionForProbe mirrors cmd/api's floor. It is duplicated rather
++// than imported because cmd/api is package main; the verify script asserts the
++// two agree by also running cmd/api's own test.
++func requiredSchemaVersionForProbe() int64 {
++	return int64(db.AutoDeviceReplacementSchemaVersion)
++}
++
++type compatFixture struct {
++	adminID                string
++	studentID              string
++	courseID               string
++	revisionID             string
++	sectionID              string
++	sectionIdentityID      string
++	lessonID               string
++	clonedLessonIdentityID string
++	videoVersionID         string
++	previewVersionID       string
++	purchaseRequestID      string
++}
++
++func seedCompatFixture(ctx context.Context, pool *pgxpool.Pool) (compatFixture, error) {
++	var f compatFixture
++	q := func(dest any, sql string, args ...any) error {
++		return pool.QueryRow(ctx, sql, args...).Scan(dest)
++	}
++	if err := q(&f.adminID, `
++		INSERT INTO accounts (normalized_email, email, role, status, display_name, email_verified_at)
++		VALUES ('compat46-admin@example.test', 'compat46-admin@example.test', 'ADMIN', 'ACTIVE', 'Compat Admin', now())
++		RETURNING id::text`); err != nil {
++		return f, err
++	}
++	if err := q(&f.studentID, `
++		INSERT INTO accounts (normalized_email, email, role, status, display_name, email_verified_at)
++		VALUES ('compat46-student@example.test', 'compat46-student@example.test', 'STUDENT', 'ACTIVE', 'Compat Student', now())
++		RETURNING id::text`); err != nil {
++		return f, err
++	}
++	if err := q(&f.courseID,
++		"INSERT INTO courses (owner_account_id, lifecycle, default_access_ends_at) VALUES ($1::uuid, 'DRAFT', now() + interval '60 days') RETURNING id::text",
++		f.adminID); err != nil {
++		return f, err
++	}
++	if err := q(&f.revisionID, `
++		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en)
++		VALUES ($1::uuid, 'APPROVED', 1, 'مقرر', 'Course') RETURNING id::text`, f.courseID); err != nil {
++		return f, err
++	}
++	if err := q(&f.sectionIdentityID,
++		"INSERT INTO course_section_identities (course_id) VALUES ($1::uuid) RETURNING id::text",
++		f.courseID); err != nil {
++		return f, err
++	}
++	if err := q(&f.sectionID, `
++		INSERT INTO course_sections (revision_id, course_id, section_identity_id, title_ar, title_en, position)
++		VALUES ($1::uuid, $2::uuid, $3::uuid, 'قسم', 'Section', 0) RETURNING id::text`,
++		f.revisionID, f.courseID, f.sectionIdentityID); err != nil {
++		return f, err
++	}
++
++	var videoAssetID, lessonIdentityID string
++	if err := q(&videoAssetID, `
++		INSERT INTO media_assets (kind, owner_account_id, course_id, visibility)
++		VALUES ('VIDEO', $1::uuid, $2::uuid, 'PROTECTED') RETURNING id::text`,
++		f.adminID, f.courseID); err != nil {
++		return f, err
++	}
++	if err := q(&f.videoVersionID, `
++		INSERT INTO media_asset_versions
++		  (logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
++		VALUES ($1::uuid, 'VIDEO', 'READY', 'compat/video/k', 'v', 'video/mp4', 100) RETURNING id::text`,
++		videoAssetID); err != nil {
++		return f, err
++	}
++	if err := q(&lessonIdentityID, `
++		INSERT INTO course_lesson_identities (course_id, section_identity_id)
++		VALUES ($1::uuid, $2::uuid) RETURNING id::text`, f.courseID, f.sectionIdentityID); err != nil {
++		return f, err
++	}
++	if err := q(&f.clonedLessonIdentityID, `
++		INSERT INTO course_lesson_identities (course_id, section_identity_id)
++		VALUES ($1::uuid, $2::uuid) RETURNING id::text`, f.courseID, f.sectionIdentityID); err != nil {
++		return f, err
++	}
++	if err := q(&f.lessonID, `
++		INSERT INTO course_lessons
++		  (section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id)
++		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'درس', 'Lesson', 0, $5::uuid) RETURNING id::text`,
++		f.sectionID, f.courseID, f.sectionIdentityID, lessonIdentityID, f.videoVersionID); err != nil {
++		return f, err
++	}
++
++	var previewAssetID string
++	if err := q(&previewAssetID, `
++		INSERT INTO media_assets (kind, owner_account_id, course_id, visibility, preview_origin_revision_id)
++		VALUES ('PREVIEW', $1::uuid, $2::uuid, 'PUBLIC_PREVIEW', $3::uuid) RETURNING id::text`,
++		f.adminID, f.courseID, f.revisionID); err != nil {
++		return f, err
++	}
++	if err := q(&f.previewVersionID, `
++		INSERT INTO media_asset_versions
++		  (logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
++		VALUES ($1::uuid, 'PREVIEW', 'READY', 'compat/preview/k', 'v', 'video/mp4', 200) RETURNING id::text`,
++		previewAssetID); err != nil {
++		return f, err
++	}
++	if _, err := pool.Exec(ctx,
++		"UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid",
++		f.previewVersionID, f.revisionID); err != nil {
++		return f, err
++	}
++	if _, err := pool.Exec(ctx,
++		"UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $1::uuid WHERE id = $2::uuid",
++		f.revisionID, f.courseID); err != nil {
++		return f, err
++	}
++	if err := q(&f.purchaseRequestID, `
++		INSERT INTO purchase_requests
++		  (reference_code, target_kind, course_id, email, normalized_email, requester_account_id,
++		   course_title_ar, course_title_en, price_minor_units, currency, state)
++		VALUES ('COMPAT46-PR', 'COURSE', $1::uuid, 'compat46-student@example.test', 'compat46-student@example.test',
++		        $2::uuid, 'مقرر', 'Course', 25000, 'KWD', 'WAITING_PAYMENT')
++		RETURNING id::text`, f.courseID, f.studentID); err != nil {
++		return f, err
++	}
++	return f, nil
++}
+diff --git a/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql b/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql
+new file mode 100644
+index 0000000..8efcf2d
+--- /dev/null
++++ b/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql
+@@ -0,0 +1,35 @@
++-- Reverses the automatic enhancement recovery state.
++--
++-- Rolling back while an automatic intent is outstanding would drop the only
++-- record of work the queue may still be about to execute. The worker would then
++-- receive a task carrying an auto_recovery_intent_id it cannot resolve; the
++-- schema-44 worker does not read the field at all and would execute the
++-- enhancement as if it were manual, so the operation itself is safe — but the
++-- scheduler's budget, its backoff deadline, and its NEEDS_OPERATOR verdict would
++-- all be destroyed silently, and an asset an operator had been told to look at
++-- would look untouched.
++--
++-- So this refuses while any intent is outstanding, matching the guard 0042
++-- applies to active media work. BACKOFF and NEEDS_OPERATOR rows are not
++-- outstanding work — nothing is queued for them — and they are discarded with the
++-- table, which is honest: without the producer there is no automatic recovery to
++-- schedule.
++
++DO $$
++BEGIN
++    IF EXISTS (
++        SELECT 1 FROM media_auto_enhancement_recovery
++         WHERE state IN ('SCHEDULED', 'EXECUTING')
++    ) THEN
++        RAISE EXCEPTION 'cannot roll back 0045: automatic enhancement recovery intents are outstanding; let them settle or clear them deliberately before rolling back';
++    END IF;
++END $$;
++
++-- processing_attempts is append-only, so the attribution column is dropped
++-- rather than cleared. Dropping it loses which attempts were automatic; the
++-- attempts themselves, their kinds, their outcomes and their operation identities
++-- are untouched.
++ALTER TABLE processing_attempts
++    DROP COLUMN auto_recovery_intent_id;
++
++DROP TABLE media_auto_enhancement_recovery;
+diff --git a/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql b/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql
+new file mode 100644
+index 0000000..f61bd1c
+--- /dev/null
++++ b/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql
+@@ -0,0 +1,159 @@
++-- Phase 3C-C / durable automatic enhancement recovery state.
++--
++-- 3C-B gave an Administrator one manual action to finish a PLAYABLE video whose
++-- canonical ladder is incomplete. 3C-C schedules that same action
++-- automatically, and this migration is the only place the scheduler's knowledge
++-- lives. It adds durable state and one nullable attribution column. It changes
++-- no existing behaviour, produces no work by itself, and the producer ships
++-- disabled in every environment.
++--
++-- WHY THE STATE MUST BE HERE RATHER THAN IN REDIS
++--
++-- The question "is automatic recovery outstanding for this Asset Version, and
++-- what happened to the last attempt" has to survive a worker crash, a Redis
++-- flush, a task retry, a process restart, and a stale-lease recovery. Redis
++-- holds queued tasks; it cannot answer that question after losing them. A
++-- scheduler that inferred the answer from "there is an open row for this asset"
++-- or from time proximity would attribute a manual retry, a second worker's
++-- operation, or an unrelated stale-recovery terminalization to an automatic
++-- attempt that never ran, and would then charge or clear a budget on that basis.
++--
++-- WHY THE INTENT IDENTITY IS THE OUTBOX EVENT ID
++--
++-- Enhancement execution mints its own operation id at claim time, on purpose:
++-- claim, source proof and ladder planning are decided against current database
++-- truth rather than against a stale queue payload. So the intent cannot know the
++-- operation in advance. Instead the scheduler commits its row and the outbox
++-- event in ONE transaction, sharing one identity, and the worker writes the
++-- operation it minted back onto the row inside the same transaction that takes
++-- the media claim. Every edge of intent -> event -> task -> operation -> terminal
++-- attempt is then a committed PostgreSQL fact.
++
++CREATE TABLE media_auto_enhancement_recovery (
++    -- One row per Asset Version, and the primary key is the dedupe guarantee:
++    -- no number of scheduler ticks or concurrent scheduler instances can produce
++    -- a second outstanding intent for the same asset. There is deliberately no
++    -- IDLE or ELIGIBLE state — the ABSENCE of a row means eligible — so a
++    -- repeated scan of an asset that has never been scheduled writes nothing.
++    asset_version_id     UUID PRIMARY KEY REFERENCES media_asset_versions (id) ON DELETE CASCADE,
++
++    state                TEXT NOT NULL,
++
++    -- The outstanding intent, which is also the outbox event id that carries it.
++    -- NULL means nothing is outstanding.
++    current_intent_id    UUID,
++
++    -- The processing operation the worker minted for current_intent_id, written
++    -- in the claim transaction. This is the authoritative intent -> execution
++    -- link: a terminal processing_attempts row for this operation belongs to this
++    -- intent, and to no other.
++    executing_operation_id TEXT,
++
++    -- When a SCHEDULED intent stops being believable. The claim transaction is
++    -- atomic, so an intent that never reached EXECUTING never ran and charged
++    -- nothing; past this deadline the asset may be scheduled again under a NEW
++    -- intent id. The superseded task is then a no-op, because the worker refuses
++    -- an intent the row no longer names.
++    intent_expires_at    TIMESTAMPTZ,
++
++    -- Consecutive AUTOMATIC failures only. A manual retry resets it, and a new
++    -- canonical rendition resets it, because real forward progress is not failure
++    -- however the operation ended.
++    consecutive_failures INT NOT NULL DEFAULT 0,
++
++    -- Which automatic attempt the outstanding intent is. Monotonic for the life
++    -- of the row; it is evidence, not the budget.
++    attempt_number       INT NOT NULL DEFAULT 0,
++
++    -- Database-clock deadline for the next automatic attempt. Never a
++    -- process-local timer: a worker whose clock runs fast would otherwise
++    -- schedule attempts the database still considers future.
++    next_attempt_at      TIMESTAMPTZ,
++
++    -- The canonical rendition count observed when the outstanding intent was
++    -- created. Progress is a comparison against this baseline and against
++    -- video_renditions, never against FFmpeg output.
++    progress_rendition_count INT NOT NULL DEFAULT 0,
++
++    last_failure_category TEXT,
++    last_outcome_at      TIMESTAMPTZ,
++    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
++    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
++
++    CONSTRAINT maer_state_valid CHECK (
++        state IN ('SCHEDULED', 'EXECUTING', 'BACKOFF', 'NEEDS_OPERATOR')
++    ),
++    CONSTRAINT maer_counters_non_negative CHECK (
++        consecutive_failures >= 0 AND attempt_number >= 0 AND progress_rendition_count >= 0
++    ),
++    CONSTRAINT maer_operation_present CHECK (
++        executing_operation_id IS NULL OR length(trim(executing_operation_id)) > 0
++    ),
++    CONSTRAINT maer_failure_category_present CHECK (
++        last_failure_category IS NULL OR length(trim(last_failure_category)) > 0
++    ),
++
++    -- The state machine, enforced by the database rather than by Go. No code path
++    -- may leave a row claiming to execute an operation it never bound, or
++    -- claiming an intent is outstanding with nothing to identify it.
++    CONSTRAINT maer_state_coherent CHECK (
++        (state = 'SCHEDULED'
++            AND current_intent_id IS NOT NULL
++            AND executing_operation_id IS NULL
++            AND intent_expires_at IS NOT NULL
++            AND attempt_number > 0)
++        OR (state = 'EXECUTING'
++            AND current_intent_id IS NOT NULL
++            AND executing_operation_id IS NOT NULL
++            AND attempt_number > 0)
++        OR (state = 'BACKOFF'
++            AND current_intent_id IS NULL
++            AND executing_operation_id IS NULL
++            AND intent_expires_at IS NULL
++            AND next_attempt_at IS NOT NULL)
++        OR (state = 'NEEDS_OPERATOR'
++            AND current_intent_id IS NULL
++            AND executing_operation_id IS NULL
++            AND intent_expires_at IS NULL
++            AND next_attempt_at IS NULL)
++    )
++);
++
++COMMENT ON TABLE media_auto_enhancement_recovery IS
++    'Durable automatic enhancement recovery state, one row per Asset Version. The absence of a row means the Asset Version has never been automatically scheduled and is therefore eligible; a row is created only when an intent is committed, and deleted when the asset reaches READY. Redis is never the source of truth for whether automatic recovery is outstanding.';
++
++COMMENT ON COLUMN media_auto_enhancement_recovery.current_intent_id IS
++    'The outstanding automatic intent, which is also the id of the outbox event that carries it. Committed in the same transaction as that event, so the row can never name an intent that was not committed.';
++
++COMMENT ON COLUMN media_auto_enhancement_recovery.executing_operation_id IS
++    'The processing operation the worker minted for current_intent_id, written in the same transaction that took the media claim. This is the authoritative intent-to-execution link and the reason attribution is never heuristic.';
++
++-- The scheduler selects on next_attempt_at, and only for rows that are not
++-- outstanding. A partial index keeps the scan proportional to the work actually
++-- due rather than to the number of assets ever recovered.
++CREATE INDEX media_auto_enhancement_recovery_due
++    ON media_auto_enhancement_recovery (next_attempt_at)
++    WHERE state = 'BACKOFF';
++
++-- Recovering an abandoned SCHEDULED intent reads the same way.
++CREATE INDEX media_auto_enhancement_recovery_abandoned
++    ON media_auto_enhancement_recovery (intent_expires_at)
++    WHERE state = 'SCHEDULED';
++
++-- Terminal attribution, nullable on purpose.
++--
++-- Every processing attempt that exists before schema 45 was either a manual
++-- enhancement or a FULL transcode, and processing_attempts is append-only, so a
++-- NOT NULL column would mean either refusing the migration or rewriting audit
++-- evidence. NULL means "not an automatic recovery attempt", which is the truth
++-- for all of them.
++--
++-- Deliberately NOT a foreign key to media_auto_enhancement_recovery: that row is
++-- deleted when the asset reaches READY, and the attempt evidence must outlive the
++-- scheduler state it was produced under. The audit value of the column is the
++-- identity itself, not a live join.
++ALTER TABLE processing_attempts
++    ADD COLUMN auto_recovery_intent_id UUID;
++
++COMMENT ON COLUMN processing_attempts.auto_recovery_intent_id IS
++    'The automatic recovery intent this attempt executed, or NULL when the attempt was manual, automatic-transcode, or predates schema 45. Retained after the scheduler row is deleted, which is why it is not a foreign key.';
+diff --git a/backend/internal/db/migrations/0046_lesson_public_preview.down.sql b/backend/internal/db/migrations/0046_lesson_public_preview.down.sql
+new file mode 100644
+index 0000000..0ad4b3b
+--- /dev/null
++++ b/backend/internal/db/migrations/0046_lesson_public_preview.down.sql
+@@ -0,0 +1,18 @@
++-- Reverses the revision-scoped Lesson public preview intent.
++--
++-- This is safe to run unconditionally, which is unusual here and worth stating.
++-- The column is pure authorization metadata: it owns no media, no storage object,
++-- no rendition, and no Student access. Dropping it withdraws public preview from
++-- every Lesson that had it, which is a fail-closed loss of exposure rather than a
++-- loss of anything a Student, an Instructor, or an Administrator paid for or
++-- created. Nothing becomes unrepresentable and no live entitlement is affected.
++--
++-- The legacy preview pointer and every PREVIEW asset are untouched, so a Course
++-- that also has a legacy course-level preview simply continues serving it — which
++-- is precisely why the legacy path is retained during the transition rather than
++-- cleared when a Lesson preview goes live.
++
++DROP INDEX course_lessons_public_preview;
++
++ALTER TABLE course_lessons
++    DROP COLUMN allow_public_preview;
+diff --git a/backend/internal/db/migrations/0046_lesson_public_preview.up.sql b/backend/internal/db/migrations/0046_lesson_public_preview.up.sql
+new file mode 100644
+index 0000000..266d4f2
+--- /dev/null
++++ b/backend/internal/db/migrations/0046_lesson_public_preview.up.sql
+@@ -0,0 +1,48 @@
++-- Revision-scoped Lesson public preview intent.
++--
++-- Public preview stops being a separate uploaded MP4 on the Course revision and
++-- becomes a permission on a Lesson: zero, one, or many Lessons in a Course may be
++-- marked previewable, and an anonymous visitor watches the SAME Lesson video a
++-- paying Student watches, over the same protected HLS renditions, from the same
++-- storage objects. There is no second upload, no second transcode, and no second
++-- media row.
++--
++-- WHY THE FLAG LIVES ON course_lessons
++--
++-- course_lessons is revision-scoped: a candidate revision holds its own lesson
++-- rows, cloned from the revision it is based on, and only becomes public when an
++-- Administrator approves it and it becomes the live revision. Preview intent has
++-- exactly those semantics — it is edited on a candidate, reviewed as part of that
++-- candidate, and takes effect on approval — so it belongs on the same row and is
++-- carried by the same clone.
++--
++-- It deliberately does NOT live on media_assets or media_asset_versions. A media
++-- asset is globally reusable; a permission on it would be a permission that
++-- escapes the revision that granted it, and marking one Lesson previewable could
++-- silently expose the same video wherever else it was used.
++--
++-- WHAT THIS MIGRATION DOES NOT TOUCH
++--
++-- course_revisions.preview_asset_version_id, the existing PREVIEW assets, their
++-- versions and their renditions all stay exactly as they are. Production has real
++-- legacy preview data in use. Nothing is backfilled onto Lessons, nothing is
++-- mapped, nothing is cleared, and the legacy pointer keeps working for every
++-- Course whose live revision marks no Lesson previewable. Removing it is a later,
++-- separate tranche that requires production observation first.
++
++ALTER TABLE course_lessons
++    ADD COLUMN allow_public_preview BOOLEAN NOT NULL DEFAULT false;
++
++COMMENT ON COLUMN course_lessons.allow_public_preview IS
++    'Whether this Lesson revision permits anonymous public preview of its video. Revision-scoped: edited on a candidate, cloned with revision data, reviewed as part of the submitted revision, and public only once that revision is live. It is authorization metadata only — it creates no media asset, version, processing attempt, rendition, or transcode intent. Resource and Lab Material attachments remain entitlement-protected regardless of its value.';
++
++-- The public resolver asks one question: which Lessons of this Course's live
++-- revision are previewable. Every previewable Lesson also carries a video, so the
++-- index is partial on the flag and covers the course, which is the only entry
++-- point the anonymous path has.
++--
++-- No uniqueness. Many previewable Lessons per Course is the intended model, not a
++-- tolerated edge case, so nothing here may assume one.
++CREATE INDEX course_lessons_public_preview
++    ON course_lessons (course_id, section_id)
++    WHERE allow_public_preview;
+diff --git a/backend/internal/db/schema.go b/backend/internal/db/schema.go
+index c54b3a3..0f2de08 100644
+--- a/backend/internal/db/schema.go
++++ b/backend/internal/db/schema.go
+@@ -69,7 +69,37 @@ const (
+ 	// Admin payment confirmation can grant access directly, with no invitation.
+ 	// Expand-only: every schema-43 row shape remains valid.
+ 	DirectPurchaseAccessGrantSchemaVersion = AutoDeviceReplacementSchemaVersion + 1
+-	MaxSchemaVersion                       = DirectPurchaseAccessGrantSchemaVersion
++	// SCHEMA-46 ROLLBACK COMPATIBILITY ONLY.
++	//
++	// This build is the 0fee657 application, unchanged in behaviour, with its
++	// compatibility ceiling raised so it can serve a database that has already
++	// been migrated to 46. It is a rollback target, not a forward release.
++	//
++	// Both additions are purely additive and this build reads neither of them:
++	//
++	//   * 45 creates media_auto_enhancement_recovery and adds a nullable
++	//     processing_attempts.auto_recovery_intent_id. Every statement this build
++	//     issues against processing_attempts names its columns explicitly, so the
++	//     extra nullable column is invisible to it, and it never writes the new
++	//     table. It therefore runs no automatic enhancement recovery — which is
++	//     the point of rolling back to it.
++	//
++	//   * 46 adds course_lessons.allow_public_preview, NOT NULL DEFAULT false.
++	//     This build's Lesson reads and its revision clone both name their
++	//     columns, so the default carries every row it writes and the flag is
++	//     invisible to it. It serves the legacy course-level preview through
++	//     course_revisions.preview_asset_version_id exactly as it does today, and
++	//     it has no Lesson-preview behaviour to expose.
++	//
++	// requiredSchemaVersion is deliberately NOT changed. Raising the API floor to
++	// 44 is a correctness fix that belongs to the forward release, not a
++	// compatibility change, and cherry-picking it here would make this artifact
++	// something other than 0fee657 behaviour. It cannot matter for a rollback
++	// target: the database it is being rolled back onto is at 46, which satisfies
++	// either floor.
++	AutoEnhancementRecoverySchemaVersion = DirectPurchaseAccessGrantSchemaVersion + 1
++	LessonPublicPreviewSchemaVersion     = AutoEnhancementRecoverySchemaVersion + 1
++	MaxSchemaVersion                     = LessonPublicPreviewSchemaVersion
+ )
+ 
+ // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
+diff --git a/backend/internal/db/schema_test.go b/backend/internal/db/schema_test.go
+index ce977a2..78f8470 100644
+--- a/backend/internal/db/schema_test.go
++++ b/backend/internal/db/schema_test.go
+@@ -26,9 +26,17 @@ func TestSchemaConstants(t *testing.T) {
+ 	if AutoDeviceReplacementSchemaVersion != 43 {
+ 		t.Fatalf("AutoDeviceReplacementSchemaVersion = %d, want 43", AutoDeviceReplacementSchemaVersion)
+ 	}
+-	if DirectPurchaseAccessGrantSchemaVersion != AutoDeviceReplacementSchemaVersion+1 ||
+-		MaxSchemaVersion != DirectPurchaseAccessGrantSchemaVersion {
+-		t.Fatalf("MaxSchemaVersion = %d, want 44", MaxSchemaVersion)
++	if DirectPurchaseAccessGrantSchemaVersion != AutoDeviceReplacementSchemaVersion+1 {
++		t.Fatalf("DirectPurchaseAccessGrantSchemaVersion = %d, want 44", DirectPurchaseAccessGrantSchemaVersion)
++	}
++	// The rollback-compatibility ceiling. This build's behaviour is 0fee657's; the
++	// ceiling exists only so it can serve an already-migrated schema-46 database.
++	if AutoEnhancementRecoverySchemaVersion != DirectPurchaseAccessGrantSchemaVersion+1 {
++		t.Fatalf("AutoEnhancementRecoverySchemaVersion = %d, want 45", AutoEnhancementRecoverySchemaVersion)
++	}
++	if LessonPublicPreviewSchemaVersion != AutoEnhancementRecoverySchemaVersion+1 ||
++		MaxSchemaVersion != LessonPublicPreviewSchemaVersion {
++		t.Fatalf("MaxSchemaVersion = %d, want 46", MaxSchemaVersion)
+ 	}
+ 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
+ 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",
