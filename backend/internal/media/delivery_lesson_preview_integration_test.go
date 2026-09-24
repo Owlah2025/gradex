@@ -131,8 +131,12 @@ func TestLessonPreviewServesTheSameCanonicalRenditionsAsPaidPlayback(t *testing.
 	if issued.PreviewSession == "" || issued.AssetVersionID != f.video {
 		t.Fatalf("issued = %+v, want a session for the Lesson video %s", issued, f.video)
 	}
-	if !strings.HasPrefix(issued.ManifestURL, "/api/v1/public/lesson-previews/") {
-		t.Fatalf("manifest URL = %q, want the public preview manifest route", issued.ManifestURL)
+	// Against the constant the router is mounted from, not a literal. A literal
+	// here is what let the issued URL and the mounted route disagree in the first
+	// place: both were self-consistently wrong.
+	if !strings.HasPrefix(issued.ManifestURL, lessonPreviewManifestRoot) {
+		t.Fatalf("manifest URL = %q, want the mounted preview manifest route %q",
+			issued.ManifestURL, lessonPreviewManifestRoot)
 	}
 
 	master, err := f.delivery.IssueLessonPreviewManifest(f.ctx, issued.PreviewSession)
@@ -204,6 +208,49 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestLessonPreviewManifestURLIsAMountedRoute ties the issued capability to a path
+// the router actually serves.
+//
+// This is the defect the integration suite could not see on its own: every other
+// test here calls IssueLessonPreviewManifest with a token directly, so a manifest
+// URL naming a route that does not exist passes all of them. The visitor gets an
+// authorization that looks valid, a player that attaches, and a video that never
+// decodes a frame — with no error anywhere to read. The router-wiring test pins
+// the mounted paths; this pins the issued URL against the same prefix, so the two
+// cannot drift apart again.
+func TestLessonPreviewManifestURLIsAMountedRoute(t *testing.T) {
+	f := newDeliveryFixture(t)
+	allowLessonPreview(t, f, true)
+	issued, err := f.delivery.IssueLessonPreview(f.ctx, lessonPreviewRequest(f))
+	if err != nil {
+		t.Fatalf("IssueLessonPreview: %v", err)
+	}
+	wantPrefix := lessonPreviewManifestRoot + issued.PreviewSession
+	if issued.ManifestURL != wantPrefix+"/index.m3u8" {
+		t.Fatalf("manifest URL = %q, want %q", issued.ManifestURL, wantPrefix+"/index.m3u8")
+	}
+
+	// The generated master's rendition links share that prefix, so a player that
+	// followed the master reaches the rendition route rather than a 404.
+	master, err := f.delivery.IssueLessonPreviewManifest(f.ctx, issued.PreviewSession)
+	if err != nil {
+		t.Fatalf("IssueLessonPreviewManifest: %v", err)
+	}
+	contents := string(master.Contents)
+	if !strings.Contains(contents, wantPrefix+"/renditions/") {
+		t.Fatalf("master does not link the mounted rendition route: %q", contents)
+	}
+	for _, line := range strings.Split(contents, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, lessonPreviewManifestRoot) {
+			t.Fatalf("master links %q, which is outside the mounted preview routes", trimmed)
+		}
+	}
 }
 
 // TestLessonPreviewCreatesNoMediaOfItsOwn is the no-duplication proof. Marking a

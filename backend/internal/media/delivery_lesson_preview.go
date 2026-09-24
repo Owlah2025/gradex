@@ -25,6 +25,18 @@ import (
 // The design this implements is docs/lesson-public-preview.md, and the intent
 // lives in course_lessons.allow_public_preview from migration 0046.
 
+// lessonPreviewManifestRoot is the mounted path of the anonymous preview manifest
+// routes, and the prefix every issued manifest URL and every rendition link in a
+// generated master is built from.
+//
+// It is a single constant because the issuer and the router have to agree
+// exactly: a manifest URL that names a path the router does not serve produces an
+// authorization that looks valid, a player that attaches, and a video that never
+// decodes a frame — a failure with no error anywhere to read. The router-wiring
+// test pins these exact paths, and TestLessonPreviewManifestURLIsAMountedRoute
+// ties the issued URL back to this constant.
+const lessonPreviewManifestRoot = "/api/v1/media/lesson-previews/"
+
 // lessonPreviewDomain separates this signature space from every other use of the
 // same key.
 //
@@ -114,7 +126,7 @@ func (s *DeliveryService) IssueLessonPreview(
 	session := s.signLessonPreviewSession(claims)
 	return LessonPreviewAuthorization{
 		PreviewSession: session,
-		ManifestURL:    "/api/v1/public/lesson-previews/" + session + "/index.m3u8",
+		ManifestURL:    lessonPreviewManifestRoot + session + "/index.m3u8",
 		CourseID:       request.CourseID,
 		LessonID:       target.lessonID,
 		AssetVersionID: target.assetVersionID,
@@ -134,7 +146,7 @@ func (s *DeliveryService) IssueLessonPreviewManifest(ctx context.Context, token 
 	if err != nil {
 		return PlaybackManifest{}, err
 	}
-	root := "/api/v1/public/lesson-previews/" + token
+	root := lessonPreviewManifestRoot + token
 	return s.issueMasterManifest(ctx, claims.AssetVersionID, root)
 }
 
