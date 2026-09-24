@@ -14,13 +14,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// schema42RollbackHarness is the fully-migrated disposable database — schema 42,
-// which is where the 3C-B release lives — plus a configuration that really
-// declares APP_ENV=production, because the acknowledgement rule under test
-// exists only there.
+// schema42RollbackHarness is the disposable database staged at exactly schema
+// 42 — where the 3C-B release lives — plus a configuration that really declares
+// APP_ENV=production, because the acknowledgement rule under test exists only
+// there. The exact version matters: rollbackSchema42 reverts 42 to 41 and
+// refuses to cross any other boundary, so a head-staged fixture proves nothing
+// about it.
 func schema42RollbackHarness(t *testing.T, ctx context.Context) (*migrate.Migrate, *config.Config, *pgxpool.Pool) {
 	t.Helper()
 	m, _, pool := migrateCommandHarness(t, ctx)
+	stageSchema42(t, m)
 	return m, migrateCommandConfig(t, "production"), pool
 }
 

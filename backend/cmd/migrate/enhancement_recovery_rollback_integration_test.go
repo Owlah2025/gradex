@@ -67,10 +67,32 @@ func migrateCommandHarness(t *testing.T, ctx context.Context) (*migrate.Migrate,
 	return m, cfg, pool
 }
 
+// stageSchema41 and stageSchema42 put the disposable database at an exact
+// schema, never at a relative offset from the head. A schema-41 or schema-42
+// rollback test asserts a boundary that is only meaningful at that exact
+// version, so relative staging (`Steps(-1)`) silently retargets the fixture
+// every time a later migration lands — which is exactly how these tests came to
+// be staged at 43 and 44 while still asserting 41 and 42. migrateCommandHarness
+// itself deliberately stays at the head, because the schema-44 migration tests
+// in this package assert head behaviour.
 func stageSchema41(t *testing.T, m *migrate.Migrate) {
 	t.Helper()
-	if err := m.Steps(-1); err != nil {
-		t.Fatalf("staging schema 41 rollback test: %v", err)
+	stageExactSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion)
+}
+
+func stageSchema42(t *testing.T, m *migrate.Migrate) {
+	t.Helper()
+	stageExactSchema(t, m, db.ActiveProcessingKindSchemaVersion)
+}
+
+func stageExactSchema(t *testing.T, m *migrate.Migrate, version int) {
+	t.Helper()
+	if err := m.Migrate(uint(version)); err != nil {
+		t.Fatalf("staging schema %d rollback test: %v", version, err)
+	}
+	current, dirty, err := m.Version()
+	if err != nil || current != uint(version) || dirty {
+		t.Fatalf("staged schema = version=%d dirty=%t err=%v, want clean %d", current, dirty, err, version)
 	}
 }
 

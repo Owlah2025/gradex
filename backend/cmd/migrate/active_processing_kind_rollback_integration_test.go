@@ -71,6 +71,7 @@ func TestSchema42DownRefusesActiveProcessingBeforeDirtyMarker(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
 			m, cfg, pool := migrateCommandHarness(t, ctx)
+			stageSchema42(t, m)
 			versionID := seedActiveProcessingKind(t, ctx, pool, kind)
 			if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET active_processing_attempt_kind=NULL WHERE id=$1::uuid`, versionID); err == nil {
 				t.Fatal("schema 42 accepted an untyped active processing claim")
@@ -102,6 +103,7 @@ func TestSchema42DownAllowsTerminalEnhancementHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	m, cfg, pool := migrateCommandHarness(t, ctx)
+	stageSchema42(t, m)
 	versionID := seedMediaVersion(t, ctx, pool)
 	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state='SCAN_ERROR' WHERE id=$1::uuid`, versionID); err != nil {
 		t.Fatal(err)
