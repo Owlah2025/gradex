@@ -265,6 +265,12 @@ export const en = {
       media: "Video",
       previewLesson: "Preview the protected video",
       previewHeading: "Lesson preview",
+      /**
+       * What the Administrator is actually approving when a lesson carries the flag. Worded as a
+       * consequence rather than as a field name, because the decision being taken is "this becomes
+       * watchable by anyone", and a label reading "allow_public_preview: true" would bury that.
+       */
+      lessonPublicPreview: "Free preview — anyone will be able to watch this lesson",
       previewFailed: "The lesson preview could not be started.",
       taxonomyFailed: "The catalogue terms could not be loaded.",
       resource: "Resource",
@@ -1773,6 +1779,21 @@ export const en = {
     previewLoading: "Loading the preview…",
     previewLead:
       "A short excerpt the instructor published openly. The rest of the course opens once you have access.",
+    /**
+     * Free-lesson preview vocabulary.
+     *
+     * "Free preview" rather than "Free lesson": the visitor gets this lesson's video, not its
+     * resources or lab files, and calling it a free lesson would promise more than it opens.
+     */
+    lessonPreviewBadge: "Free preview",
+    lessonPreviewPlay: "Play this lesson",
+    lessonPreviewClose: "Close the preview",
+    lessonPreviewLoading: "Preparing this lesson…",
+    lessonPreviewHeading: "Lesson preview",
+    lessonPreviewLead:
+      "Full lessons the instructor opened to everyone. The rest of the course opens once you have access.",
+    lessonPreviewFailed: "This lesson preview is not available right now. Try again in a moment.",
+    lessonPreviewUnavailable: "This lesson preview could not be played.",
     instructorHeading: "Your instructor",
     instructorRole: "Course author",
     instructorNote:
@@ -1997,6 +2018,20 @@ export const en = {
       videoProcessing: "Video processing",
       videoMissing: "No video yet",
       labMaterials: "Lab materials",
+      /**
+       * Free-preview vocabulary for the Instructor.
+       *
+       * "Free preview" rather than "public lesson": what the visitor gets is this lesson's video,
+       * not its resources or lab files, and the helper text says so rather than leaving the
+       * Instructor to assume either way.
+       */
+      publicPreviewLabel: "Offer as a free preview",
+      publicPreviewHelp:
+        "Anyone can watch this lesson's video without paying. Its resources and lab materials stay for students only. This takes effect after an administrator approves this version.",
+      publicPreviewNeedsVideo: "Upload a video before offering this lesson free.",
+      publicPreviewProcessing:
+        "Saved. Anyone will be able to watch it once the video finishes processing.",
+      publicPreviewFailed: "That could not be saved.",
       confirmDeleteSectionTitle: "Delete this section?",
       confirmDeleteSectionBody:
         "The section and every lesson inside it are removed, including any video already uploaded to those lessons. This cannot be undone.",

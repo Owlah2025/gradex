@@ -111,3 +111,15 @@ export function instructorInitials(displayName: string): string {
     .join("")
     .toUpperCase();
 }
+
+/**
+ * Whether the live revision opened any lesson to everyone.
+ *
+ * This is the discriminator between the two preview models on the public page. It reads the
+ * projection rather than `has_preview`, because `has_preview` is derived from BOTH sources and is
+ * therefore true for a Course whose only preview is the legacy course-level one — using it to
+ * decide would render the legacy hero for a Course that has free lessons instead, or the reverse.
+ */
+export function hasLessonPreviews(course: PublicCourseDetail): boolean {
+  return course.sections.some((section) => (section.lessons?.length ?? 0) > 0);
+}

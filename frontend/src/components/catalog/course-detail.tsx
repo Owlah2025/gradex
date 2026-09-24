@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { catalogueCopy } from "./catalogue-copy";
 import { CourseAccessSummary, MobileAccessBar } from "./course-access-summary";
 import { CourseCurriculum } from "./course-curriculum";
+import { hasLessonPreviews } from "./course-detail-presentation";
 import {
   BackToCatalogue,
   CourseAcademicContext,
@@ -225,7 +226,16 @@ export function CourseDetail({
                     </p>
                   </section>
 
-                  {state.course.has_preview ? (
+                  {/* The transition between the two preview models, decided here rather than on the
+                      server. `has_preview` is now DERIVED — true when the live revision has free
+                      lessons OR when the legacy course-level preview still resolves — so it can no
+                      longer decide this on its own: a Course with free lessons and no legacy
+                      preview would render a hero whose single request is guaranteed to fail.
+
+                      A Course with free lessons shows them in the outline, where they belong. A
+                      Course with none keeps exactly the hero it has today. The legacy pointer is
+                      not cleared either way; retiring it is a separate later tranche. */}
+                  {state.course.has_preview && !hasLessonPreviews(state.course) ? (
                     <CoursePreview
                       courseID={state.course.id}
                       locale={locale}
@@ -240,8 +250,10 @@ export function CourseDetail({
                   <CourseAcademicContext course={state.course} copy={copy} />
 
                   <CourseCurriculum
+                    courseID={state.course.id}
                     sections={state.course.sections}
                     copy={copy}
+                    locale={locale}
                     headingLabel={catalogue.outline}
                     lessonsUnit={catalogue.lessons}
                   />

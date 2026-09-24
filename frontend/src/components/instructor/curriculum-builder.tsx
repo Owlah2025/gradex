@@ -32,6 +32,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { LessonVideoUpload } from "./lesson-video-upload";
 import { isLessonVideoProcessing } from "./lesson-video-upload-state";
 import { LessonResourceUpload } from "./lesson-resource-upload";
+import { LessonPublicPreviewToggle } from "./lesson-public-preview-toggle";
 import { moveIdentity } from "./curriculum-order";
 
 type CurriculumLabels = Dictionary["instructor"]["curriculum"];
@@ -639,6 +640,25 @@ function LessonRow({
           lessonID={lesson.id}
           locale={locale}
           files={lesson.files ?? []}
+          onChanged={onContentChanged}
+        />
+        {/* The free-preview decision sits with the lesson it belongs to, under the video it opens.
+            This is the primary way an Instructor publishes a preview now; the separate course-level
+            preview upload remains only for the courses that already use it. */}
+        <LessonPublicPreviewToggle
+          courseID={courseID}
+          revisionID={revisionID}
+          lessonID={lesson.id}
+          allowPublicPreview={Boolean(lesson.allow_public_preview)}
+          // Deliberately NOT the `hasVideo` above, which also requires READY. A video that is
+          // still processing is the ordinary case while a course is being built, and disabling
+          // the control then would force the Instructor to come back and tick it again after
+          // processing — the step people forget. The intent is recorded now; public playback
+          // fails closed until the video is READY.
+          hasVideo={Boolean(lesson.video_asset_version_id)}
+          videoState={lesson.video_asset_state}
+          locale={locale}
+          labels={labels}
           onChanged={onContentChanged}
         />
       </div>

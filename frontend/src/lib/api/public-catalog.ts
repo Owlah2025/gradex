@@ -22,9 +22,27 @@ export type PublicCourse = {
   has_preview: boolean;
   thumbnail?: { asset_version_id: string; card_url: string; large_url: string } | null;
 };
+/**
+ * One Lesson of the live revision whose video an anonymous visitor may watch.
+ *
+ * The public projection returns these and nothing else about the curriculum's lessons: a visitor
+ * who has not paid sees which Lessons they can watch, and nothing more about the ones they cannot.
+ * There is no asset identifier, no duration and no state here, because the preview authorization
+ * endpoint re-proves the whole chain server-side and needs only the Lesson.
+ */
+export type PublicPreviewableLesson = { id: string; title: string; position: number };
 export type PublicCourseDetail = PublicCourse & {
   description: string;
-  sections: { title: string; position: number; lesson_count: number }[];
+  sections: {
+    title: string;
+    position: number;
+    lesson_count: number;
+    /**
+     * The previewable Lessons of this section, in curriculum order. Absent or empty is the ordinary
+     * case, and `lesson_count` remains the count of the WHOLE section rather than of this list.
+     */
+    lessons?: PublicPreviewableLesson[];
+  }[];
   /** Localized Program names this Course is relevant to. Never identifiers. */
   program_audience?: string[];
 };
@@ -103,6 +121,18 @@ export type PublicCourseList = {
   total: number;
 };
 export type PublicPreviewAuthorization = { url: string; expires_at: string };
+/**
+ * An anonymous Lesson preview capability.
+ *
+ * `manifest_url` is an application route, not a storage URL: the protected HLS master is generated
+ * per request from the same canonical renditions paid playback uses. There is no object URL here to
+ * leak or to cache.
+ */
+export type LessonPreviewAuthorization = {
+  preview_session: string;
+  manifest_url: string;
+  expires_at: string;
+};
 
 export function getPublicCourses(
   locale: "ar" | "en",
@@ -250,4 +280,37 @@ export async function getPublicCoursePreview(
       : new Error("Public preview request failed");
   }
   return body as PublicPreviewAuthorization;
+}
+
+/**
+ * Authorizes anonymous preview of one Lesson.
+ *
+ * Nothing about what may be watched is decided here. The server re-proves the Course's published
+ * state, the live revision, the lesson's membership of it, the preview flag, the exact video asset
+ * version, retirement, READY state and the canonical renditions — on this request and again on
+ * every manifest request. A refusal is deliberately indistinguishable between "not previewable",
+ * "still processing" and "does not exist", so it reveals nothing about a Course's unpublished
+ * contents.
+ */
+export async function getLessonPreview(
+  courseID: string,
+  lessonID: string,
+  locale: "ar" | "en",
+): Promise<LessonPreviewAuthorization> {
+  const response = await fetch(
+    `/api/v1/media/courses/${encodeURIComponent(courseID)}/lessons/${encodeURIComponent(lessonID)}/preview-authorizations`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json, application/problem+json",
+        "Accept-Language": locale,
+      },
+      cache: "no-store",
+    },
+  );
+  const body: unknown = await response.json();
+  if (!response.ok) {
+    throw isProblem(body) ? new ProblemError(body) : new Error("Lesson preview request failed");
+  }
+  return body as LessonPreviewAuthorization;
 }

@@ -295,6 +295,7 @@ export const ar: Dictionary = {
       media: "الفيديو",
       previewLesson: "معاينة الفيديو المحمي",
       previewHeading: "معاينة الدرس",
+      lessonPublicPreview: "معاينة مجانية — سيتمكن أي شخص من مشاهدة هذا الدرس",
       previewFailed: "تعذّر بدء معاينة الدرس.",
       taxonomyFailed: "تعذّر تحميل مفردات الكتالوج.",
       resource: "مورد",
@@ -1666,6 +1667,15 @@ export const ar: Dictionary = {
     previewLoading: "جارٍ تحميل المعاينة…",
     previewLead:
       "مقطع قصير نشره المدرّس للجميع. تُفتح بقية المقرر عند حصولك على صلاحية الوصول.",
+    lessonPreviewBadge: "معاينة مجانية",
+    lessonPreviewPlay: "تشغيل هذا الدرس",
+    lessonPreviewClose: "إغلاق المعاينة",
+    lessonPreviewLoading: "جارٍ تحضير هذا الدرس…",
+    lessonPreviewHeading: "معاينة الدرس",
+    lessonPreviewLead:
+      "دروس كاملة أتاحها المدرّس للجميع. تُفتح بقية المقرر عند حصولك على صلاحية الوصول.",
+    lessonPreviewFailed: "معاينة هذا الدرس غير متاحة الآن. حاول مرة أخرى بعد قليل.",
+    lessonPreviewUnavailable: "تعذّر تشغيل معاينة هذا الدرس.",
     instructorHeading: "مدرّس المقرر",
     instructorRole: "مؤلف المقرر",
     instructorNote: "كتب هذا المقرر ويدرّسه هذا المدرّس على منصة جراديكس.",
@@ -1851,6 +1861,12 @@ export const ar: Dictionary = {
       videoProcessing: "الفيديو قيد المعالجة",
       videoMissing: "لا يوجد فيديو بعد",
       labMaterials: "مواد المختبر",
+      publicPreviewLabel: "إتاحة الدرس كمعاينة مجانية",
+      publicPreviewHelp:
+        "يمكن لأي شخص مشاهدة فيديو هذا الدرس دون دفع. أما المراجع ومواد المختبر فتبقى للطلاب فقط. يبدأ التأثير بعد موافقة المشرف على هذه النسخة.",
+      publicPreviewNeedsVideo: "ارفع فيديو قبل إتاحة هذا الدرس مجانًا.",
+      publicPreviewProcessing: "تم الحفظ. سيتمكن الجميع من المشاهدة بعد انتهاء معالجة الفيديو.",
+      publicPreviewFailed: "تعذّر الحفظ.",
       confirmDeleteSectionTitle: "حذف هذا القسم؟",
       confirmDeleteSectionBody:
         "سيُحذف القسم وكل درس بداخله، بما في ذلك أي فيديو رُفع إلى تلك الدروس. لا يمكن التراجع عن هذا.",

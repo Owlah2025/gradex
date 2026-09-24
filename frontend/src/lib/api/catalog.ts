@@ -49,6 +49,14 @@ export type LessonWire = {
   position: number;
   video_asset_version_id?: string;
   video_asset_state?: string;
+  /**
+   * Whether this Lesson revision permits anonymous public preview of its video.
+   *
+   * Revision-scoped: it is edited on a candidate and becomes public only when that candidate
+   * becomes live, so `true` on a candidate means "will be public once approved", never "is public
+   * now". The Admin review payload carries the same field for the same reason.
+   */
+  allow_public_preview?: boolean;
   files?: LessonFileWire[];
 };
 

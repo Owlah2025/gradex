@@ -333,6 +333,38 @@ export async function setLessonVideo(
 }
 
 /**
+ * Allows or withdraws anonymous public preview of one candidate Lesson's video.
+ *
+ * Candidate-only. The server locks the Course's editable candidate, so this can never change what
+ * the live revision exposes: the flag becomes public when the candidate is approved and becomes
+ * live, and not before.
+ *
+ * The server refuses to allow preview on a Lesson with no video, and reports that refusal as
+ * `lesson-preview-needs-video` rather than silently coercing the value — an Instructor who was told
+ * nothing would reasonably believe they had published a preview. READY is deliberately not
+ * required: intent recorded while the video is still processing survives, and public playback fails
+ * closed until it is READY.
+ */
+export async function setLessonPublicPreview(
+  input: AuthoringInput & {
+    courseID: string;
+    revisionID: string;
+    lessonID: string;
+    allow: boolean;
+  },
+): Promise<LessonWire> {
+  requireCSRF(input);
+  const updated = await authenticatedRequest<LessonWire>(
+    `${path.revision(input.courseID, input.revisionID)}/lessons/${encodeURIComponent(input.lessonID)}/public-preview`,
+    "PUT",
+    input.locale,
+    input.csrf,
+    { allow_public_preview: input.allow },
+  );
+  return requireResult(updated, input.locale);
+}
+
+/**
  * Attaches a READY, separately uploaded public-preview Asset Version to this
  * editable revision. The server proves kind, ownership, Course/revision origin
  * and scanner evidence; callers never send a Lesson or storage identifier.

@@ -464,6 +464,18 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
                             >
                               {copy.media}: {mediaLabel(mediaState)}
                             </p>
+                            {/* Part of what is being approved, so it is stated on the lesson rather
+                                than summarised elsewhere: approving this version is what makes
+                                these lessons watchable by anyone. Many lessons in one version may
+                                carry it. */}
+                            {lesson.allow_public_preview ? (
+                              <p
+                                data-testid={`submitted-lesson-public-preview-${lesson.id}`}
+                                className="mt-2 inline-flex rounded-pill bg-primary/10 px-2 py-0.5 text-sm font-semibold text-primary"
+                              >
+                                {copy.lessonPublicPreview}
+                              </p>
+                            ) : null}
                             {lesson.files && lesson.files.length > 0 ? (
                               <ul
                                 data-testid={`submitted-lesson-materials-${lesson.id}`}
