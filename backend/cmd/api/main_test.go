@@ -563,13 +563,25 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		method string
 		path   string
 	}{
-		{method: "POST", path: "/api/v1/me/devices/trust"},
-		{method: "POST", path: "/api/v1/me/devices/trust/resend"},
-		{method: "POST", path: "/api/v1/me/devices/adopt"},
 		{method: "DELETE", path: "/api/v1/me/devices/:deviceId"},
 		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/:deviceId/revocations"},
 		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/revocations"},
 		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/cooldown-resets"},
+	}
+
+	// D-109 retired the interactive device-admission surface. A successful
+	// password login from a new browser trusts its credential in the same
+	// database transaction and sends no device code, so there is nothing for a
+	// Student to confirm, resend, or adopt. These paths are asserted ABSENT
+	// rather than deleted from the list, because re-mounting one would put an
+	// unauthenticated device-trust mutation back on the production router.
+	retiredDeviceAdmissionRoutes := []struct {
+		method string
+		path   string
+	}{
+		{method: "POST", path: "/api/v1/me/devices/trust"},
+		{method: "POST", path: "/api/v1/me/devices/trust/resend"},
+		{method: "POST", path: "/api/v1/me/devices/adopt"},
 	}
 
 	surfaceMounted := make(map[string]bool)
@@ -645,6 +657,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	for _, route := range requiredDeviceMutationRoutes {
 		if !mounted[route.method+" "+route.path] {
 			t.Fatalf("production router is missing device mutation route %s %s", route.method, route.path)
+		}
+	}
+	for _, route := range retiredDeviceAdmissionRoutes {
+		if mounted[route.method+" "+route.path] {
+			t.Fatalf("D-109 retired device admission route %s %s is mounted again", route.method, route.path)
 		}
 	}
 
@@ -732,27 +749,80 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 }
 
 // TestRequiredSchemaVersionCoversMountedRoutes pins the readiness floor to the
-// newest schema any mounted route actually reads.
+// newest schema any mounted route actually WRITES or reads.
 //
-// This build mounts the D-106 Subject discovery and demand routes, which query
-// subject_demand_signals — a table that arrives in schema 38. A floor of 37
-// would let the process report ready against a database where that table does
-// not exist, and every one of those routes would then fail on a missing
-// relation instead of the deployment being held out of the load balancer.
+// The floor is schema 44. Admin payment confirmation grants Course access
+// directly: it inserts an Entitlement with grant_source = 'PURCHASE_REQUEST' and
+// no invitation, and moves the purchase request to ACCESS_GRANTED with no
+// invitation. Schema 43 refuses both — ent_purchase_needs_invitation and the
+// schema-43 purchase_requests_transition_coherent each require the invitation —
+// so a process serving 43 would report ready and then fail confirmation after the
+// Administrator had already taken the money.
+//
+// The earlier floor of 38 (subject_demand_signals, D-106) and 43 (AUTO_REPLACED
+// device rotation) are both still covered, because the floor only rises.
 func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
-	if got := requiredSchemaVersion(nil); got != db.SubjectDemandSignalSchemaVersion {
-		t.Fatalf("required schema = %d, want %d", got, db.SubjectDemandSignalSchemaVersion)
+	if got := requiredSchemaVersion(nil); got != db.DirectPurchaseAccessGrantSchemaVersion {
+		t.Fatalf("required schema = %d, want %d", got, db.DirectPurchaseAccessGrantSchemaVersion)
 	}
 	// The floor must never exceed what this build can serve, or readiness would
 	// be unsatisfiable at every version.
 	if got := requiredSchemaVersion(nil); got > db.MaxSchemaVersion {
 		t.Fatalf("required schema %d exceeds the build ceiling %d", got, db.MaxSchemaVersion)
 	}
-	// Schema 37 carries the trusted-device tables but not subject_demand_signals,
-	// so it must sit strictly below the floor rather than at it.
-	if db.StudentTrustedDeviceSchemaVersion >= requiredSchemaVersion(nil) {
-		t.Fatalf("schema %d must be below the readiness floor %d",
-			db.StudentTrustedDeviceSchemaVersion, requiredSchemaVersion(nil))
+	// Every schema that predates a capability this build mounts must sit strictly
+	// below the floor rather than at it.
+	for _, below := range []int64{
+		db.StudentTrustedDeviceSchemaVersion,
+		db.SubjectDemandSignalSchemaVersion,
+		db.AutoDeviceReplacementSchemaVersion,
+	} {
+		if below >= requiredSchemaVersion(nil) {
+			t.Fatalf("schema %d must be below the readiness floor %d", below, requiredSchemaVersion(nil))
+		}
+	}
+}
+
+// TestSchemaFloorRefusesSchema43AndAcceptsSchema44 proves the floor is a real
+// startup gate rather than a constant nobody consults. It runs the exact
+// predicate cmd/api evaluates at readiness against a real database staged at
+// each exact schema: 43 — which is what production ran before the direct grant —
+// must be refused, and 44 must be accepted.
+func TestSchemaFloorRefusesSchema43AndAcceptsSchema44(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiOpTimeout)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, apiAdminDSN)
+	if err != nil {
+		t.Fatalf("connecting to admin db: %v", err)
+	}
+	defer admin.Close()
+	_, _ = admin.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, apiTestDBName)
+	_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+apiTestDBName)
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+apiTestDBName); err != nil {
+		t.Fatalf("creating test db: %v", err)
+	}
+	m, err := migrate.New(apiSourceURL, apiTestDSN)
+	if err != nil {
+		t.Fatalf("creating migrator: %v", err)
+	}
+	defer m.Close()
+
+	pool, poolCtx := apiPool(t)
+	floor := requiredSchemaVersion(nil)
+
+	if err := m.Migrate(uint(db.AutoDeviceReplacementSchemaVersion)); err != nil {
+		t.Fatalf("staging schema 43: %v", err)
+	}
+	if err := db.CheckSchemaAtLeast(poolCtx, pool, floor); !errors.Is(err, db.ErrSchemaIncompatible) {
+		t.Fatalf("schema 43 readiness = %v, want ErrSchemaIncompatible; the direct Course grant is unrepresentable there", err)
+	}
+
+	if err := m.Migrate(uint(db.DirectPurchaseAccessGrantSchemaVersion)); err != nil {
+		t.Fatalf("staging schema 44: %v", err)
+	}
+	if err := db.CheckSchemaAtLeast(poolCtx, pool, floor); err != nil {
+		t.Fatalf("schema 44 readiness = %v, want accepted", err)
 	}
 }
 
