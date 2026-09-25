@@ -221,11 +221,18 @@ http_call() {
 }
 
 require_http() {
-  local label="$1" want="$2" path="$3"
+  local label="$1" want="$2" path="$3" candidate matched=0
   shift 3
   http_call "$path" "$@"
-  [ "$HTTP_STATUS" = "$want" ] ||
-    die "$label: HTTP $HTTP_STATUS, want $want ($path) body=$(printf '%s' "$HTTP_BODY" | head -c 300)"
+  # `want` may name several acceptable codes, space separated, for routes where
+  # the product legitimately answers more than one success status. Login creates
+  # a session and answers 201; a read answers 200. The drill asserts the exact
+  # set rather than accepting "any 2xx".
+  for candidate in $want; do
+    [ "$HTTP_STATUS" = "$candidate" ] && matched=1
+  done
+  [ "$matched" = 1 ] ||
+    die "$label: HTTP $HTTP_STATUS, want one of [$want] ($path) body=$(printf '%s' "$HTTP_BODY" | head -c 300)"
 }
 
 worker_running() {
@@ -247,18 +254,44 @@ backend_image_of() {
 
 # ------------------------------------------------------------------- assertions
 
-# One active purchase request per Course and email is a product rule, so each
-# application turn mints its own rather than the fixture pre-seeding several.
-new_purchase_request() {
-  local reference="$1" id
-  id="$(psql_query "INSERT INTO purchase_requests
+# Each application turn gets its OWN Student and its own purchase request.
+#
+# Two product rules make this necessary, and neither is worked around:
+#
+#   * only one ACTIVE purchase request may exist per Course and email; and
+#   * a Student who already holds access to a Course does not receive a second
+#     Entitlement row for it.
+#
+# Sharing one Student across the turns made the candidate's grant satisfy the
+# rollback's assertion vacuously: confirm-payment answered 200 and wrote no new
+# row, because that Student already had access. A fresh Student per turn keeps
+# "exactly one direct Entitlement was written" a real assertion on every turn.
+#
+# Sets TURN_STUDENT_EMAIL and TURN_PURCHASE for the caller.
+new_turn_principal() {
+  local slug="$1" student_id
+  TURN_STUDENT_EMAIL="schema46-drill-$slug@example.test"
+  student_id="$(psql_query "INSERT INTO accounts
+      (normalized_email, email, role, status, display_name, email_verified_at)
+    VALUES ('$TURN_STUDENT_EMAIL', '$TURN_STUDENT_EMAIL', 'STUDENT', 'ACTIVE', 'Drill Student $slug', now())
+    RETURNING id;" | head -n 1)"
+  [[ "$student_id" =~ ^[0-9a-f-]{36}$ ]] || die "could not create the $slug Student: $student_id"
+  # The real Administrator credential hash, so this Student can log in over HTTP
+  # with the same disposable passphrase. The password is never known to SQL.
+  psql_query "INSERT INTO password_credentials (account_id, password_hash, state)
+    SELECT '$student_id', password_hash, 'ACTIVE' FROM password_credentials
+     WHERE account_id = '$ADMIN_ID' LIMIT 1;" >/dev/null
+
+  TURN_PURCHASE="$(psql_query "INSERT INTO purchase_requests
       (reference_code, target_kind, course_id, email, normalized_email, requester_account_id,
        course_title_ar, course_title_en, price_minor_units, currency, state)
-    VALUES ('$reference', 'COURSE', '$COURSE_ID', '$STUDENT_EMAIL', '$STUDENT_EMAIL', '$STUDENT_ID',
-            'مقرر التجربة', 'Rollback Drill Course', 25000, 'KWD', 'WAITING_PAYMENT')
-    RETURNING id;")"
-  [ -n "$id" ] || die "could not mint the purchase request $reference"
-  printf '%s' "$id"
+    VALUES ('SCHEMA46-DRILL-$slug', 'COURSE', '$COURSE_ID', '$TURN_STUDENT_EMAIL', '$TURN_STUDENT_EMAIL',
+            '$student_id', 'مقرر التجربة', 'Rollback Drill Course', 25000, 'KWD', 'WAITING_PAYMENT')
+    RETURNING id;" | head -n 1)"
+  # psql prints the INSERT command tag after the RETURNING row even under
+  # --tuples-only, so only the first line is the identifier.
+  [[ "$TURN_PURCHASE" =~ ^[0-9a-f-]{36}$ ]] ||
+    die "could not mint the $slug purchase request: $TURN_PURCHASE"
 }
 
 
@@ -288,7 +321,7 @@ admin_session() {
   require_http "session bootstrap" 200 /api/v1/session/bootstrap
   csrf="$(printf '%s' "$HTTP_BODY" | jq -r '.csrf_token // empty')"
   [ -n "$csrf" ] || die "session bootstrap returned no CSRF token"
-  require_http "admin login" 200 /api/v1/sessions \
+  require_http "admin login" 201 /api/v1/sessions \
     --request POST \
     --header 'Content-Type: application/json' \
     --header "X-CSRF-Token: $csrf" \
@@ -303,7 +336,7 @@ direct_course_grant() {
   local label="$1" request="$2" before after
   before="$(psql_query "SELECT count(*) FROM entitlements WHERE source_purchase_request_id = '$request';")"
   [ "$before" = 0 ] || die "$label: purchase request $request was already granted"
-  require_http "$label direct Course grant" 200 \
+  require_http "$label direct Course grant" "200 201 204" \
     "/api/v1/admin/purchase-requests/$request/confirm-payment" \
     --request POST --header 'Content-Type: application/json' \
     --header "X-CSRF-Token: $ADMIN_CSRF" --data '{}'
@@ -408,17 +441,17 @@ student_playback() {
   COOKIES=""
   require_http "$label student bootstrap" 200 /api/v1/session/bootstrap
   csrf="$(printf '%s' "$HTTP_BODY" | jq -r '.csrf_token // empty')"
-  require_http "$label student login" 200 /api/v1/sessions \
+  require_http "$label student login" 201 /api/v1/sessions \
     --request POST --header 'Content-Type: application/json' \
     --header "X-CSRF-Token: $csrf" \
-    --data "{\"email\":\"$STUDENT_EMAIL\",\"password\":\"$ACCOUNT_PASSPHRASE\"}"
+    --data "{\"email\":\"$TURN_STUDENT_EMAIL\",\"password\":\"$ACCOUNT_PASSPHRASE\"}"
   local session_csrf
   session_csrf="$(printf '%s' "$HTTP_BODY" | jq -r '.csrf_token // empty')"
   [ -n "$session_csrf" ] || session_csrf="$csrf"
-  require_http "$label Student playback authorization" 200 /api/v1/media/playback-authorizations \
+  require_http "$label Student playback authorization" "200 201" /api/v1/media/playback-authorizations \
     --request POST --header 'Content-Type: application/json' \
     --header "X-CSRF-Token: $session_csrf" \
-    --data "{\"lesson_id\":\"$PREVIEWABLE_LESSON\"}"
+    --data "{\"lesson_id\":\"$PREVIEWABLE_LESSON\",\"asset_version_id\":\"$VIDEO_VERSION\"}"
   pass "$label Student protected playback authorization"
 }
 
@@ -634,7 +667,6 @@ main() {
   # ---------------------------------------------------------------- Section 4
   # Accounts, created by the real bootstrap binary, and the fixture the HTTP
   # smoke reads. Seeded once, into this same database, never re-seeded.
-  local admin_id
   export BOOTSTRAP_ADMIN_PASSWORD="$ACCOUNT_PASSPHRASE"
   # The single Administrator, created by the real binary. The Student is made by
   # the fixture, because this tool exists to create exactly one Administrator.
@@ -644,8 +676,8 @@ main() {
     compose run --rm --no-deps bootstrap-admin >/dev/null ||
     die "bootstrap-admin failed for $ADMIN_EMAIL"
   unset BOOTSTRAP_ADMIN_PASSWORD
-  admin_id="$(psql_query "SELECT id FROM accounts WHERE normalized_email = '$ADMIN_EMAIL';")"
-  [ -n "$admin_id" ] || die "the bootstrapped Administrator is absent"
+  ADMIN_ID="$(psql_query "SELECT id FROM accounts WHERE normalized_email = '$ADMIN_EMAIL';")"
+  [ -n "$ADMIN_ID" ] || die "the bootstrapped Administrator is absent"
 
   local fixture_ids
   fixture_ids="$(docker exec --interactive "$(postgres_container)" \
@@ -675,7 +707,8 @@ main() {
   pass "candidate application selected and recreated (api image $candidate_backend)"
 
   candidate_health "candidate"
-  candidate_smoke "candidate" "$(new_purchase_request SCHEMA46-DRILL-1)" full
+  new_turn_principal 1
+  candidate_smoke "candidate" "$TURN_PURCHASE" full
   require_schema '46|false'
   require_db_identity "$identity"
   pass "database remained clean46 under the candidate"
@@ -690,7 +723,8 @@ main() {
   pass "rollback application selected on the SAME clean46 database (api image $rollback_backend)"
 
   candidate_health "rollback"
-  rollback_smoke "$(new_purchase_request SCHEMA46-DRILL-2)"
+  new_turn_principal 2
+  rollback_smoke "$TURN_PURCHASE"
   require_schema '46|false'
   require_db_identity "$identity"
   pass "database remained clean46 under the rollback application; no migration ran"
@@ -703,7 +737,8 @@ main() {
   pass "candidate restarted on the same database after the rollback"
 
   candidate_health "candidate restart"
-  candidate_smoke "candidate restart" "$(new_purchase_request SCHEMA46-DRILL-3)" full
+  new_turn_principal 3
+  candidate_smoke "candidate restart" "$TURN_PURCHASE" full
   require_schema '46|false'
   require_db_identity "$identity"
   pass "candidate re-smoke passed; the rollback application's writes did not poison it"
