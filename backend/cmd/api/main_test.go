@@ -488,7 +488,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building test storage client: %v", err)
 	}
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
+	mediaFoundation, err := buildMediaFoundation(context.Background(), cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
 	if err != nil {
 		t.Fatalf("building test media foundation: %v", err)
 	}

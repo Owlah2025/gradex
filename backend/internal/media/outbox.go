@@ -51,11 +51,17 @@ type enhancementSchedule struct {
 	autoRecoveryIntentID string
 }
 
-func appendEnhancementWork(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, assetVersionID string) error {
+// appendEnhancementWork writes one MANUAL enhancement intent and returns the
+// committed outbox event id.
+//
+// The identity is returned because the manual override needs it: an accepted
+// Admin request records that exact event as the thing suppressing automatic
+// scheduling, in this same transaction.
+func appendEnhancementWork(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, assetVersionID string) (string, error) {
 	return appendEnhancementWorkAt(ctx, tx, writer, enhancementSchedule{assetVersionID: assetVersionID})
 }
 
-func appendEnhancementWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, schedule enhancementSchedule) error {
+func appendEnhancementWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, schedule enhancementSchedule) (string, error) {
 	eventID := schedule.eventID
 	if eventID == "" {
 		eventID = uuid.NewString()
@@ -83,9 +89,9 @@ func appendEnhancementWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writ
 		SafePayload: safe,
 	}, work)
 	if err != nil {
-		return fmt.Errorf("writing media enhancement outbox intent: %w", err)
+		return "", fmt.Errorf("writing media enhancement outbox intent: %w", err)
 	}
-	return nil
+	return eventID, nil
 }
 
 func appendScanWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, schedule workSchedule) error {

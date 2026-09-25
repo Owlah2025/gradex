@@ -234,7 +234,8 @@ func (w *Worker) handleEnhancementTask(ctx context.Context, task *asynq.Task) er
 	// mean re-delivering a task the authoritative scheduler row has already
 	// replaced, which can never succeed and would keep the queue busy denying it.
 	if errors.Is(err, ErrEnhancementNotEligible) || errors.Is(err, ErrEnhancementActive) ||
-		errors.Is(err, ErrEnhancementIntentSuperseded) {
+		errors.Is(err, ErrEnhancementIntentSuperseded) ||
+		errors.Is(err, ErrAutoEnhancementRecoveryDisabled) {
 		return nil
 	}
 	return err
@@ -574,6 +575,22 @@ func (w *Worker) RetryEnhancements(ctx context.Context, assetVersionID string) e
 // present one is an automatic intent whose identity must still be authoritative
 // when the claim is taken.
 func (w *Worker) RetryEnhancementsForIntent(ctx context.Context, assetVersionID, intentID string) error {
+	// AUTOMATIC work is refused while the feature is disabled, BEFORE any
+	// operation identity is minted, before the transcode gate is entered, and
+	// therefore long before beginEnhancement could take the media claim.
+	//
+	// Stopping the scheduler loop is not the same as disabling the feature: tasks
+	// committed while it was enabled survive in the queue and would otherwise
+	// still claim, write a processing attempt and encode. An operator switching
+	// MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED to false is trying to stop exactly
+	// that.
+	//
+	// The source is the authoritative intent identity carried by the task, never
+	// a correlation string. Manual recovery has no intent id and is unaffected.
+	if intentID != "" && !w.AutoEnhancementRecoveryEnabled() {
+		w.pauseIntentWhileDisabled(ctx, assetVersionID, intentID)
+		return ErrAutoEnhancementRecoveryDisabled
+	}
 	operationID := ""
 	started := false
 	err := w.transcodeGate.run(ctx, func() error {
@@ -608,6 +625,13 @@ func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operatio
 		// an automatic failure.
 		if intentID != "" && autoRecoveryFailureIsBenign(errOrBenign(err)) {
 			w.releaseIntentAfterBenignOutcome(ctx, assetVersionID, intentID)
+		}
+		// A MANUAL task that reached execution and declined it must release its
+		// own suppression, or one accepted request against an asset that had
+		// already stopped being eligible would block automatic recovery until the
+		// manual lease expired.
+		if intentID == "" && autoRecoveryFailureIsBenign(errOrBenign(err)) {
+			w.settleManualSuppressionAfterBenignOutcome(ctx, assetVersionID)
 		}
 		return err
 	}
@@ -1934,4 +1958,58 @@ func (w *Worker) resolveDuplicateTranscode(ctx context.Context, completion trans
 		return fmt.Errorf("%w: transcode callback was replayed with different evidence", ErrConflict)
 	}
 	return nil
+}
+
+// pauseIntentWhileDisabled closes an automatic intent whose task was delivered
+// while the feature is switched off.
+//
+// It runs in its own transaction — no claim transaction exists, because the task
+// is refused before one is opened — and a failure is not escalated: the intent
+// lease is the backstop, so the worst case is one delayed retry rather than lost
+// or duplicated work.
+func (w *Worker) pauseIntentWhileDisabled(ctx context.Context, assetVersionID, intentID string) {
+	if !w.autoRecoveryStateAvailable {
+		return
+	}
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	if err := pauseAutoRecoveryWhileDisabled(ctx, tx, assetVersionID, intentID); err != nil {
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return
+	}
+	w.observeAutoRecovery(AutoRecoveryObservation{
+		Phase: AutoRecoveryIntentReleased, AssetVersionID: assetVersionID, IntentID: intentID,
+	})
+}
+
+// settleManualSuppressionAfterBenignOutcome releases the suppression of a manual
+// request whose execution declined to run, so automatic recovery does not stay
+// blocked until the manual lease expires.
+func (w *Worker) settleManualSuppressionAfterBenignOutcome(ctx context.Context, assetVersionID string) {
+	if !w.autoRecoveryStateAvailable {
+		return
+	}
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	var manualEventID string
+	err = tx.QueryRow(ctx, `
+		SELECT manual_intent_id::text FROM media_auto_enhancement_recovery
+		WHERE asset_version_id = $1::uuid AND state = 'MANUAL_PENDING'
+		FOR UPDATE
+	`, assetVersionID).Scan(&manualEventID)
+	if err != nil {
+		return
+	}
+	if err := settleManualSuppression(ctx, tx, assetVersionID, manualEventID); err != nil {
+		return
+	}
+	_ = tx.Commit(ctx)
 }

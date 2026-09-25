@@ -91,7 +91,7 @@ func main() {
 	routerOptions := pf.Options
 	sessionRepository = pf.SessionRepository
 
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
+	mediaFoundation, err := buildMediaFoundation(ctx, cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
 	if err != nil {
 		log.Fatalf("building media foundation: %v", err)
 	}
@@ -383,6 +383,7 @@ func buildLearningFoundation(
 }
 
 func buildMediaFoundation(
+	ctx context.Context,
 	cfg *config.Config,
 	pool *pgxpool.Pool,
 	storageClient *storage.Client,
@@ -412,10 +413,26 @@ func buildMediaFoundation(
 	if err != nil {
 		return nil, err
 	}
+	// Whether an accepted manual RetryEnhancements request can durably suppress
+	// automatic scheduling depends on the schema carrying the 3C-C state.
+	//
+	// This is a CAPABILITY probe, not a readiness gate. The API floor is 44, so a
+	// correctly deployed API may legitimately be serving schema 44, where the
+	// scheduler table does not exist and there is no automatic recovery to
+	// suppress. Failing to start would be wrong; silently assuming the table
+	// exists would be worse, because the manual request would then error.
+	autoRecoveryStateAvailable := false
+	{
+		probeCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+		autoRecoveryStateAvailable = db.CheckSchemaAtLeast(
+			probeCtx, pool, db.AutoEnhancementRecoverySchemaVersion) == nil
+		cancel()
+	}
 	service, err := media.NewService(media.ServiceOptions{
 		DB: pool, Store: storageClient, Outbox: writer, Scanner: scanner,
 		UploadURLExpiry: cfg.UploadURLExpiry(), MaxUploadBytes: cfg.MaxUploadSizeBytes(),
-		OperatingMode: media.OperatingMode(cfg.MediaOperatingMode()),
+		OperatingMode:              media.OperatingMode(cfg.MediaOperatingMode()),
+		AutoRecoveryStateAvailable: autoRecoveryStateAvailable,
 	})
 	if err != nil {
 		return nil, err

@@ -75,13 +75,45 @@ CREATE TABLE media_auto_enhancement_recovery (
     -- video_renditions, never against FFmpeg output.
     progress_rendition_count INT NOT NULL DEFAULT 0,
 
+    -- MANUAL OVERRIDE SUPPRESSION.
+    --
+    -- The outbox event id of an ACCEPTED Admin RetryEnhancements request that has
+    -- not yet executed. NULL means no manual request is suppressing automatic
+    -- scheduling.
+    --
+    -- WHY THIS IS NOT INFERRED
+    --
+    -- An accepted manual request must suppress automatic scheduling the instant
+    -- its transaction commits, not later when the manual worker happens to take
+    -- the media claim. Between those two moments the scheduler could otherwise
+    -- mint a fresh automatic intent, and that automatic task could take the claim
+    -- first — so the operator's accepted action would lose to the machine it was
+    -- meant to override.
+    --
+    -- The window is real and unbounded: it spans outbox dispatch, queue latency
+    -- and worker scheduling. It cannot be closed with a sleep, a "recent manual
+    -- request" timestamp, or any assumption about ordering, so the suppression is
+    -- a committed relational fact written in the SAME transaction as the manual
+    -- media.enhancement_requested event. If that transaction rolls back, neither
+    -- the manual work nor the suppression exists.
+    manual_intent_id     UUID,
+
+    -- When the manual suppression stops being believable, so automatic recovery
+    -- cannot be blocked forever by a manual request whose task was lost.
+    --
+    -- Like intent_expires_at this is a deadline, not a licence: expiry alone does
+    -- not release the suppression. The manual event must ALSO carry a durable
+    -- media_outbox_dispatches receipt, because an undispatched manual event is
+    -- still owned by the outbox dispatcher and is going to run.
+    manual_expires_at    TIMESTAMPTZ,
+
     last_failure_category TEXT,
     last_outcome_at      TIMESTAMPTZ,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT maer_state_valid CHECK (
-        state IN ('SCHEDULED', 'EXECUTING', 'BACKOFF', 'NEEDS_OPERATOR')
+        state IN ('SCHEDULED', 'EXECUTING', 'BACKOFF', 'NEEDS_OPERATOR', 'MANUAL_PENDING')
     ),
     CONSTRAINT maer_counters_non_negative CHECK (
         consecutive_failures >= 0 AND attempt_number >= 0 AND progress_rendition_count >= 0
@@ -96,6 +128,18 @@ CREATE TABLE media_auto_enhancement_recovery (
     -- The state machine, enforced by the database rather than by Go. No code path
     -- may leave a row claiming to execute an operation it never bound, or
     -- claiming an intent is outstanding with nothing to identify it.
+    -- Manual suppression columns belong to MANUAL_PENDING and to no other state,
+    -- so no row can claim to be suppressed by a manual request while also
+    -- presenting itself to the scheduler as due.
+    CONSTRAINT maer_manual_columns_coherent CHECK (
+        (state = 'MANUAL_PENDING'
+            AND manual_intent_id IS NOT NULL
+            AND manual_expires_at IS NOT NULL)
+        OR (state <> 'MANUAL_PENDING'
+            AND manual_intent_id IS NULL
+            AND manual_expires_at IS NULL)
+    ),
+
     CONSTRAINT maer_state_coherent CHECK (
         (state = 'SCHEDULED'
             AND current_intent_id IS NOT NULL
@@ -112,6 +156,16 @@ CREATE TABLE media_auto_enhancement_recovery (
             AND intent_expires_at IS NULL
             AND next_attempt_at IS NOT NULL)
         OR (state = 'NEEDS_OPERATOR'
+            AND current_intent_id IS NULL
+            AND executing_operation_id IS NULL
+            AND intent_expires_at IS NULL
+            AND next_attempt_at IS NULL)
+        -- MANUAL_PENDING owns no automatic identity at all. An accepted manual
+        -- request supersedes any outstanding automatic intent, so there is
+        -- nothing left for the scheduler to execute or reconcile: no intent, no
+        -- bound operation, no lease, and no automatic deadline. The only live
+        -- deadline is the manual one.
+        OR (state = 'MANUAL_PENDING'
             AND current_intent_id IS NULL
             AND executing_operation_id IS NULL
             AND intent_expires_at IS NULL
@@ -139,6 +193,17 @@ CREATE INDEX media_auto_enhancement_recovery_due
 CREATE INDEX media_auto_enhancement_recovery_abandoned
     ON media_auto_enhancement_recovery (intent_expires_at)
     WHERE state = 'SCHEDULED';
+
+-- Releasing an abandoned manual suppression reads the same way.
+CREATE INDEX media_auto_enhancement_recovery_manual
+    ON media_auto_enhancement_recovery (manual_expires_at)
+    WHERE state = 'MANUAL_PENDING';
+
+COMMENT ON COLUMN media_auto_enhancement_recovery.manual_intent_id IS
+    'The outbox event id of an accepted Admin RetryEnhancements request that has not yet executed. Written in the same transaction as that event, so an accepted manual request suppresses automatic scheduling immediately rather than only once the manual worker takes the media claim.';
+
+COMMENT ON COLUMN media_auto_enhancement_recovery.manual_expires_at IS
+    'When the manual suppression stops being believable. Expiry alone does not release it: the manual event must also carry a media_outbox_dispatches receipt, because an undispatched manual event is still owned by the outbox dispatcher.';
 
 -- Terminal attribution, nullable on purpose.
 --

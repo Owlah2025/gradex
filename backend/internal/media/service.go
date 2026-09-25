@@ -63,6 +63,12 @@ type Service struct {
 	limits          uploadLimits
 	operatingMode   OperatingMode
 	now             func() time.Time
+
+	// autoRecoveryStateAvailable reports that the database carries the schema-45
+	// automatic recovery state, so an accepted manual request can record its
+	// suppression. Below 45 the table does not exist and there is no automatic
+	// scheduler to suppress.
+	autoRecoveryStateAvailable bool
 }
 
 type uploadRecord struct {
@@ -130,6 +136,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		scanner: options.Scanner, uploadURLExpiry: options.UploadURLExpiry,
 		maxUploadBytes: options.MaxUploadBytes, limits: resolveUploadLimits(options),
 		operatingMode: mode, now: now,
+		autoRecoveryStateAvailable: options.AutoRecoveryStateAvailable,
 	}, nil
 }
 
@@ -1092,8 +1099,25 @@ func (s *Service) RetryEnhancements(ctx context.Context, request RetryRequest) e
 	if claimToken != nil || leaseValid {
 		return ErrEnhancementActive
 	}
-	if err := appendEnhancementWork(ctx, tx, s.outbox, request.AssetVersionID); err != nil {
+	manualEventID, err := appendEnhancementWork(ctx, tx, s.outbox, request.AssetVersionID)
+	if err != nil {
 		return err
+	}
+	// The accepted request suppresses automatic scheduling HERE, in the same
+	// transaction as the event, rather than later when the manual worker takes
+	// the media claim.
+	//
+	// Between admission and execution lies outbox dispatch, queue latency and
+	// worker scheduling — an unbounded window. Suppressing only at claim time let
+	// the scheduler mint a fresh automatic intent inside that window, and that
+	// automatic task could take the claim first, so an accepted operator action
+	// could lose to the machine it was meant to override. Committing the
+	// suppression with the event closes the window by construction: if this
+	// transaction rolls back, neither the manual work nor the suppression exists.
+	if s.autoRecoveryStateAvailable {
+		if err := suppressAutoRecoveryForManualRequest(ctx, tx, request.AssetVersionID, manualEventID); err != nil {
+			return err
+		}
 	}
 	if err := appendMediaAudit(ctx, tx, request.AdminAccountID, "ADMIN", "MEDIA_ENHANCEMENT_RETRY_REQUESTED", request.AssetVersionID, "Admin queued manual enhancement recovery", map[string]any{"state": string(state), "manual": true}); err != nil {
 		return err

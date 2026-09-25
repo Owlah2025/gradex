@@ -209,6 +209,11 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	service, err := NewService(ServiceOptions{
 		DB: pool, Store: newIntegrationObjectStore(), Outbox: writer, Scanner: passScanner,
 		UploadURLExpiry: 15 * time.Minute, MaxUploadBytes: 10 * 1024 * 1024,
+		// The integration database is migrated to the current schema, so the
+		// automatic recovery state genuinely exists. Declaring it available is the
+		// truthful configuration, and it is what lets an accepted manual request
+		// suppress automatic scheduling the way production at schema 45+ does.
+		AutoRecoveryStateAvailable: true,
 	})
 	if err != nil {
 		t.Fatalf("constructing media service: %v", err)

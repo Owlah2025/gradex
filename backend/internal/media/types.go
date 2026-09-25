@@ -279,6 +279,16 @@ type ServiceOptions struct {
 	MaxUploadBytes  int64
 	OperatingMode   OperatingMode
 
+	// AutoRecoveryStateAvailable reports that the database is at schema 45 or
+	// later, so an accepted manual RetryEnhancements request can durably suppress
+	// automatic scheduling in the same transaction as its outbox event.
+	//
+	// It is a capability gate, not a feature switch: the suppression is written
+	// whenever the state exists, regardless of whether the automatic reconciler is
+	// enabled, because a queued automatic task can outlive the flag being turned
+	// off. Below schema 45 there is no scheduler state to suppress.
+	AutoRecoveryStateAvailable bool
+
 	// The D-011 per-bucket caps enforced under BR-068. Each is optional and
 	// falls back to the Default* value in limits.go; they are tunable
 	// implementation parameters, not deployment switches, so composition

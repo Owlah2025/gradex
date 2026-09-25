@@ -34,7 +34,22 @@ const (
 	autoRecoveryExecuting     = "EXECUTING"
 	autoRecoveryBackoff       = "BACKOFF"
 	autoRecoveryNeedsOperator = "NEEDS_OPERATOR"
+	// autoRecoveryManualPending means an Administrator's RetryEnhancements
+	// request has been accepted and has not yet executed. Automatic scheduling is
+	// suppressed for as long as the row is in this state.
+	autoRecoveryManualPending = "MANUAL_PENDING"
 )
+
+// autoRecoveryManualLease bounds how long an accepted manual request suppresses
+// automatic scheduling.
+//
+// It is the safety valve for a manual task that was dispatched and then lost:
+// without it, one accepted request whose task never arrived would block automatic
+// recovery for that asset forever. Like the intent lease it is a deadline rather
+// than a licence — expiry permits release only once the manual event carries a
+// durable dispatch receipt, because an undispatched manual event has not been
+// lost at all and the outbox dispatcher is still going to deliver it.
+const autoRecoveryManualLease = 2 * time.Hour
 
 // MaxAutoEnhancementFailures is the consecutive automatic failure budget.
 //
@@ -93,6 +108,18 @@ const autoEnhancementRecoveryCorrelation = "auto-enhancement-recovery"
 // It is benign. The task claims nothing, charges no automatic attempt, and is
 // acknowledged rather than retried.
 var ErrEnhancementIntentSuperseded = errors.New("media enhancement intent is superseded")
+
+// ErrAutoEnhancementRecoveryDisabled means a queued AUTOMATIC recovery task was
+// delivered while MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED is false.
+//
+// Disabling the feature has to stop work that is already in flight, not merely
+// stop the scheduler loop from starting. A task that ran anyway would take the
+// media claim, write a processing attempt and encode — which is exactly what an
+// operator turning the flag off is trying to prevent.
+//
+// It is benign: the task claims nothing, charges no automatic attempt, and is
+// acknowledged rather than retried. Manual recovery is unaffected.
+var ErrAutoEnhancementRecoveryDisabled = errors.New("automatic media enhancement recovery is disabled")
 
 // autoEnhancementBackoff is the automatic retry schedule. Deadlines are written
 // as database timestamps, so the schedule is not held in any process.
@@ -252,6 +279,9 @@ func (w *Worker) autoRecoveryCandidates(ctx context.Context, limit int) ([]strin
 		         AND EXISTS (SELECT 1 FROM media_outbox_dispatches md
 		                     WHERE md.event_id = r.current_intent_id))
 		     OR (r.state = 'EXECUTING' AND r.intent_expires_at <= now())
+		     OR (r.state = 'MANUAL_PENDING' AND r.manual_expires_at <= now()
+		         AND EXISTS (SELECT 1 FROM media_outbox_dispatches md
+		                     WHERE md.event_id = r.manual_intent_id))
 		  )
 		ORDER BY COALESCE(r.next_attempt_at, mav.created_at), mav.id
 		LIMIT $1
@@ -334,6 +364,8 @@ func (w *Worker) scheduleAutoRecoveryIntent(ctx context.Context, assetVersionID 
 		SET state = 'SCHEDULED',
 		    current_intent_id = EXCLUDED.current_intent_id,
 		    executing_operation_id = NULL,
+		    manual_intent_id = NULL,
+		    manual_expires_at = NULL,
 		    intent_expires_at = EXCLUDED.intent_expires_at,
 		    attempt_number = media_auto_enhancement_recovery.attempt_number + 1,
 		    next_attempt_at = NULL,
@@ -347,6 +379,10 @@ func (w *Worker) scheduleAutoRecoveryIntent(ctx context.Context, assetVersionID 
 		                   WHERE md.event_id = media_auto_enhancement_recovery.current_intent_id))
 		   OR (media_auto_enhancement_recovery.state = 'EXECUTING'
 		       AND media_auto_enhancement_recovery.intent_expires_at <= now())
+		   OR (media_auto_enhancement_recovery.state = 'MANUAL_PENDING'
+		       AND media_auto_enhancement_recovery.manual_expires_at <= now()
+		       AND EXISTS (SELECT 1 FROM media_outbox_dispatches md
+		                   WHERE md.event_id = media_auto_enhancement_recovery.manual_intent_id))
 		RETURNING attempt_number, consecutive_failures
 	`, assetVersionID, intentID, autoRecoveryIntentLease.Seconds()).Scan(&attemptNumber, &failures)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -359,7 +395,7 @@ func (w *Worker) scheduleAutoRecoveryIntent(ctx context.Context, assetVersionID 
 		return false, fmt.Errorf("committing automatic recovery intent: %w", err)
 	}
 
-	if err := appendEnhancementWorkAt(ctx, tx, w.outbox, enhancementSchedule{
+	if _, err := appendEnhancementWorkAt(ctx, tx, w.outbox, enhancementSchedule{
 		assetVersionID:       assetVersionID,
 		eventID:              intentID,
 		correlation:          autoEnhancementRecoveryCorrelation,
@@ -432,6 +468,8 @@ func overrideAutoRecoveryForManualClaim(ctx context.Context, tx pgx.Tx, assetVer
 		    current_intent_id = NULL,
 		    executing_operation_id = NULL,
 		    intent_expires_at = NULL,
+		    manual_intent_id = NULL,
+		    manual_expires_at = NULL,
 		    next_attempt_at = EXCLUDED.next_attempt_at,
 		    last_failure_category = NULL,
 		    updated_at = now()
@@ -657,6 +695,116 @@ func appendAutoRecoveryAudit(
 		          'MEDIA_ASSET_VERSION', $2, $3, $4::jsonb)
 	`, action, assetVersionID, reason, encoded); err != nil {
 		return fmt.Errorf("writing automatic recovery audit evidence: %w", err)
+	}
+	return nil
+}
+
+// suppressAutoRecoveryForManualRequest makes an accepted Admin RetryEnhancements
+// request an immediate, durable automatic-scheduling suppression.
+//
+// It runs in the SAME transaction that appends the manual
+// media.enhancement_requested event, so the two commit together or not at all.
+// That is the whole point: until this existed, the scheduler was free to mint a
+// fresh automatic intent in the window between the operator's request being
+// accepted and the manual worker taking the media claim, and the automatic task
+// could win that race — the machine overriding the operator, rather than the
+// other way round.
+//
+// One write does everything the override needs:
+//
+//   - it supersedes any outstanding automatic intent, because MANUAL_PENDING
+//     carries no current_intent_id, so a queued automatic task's compare-and-set
+//     on that identity fails and the task no-ops before taking any claim;
+//   - it resets the automatic failure budget, which is the approved
+//     manual-override semantic and is why a request from NEEDS_OPERATOR works;
+//   - it names the manual outbox event that is doing the suppressing, so the
+//     suppression is attributable rather than anonymous;
+//   - it records when the suppression stops being believable.
+//
+// The row is upserted, so a manual request against an asset the scheduler has
+// never touched also suppresses an immediate automatic duplicate.
+//
+// It deletes no historical evidence. processing_attempts is untouched.
+func suppressAutoRecoveryForManualRequest(ctx context.Context, tx pgx.Tx, assetVersionID, manualEventID string) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_auto_enhancement_recovery (
+			asset_version_id, state, consecutive_failures, attempt_number,
+			manual_intent_id, manual_expires_at, progress_rendition_count, updated_at
+		) VALUES (
+			$1::uuid, 'MANUAL_PENDING', 0, 0,
+			$2::uuid, now() + make_interval(secs => $3),
+			(SELECT count(*) FROM video_renditions WHERE asset_version_id = $1::uuid), now()
+		)
+		ON CONFLICT (asset_version_id) DO UPDATE
+		SET state = 'MANUAL_PENDING',
+		    consecutive_failures = 0,
+		    current_intent_id = NULL,
+		    executing_operation_id = NULL,
+		    intent_expires_at = NULL,
+		    next_attempt_at = NULL,
+		    manual_intent_id = EXCLUDED.manual_intent_id,
+		    manual_expires_at = EXCLUDED.manual_expires_at,
+		    last_failure_category = NULL,
+		    updated_at = now()
+	`, assetVersionID, manualEventID, autoRecoveryManualLease.Seconds()); err != nil {
+		return fmt.Errorf("suppressing automatic recovery for an accepted manual request: %w", err)
+	}
+	return nil
+}
+
+// settleManualSuppression releases a manual suppression whose work will never
+// run, so automatic recovery is not blocked forever.
+//
+// The manual task reached execution and declined it: the asset had stopped being
+// eligible, or another claimant held it. Nothing failed automatically, so no
+// budget is charged; the row simply becomes due again.
+//
+// It is keyed by the manual event identity, so a settle can never release a
+// DIFFERENT, newer manual request that superseded this one.
+func settleManualSuppression(ctx context.Context, tx pgx.Tx, assetVersionID, manualEventID string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_auto_enhancement_recovery
+		SET state = 'BACKOFF',
+		    manual_intent_id = NULL,
+		    manual_expires_at = NULL,
+		    next_attempt_at = now() + make_interval(secs => $3),
+		    updated_at = now()
+		WHERE asset_version_id = $1::uuid
+		  AND state = 'MANUAL_PENDING'
+		  AND manual_intent_id = $2::uuid
+	`, assetVersionID, manualEventID, autoEnhancementBackoff(1).Seconds()); err != nil {
+		return fmt.Errorf("settling manual recovery suppression: %w", err)
+	}
+	return nil
+}
+
+// pauseAutoRecoveryWhileDisabled closes an automatic intent whose task arrived
+// while the feature was switched off.
+//
+// Acknowledging the task and leaving the row SCHEDULED would strand it: the
+// intent would sit outstanding until its lease expired, and re-enabling the
+// feature would not produce work until then. Charging a failure would be a lie,
+// because nothing ran.
+//
+// So the intent is explicitly closed and the row becomes due immediately. The
+// automatic budget is untouched, no operation is bound, no claim is taken, and
+// the acknowledged task can never become active later because the identity it
+// carries is no longer the one the row names. Re-enabling the feature therefore
+// yields exactly one fresh intent on the next tick.
+func pauseAutoRecoveryWhileDisabled(ctx context.Context, tx pgx.Tx, assetVersionID, intentID string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_auto_enhancement_recovery
+		SET state = 'BACKOFF',
+		    current_intent_id = NULL,
+		    executing_operation_id = NULL,
+		    intent_expires_at = NULL,
+		    next_attempt_at = now(),
+		    updated_at = now()
+		WHERE asset_version_id = $1::uuid
+		  AND state = 'SCHEDULED'
+		  AND current_intent_id = $2::uuid
+	`, assetVersionID, intentID); err != nil {
+		return fmt.Errorf("pausing automatic recovery while disabled: %w", err)
 	}
 	return nil
 }

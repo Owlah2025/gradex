@@ -20,6 +20,21 @@ import (
 // a test that inherited a true default would be proving the wrong thing.
 func autoRecoveryWorker(t *testing.T, f *mediaFixture, now *time.Time, processor Processor) (*Worker, *autoRecoveryLog) {
 	t.Helper()
+	return autoRecoveryWorkerEnabled(t, f, now, processor, true)
+}
+
+// workerWithAutoRecovery builds a worker whose 3C-C feature flag is set
+// explicitly. The schema-45 state stays available either way, because switching
+// the feature off does not remove the table — which is exactly the situation a
+// queued automatic task arrives in.
+func workerWithAutoRecovery(t *testing.T, f *mediaFixture, now *time.Time, processor Processor, enabled bool) *Worker {
+	t.Helper()
+	worker, _ := autoRecoveryWorkerEnabled(t, f, now, processor, enabled)
+	return worker
+}
+
+func autoRecoveryWorkerEnabled(t *testing.T, f *mediaFixture, now *time.Time, processor Processor, enabled bool) (*Worker, *autoRecoveryLog) {
+	t.Helper()
 	log := &autoRecoveryLog{}
 	scanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
 		return ScanObservation{
@@ -32,7 +47,7 @@ func autoRecoveryWorker(t *testing.T, f *mediaFixture, now *time.Time, processor
 		ProcessingTimeout: time.Second, WorkLeaseDuration: 2 * time.Second,
 		Now:                            func() time.Time { return *now },
 		AutoRecoveryStateAvailable:     true,
-		AutoEnhancementRecoveryEnabled: true,
+		AutoEnhancementRecoveryEnabled: enabled,
 		ObserveAutoRecovery:            log.record,
 	})
 	if err != nil {
