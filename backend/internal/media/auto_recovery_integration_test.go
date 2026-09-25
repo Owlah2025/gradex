@@ -845,6 +845,32 @@ func TestAutoRecoveryStaleRecoveryReconcilesCrashedExecution(t *testing.T) {
 // TestAutoRecoveryRedisLossReissuesIntentAndSupersedesTheOldTask is the Redis
 // edge. The queue is gone; the scheduler row is not. The asset is scheduled again
 // under a NEW intent, and the old task — if it ever arrives — is a no-op.
+// markIntentDispatched records the durable dispatch receipt the media dispatcher
+// writes when it has actually handed an outbox event to the queue. The intent id
+// IS the event id, so this is the same row the production dispatcher inserts.
+//
+// It is the discriminator the scheduler uses to tell "the queue accepted this and
+// lost it" from "this never left the outbox".
+func markIntentDispatched(t *testing.T, f *mediaFixture, intentID string) {
+	t.Helper()
+	if _, err := f.pool.Exec(f.ctx,
+		"INSERT INTO media_outbox_dispatches (event_id) VALUES ($1::uuid) ON CONFLICT (event_id) DO NOTHING",
+		intentID); err != nil {
+		t.Fatalf("recording the dispatch receipt: %v", err)
+	}
+}
+
+func intentIsDispatched(t *testing.T, f *mediaFixture, intentID string) bool {
+	t.Helper()
+	var present bool
+	if err := f.pool.QueryRow(f.ctx,
+		"SELECT EXISTS (SELECT 1 FROM media_outbox_dispatches WHERE event_id = $1::uuid)",
+		intentID).Scan(&present); err != nil {
+		t.Fatalf("reading the dispatch receipt: %v", err)
+	}
+	return present
+}
+
 func TestAutoRecoveryRedisLossReissuesIntentAndSupersedesTheOldTask(t *testing.T) {
 	f, _, versionID := seedPlayableEnhancementAsset(t, []string{"1080p", "720p", "480p"})
 	now := time.Now().UTC()
@@ -855,6 +881,10 @@ func TestAutoRecoveryRedisLossReissuesIntentAndSupersedesTheOldTask(t *testing.T
 		t.Fatalf("scheduling: scheduled=%d err=%v", scheduled, err)
 	}
 	lostIntent := latestAutoIntent(t, f, versionID)
+	// The dispatcher published it and Redis then lost the task. The receipt is
+	// what makes this a lost DISPATCHED task rather than an event still sitting
+	// undispatched in the outbox, and only the former may be re-issued.
+	markIntentDispatched(t, f, lostIntent)
 
 	// While the intent is live the asset is not a candidate, whatever happened to
 	// the queue: the database is the authority on what is outstanding.
@@ -1106,5 +1136,112 @@ func TestAutoRecoverySchedulerNeverTakesTheClaim(t *testing.T) {
 	}
 	if audits != 1 {
 		t.Fatalf("scheduling audit events = %d, want 1", audits)
+	}
+}
+
+// TestAutoRecoveryUndispatchedIntentStaysBoundedAcrossExpiry is the G0-1
+// regression.
+//
+// The failure it pins: during a sustained dispatcher or Redis outage the
+// enhancement event never leaves the outbox, but scheduler time keeps elapsing.
+// If expiry alone authorised replacement, every lease window would mint a new
+// intent and a new enhancement event while the previous ones stayed
+// undispatched and still dispatchable. When the dispatcher recovered, every one
+// of those distinct events would dispatch — unbounded growth from a pure
+// outage, which the bounded-growth invariant forbids.
+//
+// Elapsed time is therefore not sufficient. Replacement additionally requires a
+// durable dispatch receipt for the intent's event.
+func TestAutoRecoveryUndispatchedIntentStaysBoundedAcrossExpiry(t *testing.T) {
+	f, _, versionID := seedPlayableEnhancementAsset(t, []string{"1080p", "720p", "480p"})
+	now := time.Now().UTC()
+	processor := &enhancementIntegrationProcessor{probe: EnhancementProbe{ExpectedRenditions: []string{"1080p", "720p", "480p", "240p"}, TrustedDurationMS: 90_000}, failAfter: -1}
+	worker, _ := autoRecoveryWorker(t, f, &now, processor)
+
+	if scheduled, err := worker.ScheduleAutoEnhancementRecovery(f.ctx, 25); err != nil || scheduled != 1 {
+		t.Fatalf("initial scheduling: scheduled=%d err=%v", scheduled, err)
+	}
+	original := latestAutoIntent(t, f, versionID)
+	// The dispatcher is down for the whole of this test: no receipt is ever
+	// written, exactly as production would leave it during a Redis outage.
+	if intentIsDispatched(t, f, original) {
+		t.Fatal("the fixture dispatched the intent; this test requires an undispatched one")
+	}
+
+	// Drive DB-authoritative time through many expiry windows. Expiry is read
+	// from the database clock, so expiring the row is how the scheduler sees
+	// elapsed leases.
+	for tick := 0; tick < 1000; tick++ {
+		if _, err := f.pool.Exec(f.ctx,
+			"UPDATE media_auto_enhancement_recovery SET intent_expires_at=now()-interval '1 hour' WHERE asset_version_id=$1::uuid",
+			versionID); err != nil {
+			t.Fatalf("tick %d: advancing past the lease: %v", tick, err)
+		}
+		scheduled, err := worker.ScheduleAutoEnhancementRecovery(f.ctx, 25)
+		if err != nil {
+			t.Fatalf("tick %d: %v", tick, err)
+		}
+		if scheduled != 0 {
+			t.Fatalf("tick %d minted a new intent for an undispatched event", tick)
+		}
+	}
+
+	// One logical current intent, and one relevant undispatched outbox event.
+	row, present := readAutoRecoveryRow(t, f, versionID)
+	if !present || row.state != autoRecoveryScheduled {
+		t.Fatalf("scheduler row after 1000 expiry windows = %+v present=%t", row, present)
+	}
+	if row.intentID == nil || *row.intentID != original {
+		t.Fatalf("the durable intent identity changed: %+v, want %s", row.intentID, original)
+	}
+	if row.attemptNumber != 1 {
+		t.Fatalf("attempt_number = %d, want 1; the budget was charged by elapsed time alone", row.attemptNumber)
+	}
+	if row.failures != 0 {
+		t.Fatalf("an undispatched intent charged %d failures", row.failures)
+	}
+	if got := countEnhancementIntents(t, f, versionID); got != 1 {
+		t.Fatalf("1000 expiry windows wrote %d enhancement events, want exactly 1", got)
+	}
+	var schedulerRows int
+	if err := f.pool.QueryRow(f.ctx, "SELECT count(*) FROM media_auto_enhancement_recovery").Scan(&schedulerRows); err != nil {
+		t.Fatalf("counting scheduler rows: %v", err)
+	}
+	if schedulerRows != 1 {
+		t.Fatalf("scheduler rows = %d, want 1", schedulerRows)
+	}
+
+	// Now the dispatcher comes back and publishes that same event. Only after the
+	// receipt exists does an expired lease authorise a new identity — which is
+	// the "dispatched but never claimed" case, and is bounded because each
+	// re-issue costs a real dispatch first.
+	markIntentDispatched(t, f, original)
+	if _, err := f.pool.Exec(f.ctx,
+		"UPDATE media_auto_enhancement_recovery SET intent_expires_at=now()-interval '1 second' WHERE asset_version_id=$1::uuid",
+		versionID); err != nil {
+		t.Fatalf("expiring the dispatched intent: %v", err)
+	}
+	if scheduled, err := worker.ScheduleAutoEnhancementRecovery(f.ctx, 25); err != nil || scheduled != 1 {
+		t.Fatalf("a dispatched, unclaimed, expired intent was not re-issued: scheduled=%d err=%v", scheduled, err)
+	}
+	reissued := latestAutoIntent(t, f, versionID)
+	if reissued == original {
+		t.Fatal("the re-issued intent reused the dispatched identity")
+	}
+
+	// Restored dispatcher: the superseded work must no-op through the existing
+	// intent identity check, so only the authoritative logical work is effective.
+	if err := worker.RetryEnhancementsForIntent(f.ctx, versionID, original); !errors.Is(err, ErrEnhancementIntentSuperseded) {
+		t.Fatalf("the superseded task error = %v, want ErrEnhancementIntentSuperseded", err)
+	}
+	var claim *string
+	if err := f.pool.QueryRow(f.ctx, "SELECT work_claim_token FROM media_asset_versions WHERE id=$1::uuid", versionID).Scan(&claim); err != nil {
+		t.Fatalf("reading the claim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("a superseded task took the media claim: %v", claim)
+	}
+	if err := worker.RetryEnhancementsForIntent(f.ctx, versionID, reissued); err != nil {
+		t.Fatalf("the authoritative intent did not execute: %v", err)
 	}
 }

@@ -41,14 +41,34 @@ const (
 // NEEDS_OPERATOR instead of scheduling again.
 const MaxAutoEnhancementFailures = 3
 
-// autoRecoveryIntentLease bounds how long a SCHEDULED intent stays believable.
+// autoRecoveryIntentLease bounds how long a DISPATCHED SCHEDULED intent stays
+// believable.
 //
 // The claim transaction is atomic, so an intent that never reached EXECUTING
 // never ran and charged nothing. Past this deadline the asset may be scheduled
-// again under a NEW intent id, which is how the scheduler recovers from a lost
-// Redis queue without inventing a heuristic. The superseded task, if it ever
-// arrives, is a no-op because the worker refuses an intent the row no longer
-// names.
+// again under a NEW intent id, which is how the scheduler recovers from a task
+// Redis accepted and then lost. The superseded task, if it ever arrives, is a
+// no-op because the worker refuses an intent the row no longer names.
+//
+// ELAPSED TIME ALONE IS NOT SUFFICIENT.
+//
+// Expiry permits replacement only once media_outbox_dispatches holds a receipt
+// for the intent's event. The intent id IS that event id, so the receipt is an
+// exact, durable, DB-authoritative answer to "did this work ever leave the
+// outbox". Without it the two cases are indistinguishable by time:
+//
+//   - never dispatched: the event is still pending in the outbox and the
+//     existing dispatcher owns retrying THAT event. Minting a second intent
+//     would leave the first event undispatched and dispatchable, so a sustained
+//     dispatcher or Redis outage would accumulate one new enhancement event per
+//     expiry window and deliver all of them when Redis returned. Bounded growth
+//     is a hard invariant, so this case must keep and reuse the durable intent
+//     however many ticks pass.
+//   - dispatched, never claimed: the queue accepted the task and lost it.
+//     Re-issuing under a new identity is the only way forward, and is bounded
+//     because each re-issue first required a real dispatch.
+//
+// Redis is never consulted for this. The receipt is the authority.
 //
 // It is deliberately shorter than the media processing timeout. A long-running
 // execution holds the media claim, and a claimed asset is excluded from
@@ -219,7 +239,9 @@ func (w *Worker) autoRecoveryCandidates(ctx context.Context, limit int) ([]strin
 		  AND (
 		        r.asset_version_id IS NULL
 		     OR (r.state = 'BACKOFF' AND r.next_attempt_at <= now())
-		     OR (r.state = 'SCHEDULED' AND r.intent_expires_at <= now())
+		     OR (r.state = 'SCHEDULED' AND r.intent_expires_at <= now()
+		         AND EXISTS (SELECT 1 FROM media_outbox_dispatches md
+		                     WHERE md.event_id = r.current_intent_id))
 		     OR (r.state = 'EXECUTING' AND r.intent_expires_at <= now())
 		  )
 		ORDER BY COALESCE(r.next_attempt_at, mav.created_at), mav.id
@@ -311,7 +333,9 @@ func (w *Worker) scheduleAutoRecoveryIntent(ctx context.Context, assetVersionID 
 		WHERE (media_auto_enhancement_recovery.state = 'BACKOFF'
 		       AND media_auto_enhancement_recovery.next_attempt_at <= now())
 		   OR (media_auto_enhancement_recovery.state = 'SCHEDULED'
-		       AND media_auto_enhancement_recovery.intent_expires_at <= now())
+		       AND media_auto_enhancement_recovery.intent_expires_at <= now()
+		       AND EXISTS (SELECT 1 FROM media_outbox_dispatches md
+		                   WHERE md.event_id = media_auto_enhancement_recovery.current_intent_id))
 		   OR (media_auto_enhancement_recovery.state = 'EXECUTING'
 		       AND media_auto_enhancement_recovery.intent_expires_at <= now())
 		RETURNING attempt_number, consecutive_failures
