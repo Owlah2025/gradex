@@ -149,3 +149,38 @@ writes checksummed image and manifest metadata. The identity is derived from the
 base SHA and patch SHA, so it can never be confused with either `0fee657` or the
 forward candidate. This is a local staging operation only; importing that
 artifact to a production host remains a later, reviewed release action.
+
+### It is an ordinary release artifact
+
+Its tooling tree is staged from the shared closure in
+[`deploy/hostinger/release-closure.sh`](../hostinger/release-closure.sh) — the
+same list the forward candidate builder uses — so the bundle has the ordinary
+layout and the ordinary `import-release.sh` consumes it directly:
+
+```bash
+deploy/schema46/build-rollback-artifact.sh /some/output/parent
+# transfer the artifact directory, then on the host:
+GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production \
+  ./import-release.sh <ROLLBACK_SHA>
+```
+
+This was not true during the 2026-09-25 production release. The builder staged
+tooling with `cp -R deploy/hostinger "$TOOLING/deploy"`, which flattens
+`deploy/hostinger/*` onto `deploy/*`, while `import-release.sh` sources
+`tooling/deploy/hostinger/release-artifact.sh` out of the artifact it is
+importing. The import failed outright and the artifact had to be staged on the
+production host by a hand-written mirror of the importer's verification logic.
+The builder now asserts the entrypoint is present before it seals a bundle, and
+[`verify-rollback-artifact-import.sh`](verify-rollback-artifact-import.sh)
+builds a real artifact and imports it with the unmodified importer:
+
+```bash
+deploy/schema46/verify-rollback-artifact-import.sh
+```
+
+Changing the packaging changes the bundle and image archive bytes, so the bundle
+and archive checksums differ from the artifact built before this fix. That is
+correct: those are content digests and are regenerated truthfully. The **release
+identity is unchanged** — it is derived from the base SHA and the patch SHA, and
+neither moved, so this artifact is still
+`abf59d4654791d11b3bb17e0c4b628b5e5f13d16` with compiled range `44..46`.

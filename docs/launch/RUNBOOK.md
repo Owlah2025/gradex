@@ -530,11 +530,28 @@ takes the media work claim**; the execution-time worker remains the only claiman
 running the same path, with no second FFmpeg invocation and no second `READY`
 proof.
 
-Three consecutive automatic failures, backing off 15 minutes, 1 hour, then 4
-hours, then `NEEDS_OPERATOR`. A newly committed canonical rendition is progress and
-resets the budget even if the operation later failed. Permanent failures — invalid
-media, checksum mismatch, missing immutable source, contradictory canonical
-evidence — reach `NEEDS_OPERATOR` immediately and never loop.
+Three consecutive automatic failures exhaust the budget, and only the first two
+of them wait:
+
+| Failure | What happens next |
+|---|---|
+| #1 | `BACKOFF` for 15 minutes |
+| #2 | `BACKOFF` for 1 hour |
+| #3 | `NEEDS_OPERATOR` — no further automatic execution |
+
+There is **no fourth automatic execution and no 4-hour stage**. A backoff is
+scheduled only for a failure count strictly below `MaxAutoEnhancementFailures`
+(3), so the only intervals any asset can ever wait are 15 minutes and 1 hour;
+failure #3 reaches `NEEDS_OPERATOR` without consulting the schedule at all. This
+paragraph previously described a `15m → 1h → 4h → NEEDS_OPERATOR` ladder, which
+the runtime has never executed. `TestAutoEnhancementBackoffMatchesApprovedPolicy`
+asserts both the two reachable intervals and the absence of the retired 4-hour
+stage.
+
+A newly committed canonical rendition is progress and resets the budget even if
+the operation later failed. Permanent failures — invalid media, checksum
+mismatch, missing immutable source, contradictory canonical evidence — reach
+`NEEDS_OPERATOR` immediately and never loop.
 
 ### Operator actions
 

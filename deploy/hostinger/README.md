@@ -67,6 +67,36 @@ marker, and the commands refuse each other's bundles and images by design:
 | --- | --- | --- | --- |
 | schema 41 (3C-A) | `SCHEMA41_CAPABILITY=supervised-41-to-40-v1` | `up-core-schema-41-foundation` | `rollback-schema-41-foundation` (41 → 40) |
 | schema 42 (3C-B) | `SCHEMA42_CAPABILITY=manual-enhancement-v1` | `up-core-schema-42-enhancement-recovery` | `rollback-schema-42-enhancement-recovery` (42 → 41) |
+| schema 46 (media preview) | `SCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1` | `up-core-schema-46-media-preview` | `rollback-schema46-application` (application only; database stays at clean 46) |
+
+Every release artifact has one layout. Both `release.sh` and
+`deploy/schema46/build-rollback-artifact.sh` stage their tooling from the single closure in
+[`release-closure.sh`](release-closure.sh), because `import-release.sh` sources
+`tooling/deploy/hostinger/release-artifact.sh` out of the artifact it is importing — an artifact
+that puts it anywhere else cannot be imported at all. Both builders assert that entrypoint is present
+before sealing a bundle. The schema46 rollback artifact is therefore imported by the ordinary
+`import-release.sh`, with no special handling and no manual rearrangement.
+
+### Selecting a release before a boundary
+
+The named schema boundaries read their release selection from `runtime.env`. Select it with the
+dedicated command rather than editing the file:
+
+```bash
+./deploy/hostinger/host.sh select-release <CANDIDATE_SHA> <ROLLBACK_SHA>
+./deploy/hostinger/host.sh show-release-selection
+```
+
+`select-release` verifies both imported artifacts — bundle inventory, manifest and image identity,
+capability marker, compiled schema ranges, and for schema46 the rollback artifact's old-behaviour
+base and patch evidence — and only then rewrites the release-selection keys by atomic rename. It
+starts nothing, stops nothing, migrates nothing and enables nothing. A schema46 candidate offered
+without its rollback artifact is refused, so the pair can never be half-selected. A refused selection
+leaves `runtime.env` byte-identical, and comments, unrelated variables, secrets and file mode are
+preserved. `show-release-selection` is read-only and prints no secret.
+
+The boundary still re-verifies every identity independently afterwards; selection does not relax any
+boundary gate.
 
 The schema-42 boundary additionally verifies that the complete deployed 3C-A artifact floor is still
 staged, proves media quiescence, and proves that no `media.enhancement_requested` outbox event or

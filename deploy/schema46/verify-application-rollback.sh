@@ -41,6 +41,19 @@
 #   and proven restore evidence remain mandatory before any production
 #   deployment, and are checked separately by the host wrapper.
 #
+# WHERE IT STOPS ON LESSON PREVIEW
+#
+#   This drill follows Lesson Preview only as far as the MASTER manifest. Its
+#   fixture does not upload HLS rendition playlists or segment objects to MinIO,
+#   so it deliberately does not fetch a rendition playlist and does not fetch or
+#   decode a segment.
+#
+#   That is a limit of THIS drill, not a gap in the release's coverage. Final G0
+#   separately verified browser E2E coverage for master manifest -> rendition
+#   manifest -> real segment and decoder configuration. Do not read the stopping
+#   point below as evidence that the rendition or segment path is untested; read
+#   it as this drill proving the leg it can prove honestly and claiming no more.
+#
 # ISOLATION
 #
 #   Its own Compose project, its own volumes, its own generated secrets, its own
@@ -392,7 +405,11 @@ candidate_smoke() {
     die "$label: the Lesson preview manifest is not an HLS playlist"
   printf '%s' "$HTTP_BODY" | grep -q 'renditions/' ||
     die "$label: the Lesson preview master names no renditions"
-  pass "$label new Lesson preview authorization and HLS manifest"
+  # The drill stops at the master. The fixture uploads no HLS rendition playlists
+  # or segments to MinIO, so following a `renditions/` URL from here would prove
+  # storage emptiness rather than delivery. Browser E2E covers master ->
+  # rendition -> segment and decoder configuration; see the header.
+  pass "$label new Lesson preview authorization and HLS master manifest (master only; see WHERE IT STOPS)"
 
   # The flag is consulted, not assumed: a Lesson that is not previewable is
   # refused even though it carries the same video.
