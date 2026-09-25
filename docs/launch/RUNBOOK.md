@@ -497,8 +497,29 @@ closed.
 | Prerequisite | one observed real 3C-B manual recovery in production |
 
 When the flag is false the reconciler is not started: no candidate query, no
-scheduler row, no outbox intent. Turning it off again stops scheduling; it does not
-delete state, and any intent already queued is superseded rather than executed.
+scheduler row, no outbox intent.
+
+**Turning it off also stops work that is already queued.** This is worth stating
+precisely, because an earlier revision of this runbook claimed it without the
+runtime doing it. Stopping the scheduler loop does not reach a task that was
+committed while the feature was enabled and is still sitting in Redis; that task
+used to arrive at a worker and execute normally — taking the media claim, writing
+a processing attempt and encoding — which is exactly what an operator switching
+the flag off is trying to prevent.
+
+A delivered automatic task is now refused before any operation identity is minted
+and long before a claim is possible. It takes no `work_claim_token`, writes no
+processing attempt, sets no `active_processing_attempt_kind`, encodes nothing,
+persists no rendition, and charges no automatic failure. Its intent is explicitly
+closed and the scheduler row becomes due immediately, so nothing is stranded and
+the acknowledged task can never become active later. Re-enabling the flag
+produces exactly one fresh intent on the next tick.
+
+The switch is targeted at AUTOMATIC recovery. **Admin `RetryEnhancements` is
+unaffected in both directions** — it remains available while the flag is false,
+which is what makes it the operator escape hatch.
+
+Turning the flag off deletes no state.
 
 ### What it does when enabled
 

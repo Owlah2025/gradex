@@ -186,6 +186,53 @@ func TestSchema45AutoEnhancementRecoveryRepresentation(t *testing.T) {
 			args: []any{versionID},
 		},
 		{
+			// MANUAL_PENDING must name the manual request doing the suppressing.
+			// An anonymous suppression could never be released by the work that
+			// caused it, and could never be told apart from a newer one.
+			name:       "MANUAL_PENDING without a manual identity is anonymous suppression",
+			constraint: "maer_manual_columns_coherent",
+			insert: `INSERT INTO media_auto_enhancement_recovery
+			   (asset_version_id, state, attempt_number)
+			 VALUES ($1::uuid, 'MANUAL_PENDING', 1)`,
+			args: []any{versionID},
+		},
+		{
+			name:       "MANUAL_PENDING without a deadline would suppress forever",
+			constraint: "maer_manual_columns_coherent",
+			insert: `INSERT INTO media_auto_enhancement_recovery
+			   (asset_version_id, state, attempt_number, manual_intent_id)
+			 VALUES ($1::uuid, 'MANUAL_PENDING', 1, gen_random_uuid())`,
+			args: []any{versionID},
+		},
+		{
+			// The manual columns belong to MANUAL_PENDING alone. A row that was
+			// both manually suppressed and due would be read as due.
+			name:       "a manual identity on a due row",
+			constraint: "maer_manual_columns_coherent",
+			insert: `INSERT INTO media_auto_enhancement_recovery
+			   (asset_version_id, state, attempt_number, next_attempt_at, manual_intent_id, manual_expires_at)
+			 VALUES ($1::uuid, 'BACKOFF', 1, now(), gen_random_uuid(), now() + interval '2 hours')`,
+			args: []any{versionID},
+		},
+		{
+			// An accepted manual request supersedes the automatic intent, so
+			// MANUAL_PENDING owns no automatic identity at all.
+			name:       "MANUAL_PENDING still naming an automatic intent",
+			constraint: "maer_state_coherent",
+			insert: `INSERT INTO media_auto_enhancement_recovery
+			   (asset_version_id, state, attempt_number, current_intent_id, manual_intent_id, manual_expires_at)
+			 VALUES ($1::uuid, 'MANUAL_PENDING', 1, gen_random_uuid(), gen_random_uuid(), now() + interval '2 hours')`,
+			args: []any{versionID},
+		},
+		{
+			name:       "MANUAL_PENDING with an automatic deadline would resume behind the operator",
+			constraint: "maer_state_coherent",
+			insert: `INSERT INTO media_auto_enhancement_recovery
+			   (asset_version_id, state, attempt_number, next_attempt_at, manual_intent_id, manual_expires_at)
+			 VALUES ($1::uuid, 'MANUAL_PENDING', 1, now(), gen_random_uuid(), now() + interval '2 hours')`,
+			args: []any{versionID},
+		},
+		{
 			name:       "a negative failure count",
 			constraint: "maer_counters_non_negative",
 			insert: `INSERT INTO media_auto_enhancement_recovery
