@@ -9,6 +9,8 @@ usage() {
 [ "$#" = 1 ] || usage
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../hostinger/release-closure.sh
+. "$ROOT/deploy/hostinger/release-closure.sh"
 OUTPUT_PARENT="$1"
 BASE=0fee657897c939cb679c9d804d184542bb2f692f
 PATCH="$ROOT/deploy/schema46/rollback-compat.patch"
@@ -45,11 +47,15 @@ done
 
 umask 077
 mkdir -p "$TOOLING"
-cp -R "$ROOT/deploy/hostinger" "$TOOLING/deploy"
-mkdir -p "$TOOLING/deploy/compose" "$TOOLING/deploy/monitoring" "$TOOLING/backend/internal/db/migrations"
-cp "$ROOT/deploy/compose/redis-server.ext" "$TOOLING/deploy/compose/"
-cp "$ROOT/deploy/monitoring/monitor-once.sh" "$TOOLING/deploy/monitoring/"
-cp "$ROOT"/backend/internal/db/migrations/004{5_auto_enhancement_recovery,6_lesson_public_preview}.{up,down}.sql "$TOOLING/backend/internal/db/migrations/"
+# The canonical release tooling closure, identical in shape to the forward
+# candidate's. This used to be `cp -R "$ROOT/deploy/hostinger" "$TOOLING/deploy"`,
+# which flattened `deploy/hostinger/*` onto `deploy/*` and produced an artifact
+# `import-release.sh` could not import: it sources
+# `tooling/deploy/hostinger/release-artifact.sh` out of the artifact itself. The
+# schema46 production release hit exactly that and had to stage the rollback
+# artifact by hand. One list, one layout, asserted before the bundle is sealed.
+stage_release_tooling "$ROOT" "$TOOLING"
+assert_release_tooling_importable "$TOOLING"
 printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1\n' "$ROLLBACK_SHA" >"$TOOLING/release-tooling.env"
 (cd "$TOOLING" && find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256)
 tar -czf "$ARTIFACT/deploy-bundle.tar.gz" -C "$TOOLING" --transform='s,^./,,' .

@@ -5,6 +5,7 @@ set -euo pipefail
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_RELEASE_DIR="$S12_ROOT/deploy/.state/hostinger/releases"
 . "$S12_ROOT/deploy/hostinger/release-artifact.sh"
+. "$S12_ROOT/deploy/hostinger/release-closure.sh"
 
 note() { printf 's12-hostinger-release: %s\n' "$*" >&2; }
 die() { note "$*"; exit 1; }
@@ -53,23 +54,11 @@ record_release() {
 package_tooling() {
   local revision="$1" release="$S12_RELEASE_DIR/$1" staging
   staging="$(mktemp -d)"
-  # Explicit runtime closure: host.sh sources backup/artifact helpers, invokes the
-  # monitor, prepares TLS/CORS, and resolves Compose's Caddy bind beside itself.
-  git -C "$S12_ROOT" archive "$revision" \
-    deploy/hostinger/host.sh deploy/hostinger/compose.yml deploy/hostinger/Caddyfile \
-    deploy/hostinger/backup-restic.sh deploy/hostinger/release-artifact.sh \
-    deploy/hostinger/r2-cors.json.template deploy/compose/redis-server.ext \
-    deploy/monitoring/monitor-once.sh deploy/scripts/verify-schema-41-rollback.sh \
-    deploy/scripts/verify-schema-42-rollback.sh \
-    backend/internal/db/migrations/0041_enhancement_recovery_foundation.up.sql \
-    backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql \
-    backend/internal/db/migrations/0042_active_processing_attempt_kind.up.sql \
-    backend/internal/db/migrations/0042_active_processing_attempt_kind.down.sql \
-    backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql \
-    backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql \
-    backend/internal/db/migrations/0046_lesson_public_preview.up.sql \
-    backend/internal/db/migrations/0046_lesson_public_preview.down.sql |
+  # The canonical closure lives in release-closure.sh so this builder and the
+  # schema46 rollback builder cannot drift into two different artifact layouts.
+  git -C "$S12_ROOT" archive "$revision" "${RELEASE_TOOLING_PATHS[@]}" |
     tar -xf - -C "$staging"
+  assert_release_tooling_importable "$staging" || die "candidate tooling is not importable"
   # One boundary capability marker per release, naming the only cutover this
   # candidate bundle may execute. Older imported artifacts retain their own
   # marker and the corresponding commands continue to reject this one.
