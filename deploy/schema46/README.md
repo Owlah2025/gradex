@@ -24,7 +24,7 @@ original `0fee657` artifact and must never be labelled as one.
 |---|---|
 | Base commit | `0fee657897c939cb679c9d804d184542bb2f692f` |
 | Patch | [`rollback-compat.patch`](rollback-compat.patch) |
-| Patch SHA-256 | `bdca30dd085889334bf937b4a7efdd9aa1181033d92e41cf407562acfd217eff` |
+| Patch SHA-256 | `b45bbb6db1dd75bc1ef70477573ba797d38afe062938b5e9b5b0f49f7ae03065` |
 | Supported schema range | **44 .. 46** |
 | Compatibility ceiling | schema 46 |
 | API readiness floor | schema 44 — **corrected from `0fee657`'s 43** |

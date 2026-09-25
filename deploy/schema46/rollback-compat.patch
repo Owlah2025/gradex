@@ -469,10 +469,10 @@ index 0000000..b1ed746
 +}
 diff --git a/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql b/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql
 new file mode 100644
-index 0000000..8efcf2d
+index 0000000..ef6eab0
 --- /dev/null
 +++ b/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,65 @@
 +-- Reverses the automatic enhancement recovery state.
 +--
 +-- Rolling back while an automatic intent is outstanding would drop the only
@@ -485,18 +485,48 @@ index 0000000..8efcf2d
 +-- would look untouched.
 +--
 +-- So this refuses while any intent is outstanding, matching the guard 0042
-+-- applies to active media work. BACKOFF and NEEDS_OPERATOR rows are not
-+-- outstanding work — nothing is queued for them — and they are discarded with the
-+-- table, which is honest: without the producer there is no automatic recovery to
-+-- schedule.
++-- applies to active media work. That guard now also covers MANUAL_PENDING: an
++-- accepted Admin RetryEnhancements request that has not yet executed is
++-- outstanding work, and dropping its suppression would let automatic scheduling
++-- resume behind an operator's back.
++--
++-- THIS DOWN IS NOT UNCONDITIONALLY SAFE, AND MUST NOT BE DESCRIBED AS SUCH.
++--
++-- The UP is additive, but that says nothing about the DOWN. Whenever scheduler
++-- rows exist, running this migration DESTROYS operational state that exists
++-- nowhere else:
++--
++--   * BACKOFF deadlines — every asset waiting to retry forgets that it was
++--     waiting, and its consecutive-failure budget resets to nothing.
++--   * NEEDS_OPERATOR verdicts — an asset an operator was told to look at becomes
++--     indistinguishable from one that was never attempted.
++--   * automatic scheduling decisions and attempt attribution — dropping
++--     processing_attempts.auto_recovery_intent_id loses which attempts were
++--     automatic and which intent produced them.
++--
++-- BACKOFF and NEEDS_OPERATOR rows are not refused, because nothing is queued for
++-- them and refusing would make the migration unrunnable rather than safe. They
++-- are discarded, and that discard is a real loss of evidence, not a no-op.
++--
++-- PRODUCTION ROLLBACK POSTURE
++--
++-- This is NOT the production rollback path for the schema 44 -> 46 release. The
++-- immediate rollback is to keep the database at clean schema 46 and roll the
++-- APPLICATION back to the schema-46-compatible old-behaviour artifact, whose
++-- truthful supported range is 44..46 (see deploy/schema46/). No database
++-- downgrade is involved, so none of the state above is lost.
++--
++-- Database restore, or an explicitly authorized future downgrade, is a separate
++-- recovery decision made with its own evidence. There is deliberately no generic
++-- production DOWN command and no automatic 46 -> 44 downgrade.
 +
 +DO $$
 +BEGIN
 +    IF EXISTS (
 +        SELECT 1 FROM media_auto_enhancement_recovery
-+         WHERE state IN ('SCHEDULED', 'EXECUTING')
++         WHERE state IN ('SCHEDULED', 'EXECUTING', 'MANUAL_PENDING')
 +    ) THEN
-+        RAISE EXCEPTION 'cannot roll back 0045: automatic enhancement recovery intents are outstanding; let them settle or clear them deliberately before rolling back';
++        RAISE EXCEPTION 'cannot roll back 0045: automatic enhancement recovery intents or accepted manual recovery requests are outstanding; let them settle or clear them deliberately before rolling back';
 +    END IF;
 +END $$;
 +
@@ -510,10 +540,10 @@ index 0000000..8efcf2d
 +DROP TABLE media_auto_enhancement_recovery;
 diff --git a/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql b/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql
 new file mode 100644
-index 0000000..f61bd1c
+index 0000000..aa59bf8
 --- /dev/null
 +++ b/backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,224 @@
 +-- Phase 3C-C / durable automatic enhancement recovery state.
 +--
 +-- 3C-B gave an Administrator one manual action to finish a PLAYABLE video whose
@@ -591,13 +621,45 @@ index 0000000..f61bd1c
 +    -- video_renditions, never against FFmpeg output.
 +    progress_rendition_count INT NOT NULL DEFAULT 0,
 +
++    -- MANUAL OVERRIDE SUPPRESSION.
++    --
++    -- The outbox event id of an ACCEPTED Admin RetryEnhancements request that has
++    -- not yet executed. NULL means no manual request is suppressing automatic
++    -- scheduling.
++    --
++    -- WHY THIS IS NOT INFERRED
++    --
++    -- An accepted manual request must suppress automatic scheduling the instant
++    -- its transaction commits, not later when the manual worker happens to take
++    -- the media claim. Between those two moments the scheduler could otherwise
++    -- mint a fresh automatic intent, and that automatic task could take the claim
++    -- first — so the operator's accepted action would lose to the machine it was
++    -- meant to override.
++    --
++    -- The window is real and unbounded: it spans outbox dispatch, queue latency
++    -- and worker scheduling. It cannot be closed with a sleep, a "recent manual
++    -- request" timestamp, or any assumption about ordering, so the suppression is
++    -- a committed relational fact written in the SAME transaction as the manual
++    -- media.enhancement_requested event. If that transaction rolls back, neither
++    -- the manual work nor the suppression exists.
++    manual_intent_id     UUID,
++
++    -- When the manual suppression stops being believable, so automatic recovery
++    -- cannot be blocked forever by a manual request whose task was lost.
++    --
++    -- Like intent_expires_at this is a deadline, not a licence: expiry alone does
++    -- not release the suppression. The manual event must ALSO carry a durable
++    -- media_outbox_dispatches receipt, because an undispatched manual event is
++    -- still owned by the outbox dispatcher and is going to run.
++    manual_expires_at    TIMESTAMPTZ,
++
 +    last_failure_category TEXT,
 +    last_outcome_at      TIMESTAMPTZ,
 +    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 +    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 +
 +    CONSTRAINT maer_state_valid CHECK (
-+        state IN ('SCHEDULED', 'EXECUTING', 'BACKOFF', 'NEEDS_OPERATOR')
++        state IN ('SCHEDULED', 'EXECUTING', 'BACKOFF', 'NEEDS_OPERATOR', 'MANUAL_PENDING')
 +    ),
 +    CONSTRAINT maer_counters_non_negative CHECK (
 +        consecutive_failures >= 0 AND attempt_number >= 0 AND progress_rendition_count >= 0
@@ -612,6 +674,18 @@ index 0000000..f61bd1c
 +    -- The state machine, enforced by the database rather than by Go. No code path
 +    -- may leave a row claiming to execute an operation it never bound, or
 +    -- claiming an intent is outstanding with nothing to identify it.
++    -- Manual suppression columns belong to MANUAL_PENDING and to no other state,
++    -- so no row can claim to be suppressed by a manual request while also
++    -- presenting itself to the scheduler as due.
++    CONSTRAINT maer_manual_columns_coherent CHECK (
++        (state = 'MANUAL_PENDING'
++            AND manual_intent_id IS NOT NULL
++            AND manual_expires_at IS NOT NULL)
++        OR (state <> 'MANUAL_PENDING'
++            AND manual_intent_id IS NULL
++            AND manual_expires_at IS NULL)
++    ),
++
 +    CONSTRAINT maer_state_coherent CHECK (
 +        (state = 'SCHEDULED'
 +            AND current_intent_id IS NOT NULL
@@ -628,6 +702,16 @@ index 0000000..f61bd1c
 +            AND intent_expires_at IS NULL
 +            AND next_attempt_at IS NOT NULL)
 +        OR (state = 'NEEDS_OPERATOR'
++            AND current_intent_id IS NULL
++            AND executing_operation_id IS NULL
++            AND intent_expires_at IS NULL
++            AND next_attempt_at IS NULL)
++        -- MANUAL_PENDING owns no automatic identity at all. An accepted manual
++        -- request supersedes any outstanding automatic intent, so there is
++        -- nothing left for the scheduler to execute or reconcile: no intent, no
++        -- bound operation, no lease, and no automatic deadline. The only live
++        -- deadline is the manual one.
++        OR (state = 'MANUAL_PENDING'
 +            AND current_intent_id IS NULL
 +            AND executing_operation_id IS NULL
 +            AND intent_expires_at IS NULL
@@ -656,6 +740,17 @@ index 0000000..f61bd1c
 +    ON media_auto_enhancement_recovery (intent_expires_at)
 +    WHERE state = 'SCHEDULED';
 +
++-- Releasing an abandoned manual suppression reads the same way.
++CREATE INDEX media_auto_enhancement_recovery_manual
++    ON media_auto_enhancement_recovery (manual_expires_at)
++    WHERE state = 'MANUAL_PENDING';
++
++COMMENT ON COLUMN media_auto_enhancement_recovery.manual_intent_id IS
++    'The outbox event id of an accepted Admin RetryEnhancements request that has not yet executed. Written in the same transaction as that event, so an accepted manual request suppresses automatic scheduling immediately rather than only once the manual worker takes the media claim.';
++
++COMMENT ON COLUMN media_auto_enhancement_recovery.manual_expires_at IS
++    'When the manual suppression stops being believable. Expiry alone does not release it: the manual event must also carry a media_outbox_dispatches receipt, because an undispatched manual event is still owned by the outbox dispatcher.';
++
 +-- Terminal attribution, nullable on purpose.
 +--
 +-- Every processing attempt that exists before schema 45 was either a manual
@@ -675,18 +770,33 @@ index 0000000..f61bd1c
 +    'The automatic recovery intent this attempt executed, or NULL when the attempt was manual, automatic-transcode, or predates schema 45. Retained after the scheduler row is deleted, which is why it is not a foreign key.';
 diff --git a/backend/internal/db/migrations/0046_lesson_public_preview.down.sql b/backend/internal/db/migrations/0046_lesson_public_preview.down.sql
 new file mode 100644
-index 0000000..0ad4b3b
+index 0000000..7dd8ca2
 --- /dev/null
 +++ b/backend/internal/db/migrations/0046_lesson_public_preview.down.sql
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,33 @@
 +-- Reverses the revision-scoped Lesson public preview intent.
 +--
-+-- This is safe to run unconditionally, which is unusual here and worth stating.
++-- This runs unconditionally, but it is NOT free, and must not be described as
++-- unconditionally safe merely because the UP was additive.
++--
 +-- The column is pure authorization metadata: it owns no media, no storage object,
 +-- no rendition, and no Student access. Dropping it withdraws public preview from
 +-- every Lesson that had it, which is a fail-closed loss of exposure rather than a
 +-- loss of anything a Student, an Instructor, or an Administrator paid for or
-+-- created. Nothing becomes unrepresentable and no live entitlement is affected.
++-- created. No live entitlement is affected.
++--
++-- What IS lost is authoring intent: which Lessons an Instructor deliberately
++-- chose to make publicly previewable. That choice exists nowhere else, so it
++-- cannot be reconstructed after the drop and would have to be made again by hand.
++--
++-- PRODUCTION ROLLBACK POSTURE
++--
++-- This is not the production rollback path for the schema 44 -> 46 release. The
++-- immediate rollback keeps the database at clean schema 46 and rolls the
++-- APPLICATION back to the schema-46-compatible old-behaviour artifact, which
++-- simply does not read this column. Nothing is dropped and no authoring intent is
++-- lost. Database restore, or an explicitly authorized future downgrade, is a
++-- separate recovery decision.
 +--
 +-- The legacy preview pointer and every PREVIEW asset are untouched, so a Course
 +-- that also has a legacy course-level preview simply continues serving it — which

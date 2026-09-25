@@ -64,7 +64,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # The running production revision this artifact's behaviour is derived from.
 BASE=0fee657897c939cb679c9d804d184542bb2f692f
 PATCH="$ROOT/deploy/schema46/rollback-compat.patch"
-PATCH_SHA256=bdca30dd085889334bf937b4a7efdd9aa1181033d92e41cf407562acfd217eff
+PATCH_SHA256=b45bbb6db1dd75bc1ef70477573ba797d38afe062938b5e9b5b0f49f7ae03065
 
 ADMIN_DSN="postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
 PROBE_DB=gradex_schema46_rollback_compat
