@@ -7,6 +7,7 @@ import type { AcademicSubjectSelection } from "./academic-subject-picker";
 import { AcademicCourseContextPanel } from "./academic-course-context";
 import { LessonVideoUpload } from "./lesson-video-upload";
 import { PublicPreviewUpload } from "./public-preview-upload";
+import { LessonPreviewGuidance } from "./lesson-preview-guidance";
 import { LessonResourceUpload } from "./lesson-resource-upload";
 import { ChangeRequestNotice } from "./change-request-notice";
 import { editsPublishedCourse, publicationMode, revisionWorkflow } from "./revision-workflow";
@@ -985,18 +986,29 @@ export function CourseBuilder() {
                           setThumbnailBlocked((current) => ({ ...current, [revision.id!]: blocked }))
                         }
                       />
-                      {/* The public preview is the Course's own trailer and is uploaded here. A
-                          Lesson video is a different act, on a different object, inside the
-                          curriculum — the two are never offered by the same control. */}
-                      <PublicPreviewUpload
-                        courseID={selectedCourse.id}
-                        revisionID={revision.id}
-                        hasPreview={Boolean(revision.preview_asset_version_id)}
-                        previewAssetVersionID={revision.preview_asset_version_id}
-                        previewAssetState={revision.preview_asset_state}
-                        locale={locale}
-                        onChanged={refreshSelectedCourse}
-                      />
+                      {/* Public preview is a LESSON permission now, so this section teaches that
+                          workflow first and the separate course-level upload is no longer the
+                          normal way to create a preview.
+
+                          The old uploader is not deleted, and neither is any preview it produced —
+                          a revision that already points at one keeps managing it below, clearly
+                          labelled as the legacy surface. But a revision with no legacy preview is
+                          never offered it: showing both as peers would teach the architecture the
+                          product is moving away from, and every new preview created through it
+                          would be more legacy data to carry. */}
+                      <LessonPreviewGuidance copy={instructor.media.preview} />
+                      {revision.preview_asset_version_id ? (
+                        <PublicPreviewUpload
+                          courseID={selectedCourse.id}
+                          revisionID={revision.id}
+                          hasPreview
+                          legacy
+                          previewAssetVersionID={revision.preview_asset_version_id}
+                          previewAssetState={revision.preview_asset_state}
+                          locale={locale}
+                          onChanged={refreshSelectedCourse}
+                        />
+                      ) : null}
                       <AuthoringContinue section="PREVIEW" label={authoring.continueAction} />
                     </div>
                   ),

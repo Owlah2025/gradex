@@ -36,6 +36,16 @@ type PublicPreviewUploadProps = {
   courseID: string;
   revisionID: string;
   hasPreview: boolean;
+  /**
+   * Render as the retained compatibility surface rather than as the way to
+   * create a preview.
+   *
+   * Public preview is a Lesson permission now. This control is kept so a course
+   * that already has a separate course-level preview can still manage or remove
+   * it, and it is only mounted for such a course — so `legacy` is not a styling
+   * variant, it is what this surface has become.
+   */
+  legacy?: boolean;
   previewAssetVersionID?: string;
   previewAssetState?: string;
   locale: "ar" | "en";
@@ -59,6 +69,7 @@ export function PublicPreviewUpload({
   courseID,
   revisionID,
   hasPreview,
+  legacy = false,
   previewAssetVersionID,
   previewAssetState,
   locale,
@@ -230,13 +241,20 @@ export function PublicPreviewUpload({
   return (
     <section
       data-testid="public-preview-authoring"
+      data-legacy={legacy ? "true" : "false"}
       className="rounded-lg border border-border bg-card p-4"
       aria-labelledby="public-preview-title"
     >
       <h3 id="public-preview-title" className="font-display text-base font-bold text-foreground">
-        {t.title}
+        {legacy ? t.legacyTitle : t.title}
       </h3>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.description}</p>
+      {/* The legacy wording is explicit rather than tactful. An Instructor who
+          sees "Public preview" beside a lesson-preview panel has to guess which
+          one is current; "Legacy course preview", plus a line saying new previews
+          belong on lessons, does not require guessing. */}
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        {legacy ? t.legacyDescription : t.description}
+      </p>
       <p
         data-testid="public-preview-state"
         data-preview-attached={hasPreview ? "true" : "false"}

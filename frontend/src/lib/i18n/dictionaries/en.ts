@@ -2107,6 +2107,24 @@ export const en = {
         ready: "Public preview is ready for review.",
         removed: "The public preview was removed from this revision.",
         failed: "The public preview could not be updated. Try again.",
+        /**
+         * The transition copy.
+         *
+         * Public preview is now a Lesson permission: an Instructor chooses which lessons visitors
+         * may watch, in the curriculum, beside the lesson itself. The separate course-level upload
+         * below predates that and is kept only so existing courses keep working.
+         *
+         * So the two surfaces are not peers. A course with no separate preview is taught the
+         * lesson-based workflow and is never offered the old uploader; a course that already has
+         * one keeps managing it, under a label that says plainly what it is.
+         */
+        lessonFirstTitle: "Lesson previews",
+        lessonFirstDescription:
+          "Choose which lessons visitors can preview from the Curriculum. Open a lesson and turn on \u201cOffer as a free preview\u201d \u2014 visitors watch it on the course page before buying.",
+        lessonFirstAction: "Go to Curriculum",
+        legacyTitle: "Legacy course preview",
+        legacyDescription:
+          "This separate preview is kept for existing courses. New previews should be enabled on individual lessons in the Curriculum.",
       },
     },
     /**
