@@ -33,6 +33,25 @@ import { ProtectedHLSPlayer } from "@/components/media/protected-hls-player";
  *
  * Nothing is requested on render. A visitor who scrolls past a course with six
  * free lessons mints no capability at all; the request happens on activation.
+ *
+ * # EXPIRY IS NOT REFRESHED MID-STREAM, ON PURPOSE
+ *
+ * An anonymous preview authorization is capped at two hours absolutely, and that
+ * cap is a security limit rather than a tuning value: the token is a shared
+ * bearer capability with no Student, no device and no revocable lease behind it.
+ * A Lesson longer than the cap is therefore NOT given a longer token.
+ *
+ * Such a preview expires while the player is still open, and the stream stops.
+ * Recovery is deliberately the ordinary path: closing and re-opening the preview
+ * calls `open()` again, which mints a completely fresh authorization after the
+ * server re-proves every condition from scratch. Nothing is cached across that
+ * boundary, so a Lesson whose preview flag was withdrawn in the meantime does not
+ * resume.
+ *
+ * A silent mid-stream refresh is not implemented here. It would mean renewing a
+ * bearer capability without the visitor asking, and the only thing it buys is
+ * uninterrupted playback of previews beyond two hours — which is precisely the
+ * case the cap exists to bound.
  */
 export function LessonPreview({
   courseID,

@@ -65,6 +65,16 @@ const lessonPreviewDomain = "gradex:s4:lesson-public-preview:v1\x00"
 // duration, clamped here — the same rule protected playback uses, because an HLS
 // rendition manifest mints every segment URL up front and a fixed short expiry
 // would break a long Lesson while the player was still open.
+//
+// THIS CAP IS ABSOLUTE.
+//
+// No configuration value and no branch may produce an anonymous authorization
+// that outlives it; lessonPreviewLifetime funnels every path through one clamp.
+// A Lesson longer than two hours is NOT given a longer token — the security
+// limit is not weakened to fit the content. Such a preview expires mid-playback,
+// and the viewer re-opens the preview to obtain a fresh authorization, which is
+// an ordinary re-request of a still-public capability rather than an escalation.
+// Raising this constant is a security decision, not a tuning one.
 const maxLessonPreviewLifetime = 2 * time.Hour
 
 // LessonPreviewRequest names the Lesson an anonymous visitor asked to preview.
@@ -267,14 +277,45 @@ func (s *DeliveryService) loadLessonPreviewTarget(
 	return target, revisionID, nil
 }
 
-// lessonPreviewLifetime is the measured-duration rule, clamped to the anonymous
-// preview ceiling rather than the Student one.
+// lessonPreviewLifetime is the measured-duration rule under ONE final clamp to
+// the anonymous preview ceiling.
+//
+// The clamp is applied to every return path, deliberately, because the previous
+// shape did not clamp all of them and the 2-hour cap was therefore not absolute:
+//
+//   - an unknown or non-positive trusted duration returned the configured grace
+//     verbatim, so a deployment configuring a signature grace above two hours
+//     minted anonymous tokens above the cap. Configuration must not be able to
+//     raise a security limit;
+//   - a trusted duration ABOVE two hours took that same early return and got
+//     only the grace — a three-hour Lesson received a shorter token than a
+//     ninety-minute one, which is backwards. Such a Lesson now receives the full
+//     ceiling, which is the most this capability is ever allowed to grant.
+//
+// Every value this returns is in (0, maxLessonPreviewLifetime]. Nothing below
+// may widen it, and no caller may add to it.
 func lessonPreviewLifetime(grace time.Duration, durationMS int64) time.Duration {
-	if durationMS <= 0 || durationMS > int64(maxLessonPreviewLifetime/time.Millisecond) {
-		return grace
+	if grace < 0 {
+		grace = 0
 	}
-	lifetime := grace + time.Duration(durationMS)*time.Millisecond
-	if lifetime <= 0 || lifetime > maxLessonPreviewLifetime {
+	lifetime := grace
+	if durationMS > 0 {
+		measured := time.Duration(durationMS) * time.Millisecond
+		// Guard the multiplication itself: a duration large enough to overflow
+		// time.Duration would otherwise wrap to a negative or small value and
+		// slip past a naive upper-bound check.
+		if measured <= 0 || measured > maxLessonPreviewLifetime {
+			return maxLessonPreviewLifetime
+		}
+		lifetime = grace + measured
+	}
+	return clampLessonPreviewLifetime(lifetime)
+}
+
+// clampLessonPreviewLifetime is the single place the anonymous preview ceiling
+// is enforced. Every issued anonymous authorization passes through it.
+func clampLessonPreviewLifetime(lifetime time.Duration) time.Duration {
+	if lifetime > maxLessonPreviewLifetime || lifetime <= 0 {
 		return maxLessonPreviewLifetime
 	}
 	return lifetime

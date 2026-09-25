@@ -578,9 +578,20 @@ func TestLessonPreviewTTLIsBoundedByTheMeasuredDuration(t *testing.T) {
 		t.Fatalf("anonymous preview inherited the Student ceiling: %s", issued.ExpiresAt.Sub(f.now))
 	}
 
-	// An absurd declared duration is clamped rather than trusted.
-	if got := lessonPreviewLifetime(5*time.Minute, int64(24*time.Hour/time.Millisecond)); got != 5*time.Minute {
-		t.Fatalf("clamped lifetime = %s, want the grace alone", got)
+	// An absurd declared duration is clamped to the ceiling rather than trusted.
+	//
+	// This previously expected the grace alone, which encoded the G1-3 defect: a
+	// duration above the cap took an early return that skipped the clamp, so a
+	// 24-hour claim produced a SHORTER token than a 90-minute one, and a grace
+	// configured above two hours escaped the cap entirely. A duration beyond the
+	// cap now receives exactly the cap, which is the most this capability may
+	// ever grant.
+	if got := lessonPreviewLifetime(5*time.Minute, int64(24*time.Hour/time.Millisecond)); got != maxLessonPreviewLifetime {
+		t.Fatalf("clamped lifetime = %s, want the absolute ceiling %s", got, maxLessonPreviewLifetime)
+	}
+	// Configuration must never be able to raise a security limit.
+	if got := lessonPreviewLifetime(3*time.Hour, 0); got != maxLessonPreviewLifetime {
+		t.Fatalf("a grace above the cap produced %s, want %s", got, maxLessonPreviewLifetime)
 	}
 	if got := lessonPreviewLifetime(5*time.Minute, int64(maxLessonPreviewLifetime/time.Millisecond)-1); got != maxLessonPreviewLifetime {
 		t.Fatalf("ceiling lifetime = %s, want %s", got, maxLessonPreviewLifetime)
