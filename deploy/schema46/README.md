@@ -24,7 +24,7 @@ original `0fee657` artifact and must never be labelled as one.
 |---|---|
 | Base commit | `0fee657897c939cb679c9d804d184542bb2f692f` |
 | Patch | [`rollback-compat.patch`](rollback-compat.patch) |
-| Patch SHA-256 | `b45bbb6db1dd75bc1ef70477573ba797d38afe062938b5e9b5b0f49f7ae03065` |
+| Patch SHA-256 | `f2d3c6bb0294c4b5982c035529b0341d8c5b1fc346ad85a80765d5e73d1405b3` |
 | Supported schema range | **44 .. 46** |
 | Compatibility ceiling | schema 46 |
 | API readiness floor | schema 44 — **corrected from `0fee657`'s 43** |
@@ -41,6 +41,7 @@ The patch changes nine files and nothing else:
 - `internal/db/schema_test.go` — the assertions for them;
 - `cmd/api/main.go` — the corrected readiness floor;
 - `cmd/api/main_test.go` — the floor assertion, corrected and extended;
+- `cmd/migrate/main.go` — the compiled `schema-range` release-selection command;
 - `cmd/schema46-rollback-probe/main.go` — new, integration-tagged.
 
 ### The API readiness floor is 44, not 43
@@ -127,6 +128,7 @@ covers:
 It also migrates a second disposable database to clean schema 43 and proves the
 artifact **refuses** it, which is the negative half of the 44..46 range claim.
 
+It also proves the rollback image's compiled `schema-range` output is `44 46`.
 It creates and drops two disposable databases and touches nothing else.
 
 ## What this is not
@@ -138,3 +140,12 @@ nothing about data recovery.
 
 It has also not been built as an image, imported, or deployed. Nothing in this
 directory has run against production.
+
+## Immutable local artifact
+
+`build-rollback-artifact.sh OUTPUT_PARENT` reproduces the base-plus-patch tree,
+builds backend, proof, and frontend images under a derived release identity, and
+writes checksummed image and manifest metadata. The identity is derived from the
+base SHA and patch SHA, so it can never be confused with either `0fee657` or the
+forward candidate. This is a local staging operation only; importing that
+artifact to a production host remains a later, reviewed release action.

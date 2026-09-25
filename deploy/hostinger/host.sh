@@ -371,7 +371,7 @@ wait_for_completion() {
 start_core() {
   local boundary="${1:-}"
   case "$boundary" in
-    ''|schema-41-foundation|schema-42-enhancement-recovery) ;;
+    ''|schema-41-foundation|schema-42-enhancement-recovery|schema-46-media-preview) ;;
     *) die "unknown application tier boundary $boundary" ;;
   esac
   if [ -n "$boundary" ]; then
@@ -386,6 +386,13 @@ start_core() {
         # application this release can roll back to, and it cannot be rebuilt here.
         require_schema41_application_floor
         ;;
+      schema-46-media-preview)
+        require_schema46_release_identity
+        require_schema46_backup_restore_evidence
+        require_schema46_rollback_floor
+        [ "${MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED:-false}" = false ] ||
+          die "schema46 release requires MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED=false"
+        ;;
     esac
     require_absent api
     require_absent worker
@@ -395,14 +402,27 @@ start_core() {
   compose up --detach postgres redis
   wait_for_status postgres healthy
   wait_for_status redis healthy
-  if [ "$boundary" = schema-42-enhancement-recovery ]; then
+  if [ "$boundary" = schema-42-enhancement-recovery ] || [ "$boundary" = schema-46-media-preview ]; then
     # Removing the api and worker containers proves the known producers are gone;
     # this proves no work was left claimed behind them.
     require_no_active_media_claims
-    require_schema_clean_at 41
+    if [ "$boundary" = schema-42-enhancement-recovery ]; then
+      require_schema_clean_at 41
+    else
+      require_schema_clean_at 44
+    fi
   fi
-  compose up --detach migrate
-  wait_for_completion migrate
+  if [ "$boundary" = schema-46-media-preview ]; then
+    compose run --rm --no-deps migrate gradex-migrate up-schema-45 ||
+      die "0045 did not complete; inspect the truthful schema marker and do not start an application"
+    require_schema_clean_at 45
+    compose run --rm --no-deps migrate gradex-migrate up-schema-46 ||
+      die "0046 did not complete; inspect the truthful schema marker and do not start an application"
+    require_schema_clean_at 46
+  else
+    compose up --detach migrate
+    wait_for_completion migrate
+  fi
   if [ "$boundary" = schema-42-enhancement-recovery ]; then
     # G2 sequencing: the API is not started until schema 42 is verified clean, so
     # no manual enhancement intent can be written before a worker exists that can
@@ -1324,7 +1344,7 @@ apply_release() {
   require_tools
   load_environment
   local manifest="$1" release backend frontend proof postgres_id state provenance image
-  local schema_version schema_dirty target_max_schema
+  local schema_version schema_dirty target_min_schema target_max_schema
   [ -f "$manifest" ] || die "release manifest is absent"
   release="$(manifest_value "$manifest" GRADEX_RELEASE_SHA)"
   backend="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)"
@@ -1347,7 +1367,9 @@ apply_release() {
   [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $state"
   [ "$schema_dirty" = false ] || die "schema is dirty: $state"
 
-  target_max_schema="$(image_max_schema_version "$backend")"
+  read -r target_min_schema target_max_schema <<<"$(image_schema_range "$backend")"
+  [ "$schema_version" -ge "$target_min_schema" ] ||
+    die "schema $schema_version is older than target release minimum $target_min_schema"
   [ "$schema_version" -le "$target_max_schema" ] ||
     die "schema $schema_version is newer than target release maximum $target_max_schema"
   provenance="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
@@ -1361,7 +1383,7 @@ apply_release() {
     --tuples-only --no-align --command "SELECT count(*) FROM entitlements WHERE source_invitation_id IS NOT NULL;")" = "$provenance" ] ||
     die "Entitlement provenance changed during application release selection"
   persist_release_selection "$release" "$backend" "$frontend" "$proof"
-  note "application release $release is healthy on unchanged schema $schema_version (target max $target_max_schema) and provenance"
+  note "application release $release is healthy on unchanged schema $schema_version (target range $target_min_schema..$target_max_schema) and provenance"
 }
 
 
@@ -1403,6 +1425,7 @@ require_production_migration_target() {
 
 require_schema41_production_target() { require_production_migration_target "schema 41 foundation"; }
 require_schema42_production_target() { require_production_migration_target "schema 42 enhancement recovery"; }
+require_schema46_production_target() { require_production_migration_target "schema 46 media preview"; }
 
 # runtime.env selects the release; the imported manifest binds the images and
 # checksummed tooling. No production Git metadata or history is needed.
@@ -1423,6 +1446,57 @@ require_schema42_release_identity() {
   [ "$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")" = 42 ] ||
     die "selected backend image must target schema 42"
   require_schema42_image_capability
+}
+
+require_schema46_release_identity() {
+  require_schema46_production_target
+  require_release_artifact "$SCHEMA46_BUNDLE_CAPABILITY"
+  require_schema46_image_capability
+}
+
+require_schema46_backup_restore_evidence() {
+  local snapshot restored_schema restored_source completed now
+  snapshot="$(cat "$S12_BACKUP_DIR/latest.offsite.snapshot" 2>/dev/null)" || die "fresh schema44 backup evidence is absent"
+  restored_schema="$(cat "$S12_RESTORED_SCHEMA_STATE_FILE" 2>/dev/null)" || die "schema44 restore evidence is absent"
+  restored_source="$(cat "$S12_RESTORED_SOURCE_FILE" 2>/dev/null)" || die "restore snapshot identity is absent"
+  completed="$(cat "$S12_BACKUP_DIR/latest.completed-at" 2>/dev/null)" || die "backup completion evidence is absent"
+  [[ "$snapshot" =~ ^[0-9a-f]{64}$ && "$restored_source" = "$snapshot" ]] || die "backup and restore evidence do not name the same snapshot"
+  [ "$restored_schema" = '44|false' ] || die "restore evidence is not clean schema44"
+  [[ "$completed" =~ ^[0-9]+$ ]] || die "backup completion evidence is invalid"
+  now="$(date +%s)"
+  [ $((now - completed)) -le "${GRADEX_BACKUP_MAX_AGE_SECONDS:-7200}" ] || die "schema44 backup evidence is stale"
+}
+
+require_schema46_rollback_floor() {
+  local floor="${GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA:-}" release patch_hash
+  [[ "$floor" =~ ^[0-9a-f]{40}$ ]] || die "GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA is required"
+  [ "$floor" != "$GRADEX_RELEASE_SHA" ] || die "schema46 rollback artifact cannot be the forward candidate"
+  release="$S12_HOST_STATE_DIR/releases/$floor"
+  [ -d "$release" ] || die "schema46 rollback artifact is not imported"
+  verify_release_bundle "$release" "$floor"
+  verify_release_images "$release/release.env" "$floor"
+  require_image_schema_range "$(artifact_value "$release/release.env" GRADEX_BACKEND_IMAGE)" 44 46
+  [ -f "$release/schema46-rollback-compat.sha256" ] || die "schema46 rollback patch verification evidence is absent"
+  patch_hash="$(artifact_value "$release/release.env" GRADEX_SCHEMA46_ROLLBACK_PATCH_SHA256)"
+  [[ "$patch_hash" =~ ^[0-9a-f]{64}$ ]] || die "schema46 rollback patch hash is invalid"
+  [ "$(awk '{print $1}' "$release/schema46-rollback-compat.sha256")" = "$patch_hash" ] ||
+    die "schema46 rollback patch verification evidence disagrees with its manifest"
+  [ "$(artifact_value "$release/release.env" GRADEX_SCHEMA46_ROLLBACK_BASE_SHA)" = 0fee657897c939cb679c9d804d184542bb2f692f ] ||
+    die "schema46 rollback artifact has an unexpected old-behaviour base"
+}
+
+# Application rollback only. The schema stays clean at 46; selecting the old
+# behaviour artifact is safe because its compiled range is verified above.
+rollback_schema46_application() {
+  require_tools
+  load_environment
+  validate_environment
+  require_schema46_production_target
+  require_schema_clean_at 46
+  require_schema46_rollback_floor
+  apply_release "$S12_HOST_STATE_DIR/releases/$GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA/release.env"
+  require_schema_clean_at 46
+  note "schema46 application rollback completed without a database migration"
 }
 
 # PostgreSQL is the authority on the marker. The migration commands check it too;
@@ -1553,7 +1627,7 @@ rollback_schema_42_enhancement_recovery() {
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-core-schema-42-enhancement-recovery|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|rollback-schema-42-enhancement-recovery|enhancement-drain|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-core-schema-42-enhancement-recovery|up-core-schema-46-media-preview|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|rollback-schema-42-enhancement-recovery|rollback-schema46-application|enhancement-drain|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1563,6 +1637,7 @@ case "${1:-}" in
   up-core) [ "$#" = 1 ] || usage; start_core ;;
   up-core-schema-41-foundation) [ "$#" = 1 ] || usage; start_core schema-41-foundation ;;
   up-core-schema-42-enhancement-recovery) [ "$#" = 1 ] || usage; start_core schema-42-enhancement-recovery ;;
+  up-core-schema-46-media-preview) [ "$#" = 1 ] || usage; start_core schema-46-media-preview ;;
   up-edge) [ "$#" = 1 ] || usage; start_edge ;;
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
   verify-core) [ "$#" = 1 ] || usage; verify_core ;;
@@ -1579,6 +1654,7 @@ case "${1:-}" in
   apply-release) shift; apply_release "$@" ;;
   rollback-schema-41-foundation) [ "$#" = 1 ] || usage; rollback_schema_41_foundation ;;
   rollback-schema-42-enhancement-recovery) [ "$#" = 1 ] || usage; rollback_schema_42_enhancement_recovery ;;
+  rollback-schema46-application) [ "$#" = 1 ] || usage; rollback_schema46_application ;;
   # The drain proof on its own, so an operator can read the real counts before
   # committing to a rollback window. Read-only; it deletes nothing.
   enhancement-drain) [ "$#" = 1 ] || usage; require_tools; load_environment; validate_environment; require_status postgres healthy; require_status redis healthy; require_enhancement_drain ;;

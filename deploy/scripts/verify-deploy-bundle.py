@@ -44,7 +44,8 @@ elif a[0] == "run":
     elif entry == "test":
         # The read-only enhancement drain proof must exist in the same image.
         sys.exit(1 if c.get("no_drain") else 0)
-    elif a[-1] == "max-version": print(c.get("ceilings", {}).get(image, c.get("ceiling", "42")))
+    elif a[-1] == "max-version": print(c.get("ceilings", {}).get(image, c.get("ceiling", "46")))
+    elif a[-1] == "schema-range": print(c.get("ranges", {}).get(image, c.get("range", "44 46")))
     else:
         commands = ["up", "down", "version", "max-version"]
         if not c.get("old"): commands.append("rollback-schema-41")
@@ -79,7 +80,7 @@ elif a[0] == "compose":
     elif "up" in a:
         for service in a[a.index("up")+1:]:
             if not service.startswith("-"): (fixture / ("started-"+service)).touch()
-        if "migrate" in a: state_file.write_text(c.get("schema_state_after_up", "42|false"))
+        if "migrate" in a: state_file.write_text(c.get("schema_state_after_up", "46|false"))
     elif "run" in a:
         if "gradex-enhancement-drain" in a:
             if c.get("pending_enhancement"): sys.exit(1)
@@ -90,6 +91,10 @@ elif a[0] == "compose":
         elif "rollback-schema-41" in a:
             assert "-confirm-production=schema-41-to-40" in a, a
             state_file.write_text("40|false")
+        elif "up-schema-45" in a:
+            state_file.write_text(c.get("schema_state_after_45", "45|false"))
+        elif "up-schema-46" in a:
+            state_file.write_text(c.get("schema_state_after_46", "46|false"))
 elif a[0] != "info": raise RuntimeError(a)
 '''
 
@@ -154,6 +159,38 @@ def stage_application_floor(state, tooling, fixture):
     run(["chmod", "-R", "a-w", str(destination)])
     return {"revisions": {image: FLOOR_SHA for image in images.values()},
             "ceilings": {images["BACKEND"]: "41"}}
+
+
+def stage_schema46_rollback_artifact(state, tooling, fixture):
+    """Stage a distinct old-behaviour artifact for the schema46 boundary."""
+    base = "0fee657897c939cb679c9d804d184542bb2f692f"
+    patch = hashlib.sha256(b"schema46-rollback-compat").hexdigest()
+    release = hashlib.sha256((base + patch).encode()).hexdigest()[:40]
+    staging = fixture / "schema46-rollback-staging"
+    shutil.copytree(tooling, staging)
+    run(["chmod", "-R", "u+w", str(staging)])
+    (staging / "release-tooling.env").write_text(
+        f"RELEASE_SHA={release}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1\n")
+    (staging / "tooling.sha256").unlink()
+    run(["bash", "-c", "find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256"], cwd=staging)
+    destination = state / "releases" / release
+    destination.mkdir(parents=True)
+    run(["tar", "-czf", str(destination / "deploy-bundle.tar.gz"), "-C", str(staging), "--transform", "s,^./,,", "."])
+    digest = hashlib.sha256((destination / "deploy-bundle.tar.gz").read_bytes()).hexdigest()
+    (destination / "deploy-bundle.tar.gz.sha256").write_text(f"{digest}  deploy-bundle.tar.gz\n")
+    (destination / "images.tar.gz").write_bytes(b"schema46 rollback images\n")
+    (destination / "images.tar.gz.sha256").write_text(f"{hashlib.sha256((destination / 'images.tar.gz').read_bytes()).hexdigest()}  images.tar.gz\n")
+    (destination / "tooling").mkdir()
+    run(["tar", "-xzf", str(destination / "deploy-bundle.tar.gz"), "-C", str(destination / "tooling")])
+    images = {role: f"gradex-{'backend-proof' if role == 'PROOF' else role.lower()}:schema46-rollback-{release[:12]}" for role in ("BACKEND", "FRONTEND", "PROOF")}
+    lines = [f"GRADEX_RELEASE_SHA={release}", f"GRADEX_SCHEMA46_ROLLBACK_BASE_SHA={base}", f"GRADEX_SCHEMA46_ROLLBACK_PATCH_SHA256={patch}", "GRADEX_SCHEMA_MIN_VERSION=44", "GRADEX_SCHEMA_MAX_VERSION=46"]
+    for role, image in images.items(): lines.append(f"GRADEX_{role}_IMAGE={image}")
+    for role, image in images.items(): lines.append(f"GRADEX_{role}_IMAGE_ID=sha256:{hashlib.sha256(image.encode()).hexdigest()}")
+    lines.append(f"GRADEX_DEPLOY_BUNDLE_SHA256={digest}")
+    (destination / "release.env").write_text("\n".join(lines) + "\n")
+    (destination / "schema46-rollback-compat.sha256").write_text(f"{patch}  rollback-compat.patch\n")
+    run(["chmod", "-R", "a-w", str(destination)])
+    return release, {"revisions": {image: release for image in images.values()}, "ranges": {images["BACKEND"]: "44 46"}, "ceilings": {images["BACKEND"]: "46"}}
 
 
 def main():
@@ -264,6 +301,16 @@ def main():
         # until the floor is present.
         floor = stage_application_floor(state, tooling, fixture)
         config = {**config, "revisions": floor["revisions"], "ceilings": floor["ceilings"]}
+        rollback_sha, rollback_images = stage_schema46_rollback_artifact(state, tooling, fixture)
+        config = {**config, **rollback_images}
+        values["GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA"] = rollback_sha
+        backup_dir = state / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        snapshot = "a" * 64
+        (backup_dir / "latest.offsite.snapshot").write_text(snapshot + "\n")
+        (backup_dir / "latest.completed-at").write_text(str(int(__import__("time").time())) + "\n")
+        (backup_dir / "restored-source").write_text(snapshot + "\n")
+        (backup_dir / "restored-schema-state").write_text("44|false\n")
 
         def host(command, overrides=None, configuration=None):
             for started in fixture.glob("started-*"):
@@ -282,6 +329,41 @@ def main():
             assert not (fixture / "GIT_CALLED").exists(), "production wrapper called Git"
             calls = [json.loads(line) for line in (fixture / "docker.log").read_text().splitlines()]
             return result, calls
+
+        # Schema46 uses two independently immutable artifacts. The release
+        # wrapper runs only from extracted candidate tooling and sees no Git.
+        schema46 = "up-core-schema-46-media-preview"
+        result, calls = host(schema46, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode == 0, result.stderr
+        runs = [call for call in calls if call[0] == "compose" and "run" in call]
+        assert any("up-schema-45" in call for call in runs), runs
+        assert any("up-schema-46" in call for call in runs), runs
+
+        result, calls = host("rollback-schema46-application", configuration={**config, "schema_state": "46|false"})
+        assert result.returncode == 0, result.stderr
+        assert any(call[0] == "compose" and "api" in call and "--force-recreate" in call for call in calls), calls
+
+        # Exact marker, capability, backup/restore identity, auto-off and both
+        # compiled ranges are pre-mutation gates. Every failure occurs before a
+        # migration container is run.
+        for mutation in (
+            {"schema_state": "43|false"}, {"schema_state": "44|true"},
+            {"schema_state": "45|false"}, {"schema_state": "46|false"},
+            {"range": "45 46"}, {"range": "44 45"},
+            {"ranges": {next(iter(rollback_images["ranges"])): "43 46"}},
+        ):
+            result, denied = host(schema46, configuration={**config, **mutation})
+            assert result.returncode and not any("up-schema-45" in call for call in denied), (mutation, result.stderr)
+        result, denied = host(schema46, overrides={"MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED": "true"}, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
+        moved = state / "releases" / (rollback_sha + ".missing")
+        (state / "releases" / rollback_sha).rename(moved)
+        result, denied = host(schema46, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
+        moved.rename(state / "releases" / rollback_sha)
+
+        print("deploy-bundle: schema46 dual-artifact no-Git proof passed")
+        return
 
         forward_command = "up-core-schema-42-enhancement-recovery"
         rollback_command = "rollback-schema-42-enhancement-recovery"

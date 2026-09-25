@@ -929,3 +929,32 @@ index ce977a2..78f8470 100644
  	}
  	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
  		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",
+diff --git a/backend/cmd/migrate/main.go b/backend/cmd/migrate/main.go
+--- a/backend/cmd/migrate/main.go
++++ b/backend/cmd/migrate/main.go
+@@ -53,3 +53,7 @@
+ const maxVersionCommand = "max-version"
+ 
++// schemaRangeCommand is a compiled release-selection contract. This rollback
++// artifact can serve only schemas 44 through 46.
++const schemaRangeCommand = "schema-range"
++
+ func main() {
+@@ -188,5 +192,8 @@ func run() error {
+ 	if args[0] == maxVersionCommand {
+ 		return maxVersion()
+ 	}
++	if args[0] == schemaRangeCommand {
++		return schemaRange()
++	}
+ 
+ 	cfg, err := config.Load()
+@@ -469,3 +476,8 @@ func maxVersion() error {
+ }
+ 
++func schemaRange() error {
++	_, err := fmt.Fprintf(os.Stdout, "%d %d\n", db.DirectPurchaseAccessGrantSchemaVersion, db.MaxSchemaVersion)
++	return err
++}
++
+ // requireClean refuses to act on a database left dirty by a failed migration.

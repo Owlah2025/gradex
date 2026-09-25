@@ -64,13 +64,16 @@ package_tooling() {
     backend/internal/db/migrations/0041_enhancement_recovery_foundation.up.sql \
     backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql \
     backend/internal/db/migrations/0042_active_processing_attempt_kind.up.sql \
-    backend/internal/db/migrations/0042_active_processing_attempt_kind.down.sql |
+    backend/internal/db/migrations/0042_active_processing_attempt_kind.down.sql \
+    backend/internal/db/migrations/0045_auto_enhancement_recovery.up.sql \
+    backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql \
+    backend/internal/db/migrations/0046_lesson_public_preview.up.sql \
+    backend/internal/db/migrations/0046_lesson_public_preview.down.sql |
     tar -xf - -C "$staging"
-  # One boundary capability marker per release, naming which cutover this bundle
-  # is for. The host's schema-42 commands require exactly this value and the
-  # schema-41 commands require their own, so a stale or mixed bundle refuses
-  # instead of being accepted by whichever command happens to run.
-  printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA42_CAPABILITY=manual-enhancement-v1\n' "$revision" >"$staging/release-tooling.env"
+  # One boundary capability marker per release, naming the only cutover this
+  # candidate bundle may execute. Older imported artifacts retain their own
+  # marker and the corresponding commands continue to reject this one.
+  printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1\n' "$revision" >"$staging/release-tooling.env"
   (cd "$staging" && find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256)
   tar -czf "$release/deploy-bundle.tar.gz" -C "$staging" --transform='s,^./,,' .
   (cd "$release" && sha256sum deploy-bundle.tar.gz >deploy-bundle.tar.gz.sha256)

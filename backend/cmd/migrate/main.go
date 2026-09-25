@@ -52,6 +52,17 @@ const lockTimeout = 30 * time.Second
 // drift unrepresentable rather than merely discouraged.
 const maxVersionCommand = "max-version"
 
+// schemaRangeCommand reports the release-level database range required to run
+// every application role in this image. It is deliberately separate from the
+// worker's narrower media floor: release selection starts API, worker and
+// frontend together, so its minimum must be the API's direct-grant floor.
+const schemaRangeCommand = "schema-range"
+
+const (
+	upSchema45Command = "up-schema-45"
+	upSchema46Command = "up-schema-46"
+)
+
 func main() {
 	// The DSN is scrubbed from every message: it carries the database
 	// password, and a migration failure is exactly when output gets pasted
@@ -133,7 +144,7 @@ const rollbackSchema42Command = "rollback-schema-42"
 const rollbackSchema42Confirmation = "schema-42-to-41"
 
 func usage() error {
-	return errors.New("usage: migrate <up|down|version|max-version|" +
+	return errors.New("usage: migrate <up|down|version|max-version|schema-range|up-schema-45|up-schema-46|" +
 		rollbackSchema41Command + "|" + rollbackSchema42Command + "> [steps]")
 }
 
@@ -188,6 +199,9 @@ func run() error {
 	if args[0] == maxVersionCommand {
 		return maxVersion()
 	}
+	if args[0] == schemaRangeCommand {
+		return schemaRange()
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -211,6 +225,10 @@ func run() error {
 	switch args[0] {
 	case "up":
 		return up(m)
+	case upSchema45Command:
+		return upExactly(m, upSchema45Command, db.DirectPurchaseAccessGrantSchemaVersion, db.AutoEnhancementRecoverySchemaVersion)
+	case upSchema46Command:
+		return upExactly(m, upSchema46Command, db.AutoEnhancementRecoverySchemaVersion, db.LessonPublicPreviewSchemaVersion)
 	case "down":
 		return down(m, cfg, args[1:])
 	case rollbackSchema41Command:
@@ -222,6 +240,28 @@ func run() error {
 	default:
 		return usage()
 	}
+}
+
+func schemaRange() error {
+	// The API is the highest required producer in a complete application tier.
+	// This is compiled from the same constants readiness uses; manifests may bind
+	// its output, but must not invent a floor in mutable host configuration.
+	fmt.Printf("%d %d\n", db.DirectPurchaseAccessGrantSchemaVersion, db.MaxSchemaVersion)
+	return nil
+}
+
+func upExactly(m *migrate.Migrate, command string, from, to int) error {
+	if err := requireCleanSchemaAt(m, command, from, to); err != nil {
+		return err
+	}
+	if err := m.Migrate(uint(to)); err != nil {
+		after, dirty, versionErr := m.Version()
+		if versionErr != nil {
+			return fmt.Errorf("%s failed: %w (resulting schema state could not be read)", command, err)
+		}
+		return fmt.Errorf("%s failed: %w (schema is now version=%d dirty=%t; no automatic repair was attempted)", command, err, after, dirty)
+	}
+	return report(m, command)
 }
 
 func up(m *migrate.Migrate) error {

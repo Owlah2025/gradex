@@ -64,7 +64,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # The running production revision this artifact's behaviour is derived from.
 BASE=0fee657897c939cb679c9d804d184542bb2f692f
 PATCH="$ROOT/deploy/schema46/rollback-compat.patch"
-PATCH_SHA256=b45bbb6db1dd75bc1ef70477573ba797d38afe062938b5e9b5b0f49f7ae03065
+PATCH_SHA256=f2d3c6bb0294c4b5982c035529b0341d8c5b1fc346ad85a80765d5e73d1405b3
 
 ADMIN_DSN="postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
 PROBE_DB=gradex_schema46_rollback_compat
@@ -122,6 +122,7 @@ echo "migration SQL: identical to the current tree"
 # above is not mistaken for coverage it did not have.
 (cd "$SCRATCH/backend" && go test -tags=integration ./cmd/api \
     -run 'TestRequiredSchemaVersionCoversMountedRoutes' -count=1)
+(cd "$SCRATCH/backend" && go run ./cmd/migrate schema-range) | grep -Fx '44 46'
 echo "artifact tests: pass (ceiling 46, API floor 44 asserted)"
 
 # 6. A disposable database migrated to 46 by the CURRENT release's migrations —
@@ -139,6 +140,7 @@ echo "probe database: migrated to schema 46 by the current release"
 #    it writes no scheduler row and marks no Lesson previewable.
 (cd "$SCRATCH/backend" && GRADEX_COMPAT46_DSN="$PROBE_DSN" \
     go run -tags=integration ./cmd/schema46-rollback-probe)
+
 
 # 8. The negative half of the supported range. A minimum that is never proven to
 #    be enforced is not a minimum. On a clean schema-43 database this artifact

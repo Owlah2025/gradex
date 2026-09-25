@@ -17,16 +17,34 @@ artifact_value() {
 # reason about — that is a mixed or stale bundle, and it refuses here.
 SCHEMA41_BUNDLE_CAPABILITY=SCHEMA41_CAPABILITY=supervised-41-to-40-v1
 SCHEMA42_BUNDLE_CAPABILITY=SCHEMA42_CAPABILITY=manual-enhancement-v1
+SCHEMA46_BUNDLE_CAPABILITY=SCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1
 
 bundle_capability() {
   local declared
   declared="$(awk -F= '$1 ~ /^SCHEMA4[0-9]_CAPABILITY$/ { count++; line=$0 } END { if (count != 1) exit 1; print line }' \
     "$1/release-tooling.env")" || die "bundle must declare exactly one release capability marker"
   case "$declared" in
-    "$SCHEMA41_BUNDLE_CAPABILITY"|"$SCHEMA42_BUNDLE_CAPABILITY") ;;
+    "$SCHEMA41_BUNDLE_CAPABILITY"|"$SCHEMA42_BUNDLE_CAPABILITY"|"$SCHEMA46_BUNDLE_CAPABILITY") ;;
     *) die "unrecognized bundle capability marker" ;;
   esac
   printf '%s' "$declared"
+}
+
+image_schema_range() {
+  local image="$1" range minimum maximum
+  range="$(docker run --rm --network none --entrypoint gradex-migrate "$image" schema-range)" ||
+    die "backend image cannot report its supported schema range"
+  read -r minimum maximum <<<"$range"
+  [[ "$minimum" =~ ^[0-9]+$ && "$maximum" =~ ^[0-9]+$ && "$minimum" -le "$maximum" ]] ||
+    die "backend image reported an invalid schema range"
+  printf '%s %s' "$minimum" "$maximum"
+}
+
+require_image_schema_range() {
+  local image="$1" expected_minimum="$2" expected_maximum="$3" actual_minimum actual_maximum
+  read -r actual_minimum actual_maximum <<<"$(image_schema_range "$image")"
+  [ "$actual_minimum" = "$expected_minimum" ] || die "backend image minimum schema is $actual_minimum, expected $expected_minimum"
+  [ "$actual_maximum" = "$expected_maximum" ] || die "backend image maximum schema is $actual_maximum, expected $expected_maximum"
 }
 
 verify_release_bundle() {
@@ -98,6 +116,12 @@ require_schema42_image_capability() {
   docker run --rm --network none --entrypoint test "$GRADEX_BACKEND_IMAGE" -x /usr/local/bin/gradex-enhancement-drain ||
     die "backend lacks the enhancement drain proof"
   require_migration_hash_binding 0042_active_processing_attempt_kind
+}
+
+require_schema46_image_capability() {
+  require_image_schema_range "$GRADEX_BACKEND_IMAGE" 44 46
+  require_migration_hash_binding 0045_auto_enhancement_recovery
+  require_migration_hash_binding 0046_lesson_public_preview
 }
 
 # The exact deployed 3C-A artifact set, which is the application rollback target
