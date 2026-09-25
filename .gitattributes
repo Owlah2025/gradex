@@ -1,1 +1,2 @@
 deploy/device43/rollback-compat.patch -whitespace
+deploy/schema46/rollback-compat.patch -whitespace

@@ -26,11 +26,23 @@
 #     * raises MaxSchemaVersion to 46 with the two named constants;
 #     * adds a probe that exercises old behaviour against schema 46.
 #
-#   It deliberately does NOT raise requiredSchemaVersion to 44. That correction
-#   belongs to the forward release; cherry-picking it would make this something
-#   other than 0fee657 behaviour, and it cannot matter for a rollback target,
-#   because the database being rolled back onto is at 46 and satisfies either
-#   floor.
+#     * corrects requiredSchemaVersion from 43 to 44.
+#
+#   That last item is a CORRECTNESS FIX, not a behaviour change, and it is
+#   required for the artifact to describe itself truthfully. 0fee657 carries the
+#   direct Course grant, and that behaviour needs schema 44: migration 0044
+#   replaces ent_purchase_needs_invitation with ent_purchase_source_valid, and
+#   below 44 the database refuses an entitlement carrying a purchase request and
+#   no invitation.
+#
+#   An earlier revision left the floor at 43, arguing it could not matter because
+#   the database being rolled back onto is at 46. That argument was wrong:
+#   release/application selection checks a MAXIMUM supported schema and no
+#   minimum, so the artifact could be selected on a schema-43 database, report
+#   ready, and then fail every direct-grant write at runtime.
+#
+#   The truthful supported range for this artifact is 44..46. It serves 44, 45
+#   and 46, and refuses 43 and below.
 #
 # WHAT THIS IS NOT
 #
@@ -52,17 +64,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # The running production revision this artifact's behaviour is derived from.
 BASE=0fee657897c939cb679c9d804d184542bb2f692f
 PATCH="$ROOT/deploy/schema46/rollback-compat.patch"
-PATCH_SHA256=290ececcd67842996ca5007f8c0d101f9a9dbe972c6479f230fb883505093f4b
+PATCH_SHA256=bdca30dd085889334bf937b4a7efdd9aa1181033d92e41cf407562acfd217eff
 
 ADMIN_DSN="postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
 PROBE_DB=gradex_schema46_rollback_compat
 PROBE_DSN="postgres://gradex:gradex@localhost:5432/${PROBE_DB}?sslmode=disable"
+NEGATIVE_DB=gradex_schema46_rollback_compat_neg
+NEGATIVE_DSN="postgres://gradex:gradex@localhost:5432/${NEGATIVE_DB}?sslmode=disable"
 
 SCRATCH="$(mktemp -d)"
 cleanup() {
     psql "$ADMIN_DSN" -q \
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${PROBE_DB}'" \
-        -c "DROP DATABASE IF EXISTS ${PROBE_DB}" >/dev/null 2>&1 || true
+        -c "DROP DATABASE IF EXISTS ${PROBE_DB}" \
+        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${NEGATIVE_DB}'" \
+        -c "DROP DATABASE IF EXISTS ${NEGATIVE_DB}" >/dev/null 2>&1 || true
     rm -rf -- "$SCRATCH"
 }
 trap cleanup EXIT
@@ -99,7 +115,14 @@ echo "migration SQL: identical to the current tree"
 #    unchanged API floor are asserted.
 (cd "$SCRATCH/backend" && go build ./...)
 (cd "$SCRATCH/backend" && go test ./internal/db ./cmd/api -count=1)
-echo "artifact tests: pass"
+# The API floor assertion lives in an integration-tagged file, so an untagged
+# run silently skips it. An earlier revision of this script omitted the tag and
+# therefore never checked the floor at all — which is how a stale assertion and
+# an untruthful floor both survived. It is named explicitly so the untagged run
+# above is not mistaken for coverage it did not have.
+(cd "$SCRATCH/backend" && go test -tags=integration ./cmd/api \
+    -run 'TestRequiredSchemaVersionCoversMountedRoutes' -count=1)
+echo "artifact tests: pass (ceiling 46, API floor 44 asserted)"
 
 # 6. A disposable database migrated to 46 by the CURRENT release's migrations —
 #    the same thing production would be left holding after the release.
@@ -117,5 +140,18 @@ echo "probe database: migrated to schema 46 by the current release"
 (cd "$SCRATCH/backend" && GRADEX_COMPAT46_DSN="$PROBE_DSN" \
     go run -tags=integration ./cmd/schema46-rollback-probe)
 
-printf 'schema46 rollback compatibility PASS: base=%s patch_sha256=%s ceiling=46 api_floor=43(unchanged)\n' \
+# 8. The negative half of the supported range. A minimum that is never proven to
+#    be enforced is not a minimum. On a clean schema-43 database this artifact
+#    must REFUSE readiness, because its direct Course grant cannot be written
+#    below schema 44.
+psql "$ADMIN_DSN" -q \
+    -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${NEGATIVE_DB}'" \
+    -c "DROP DATABASE IF EXISTS ${NEGATIVE_DB}" \
+    -c "CREATE DATABASE ${NEGATIVE_DB}" >/dev/null
+(cd "$ROOT/backend" && go run -tags=integration ./cmd/migrate-to-version "file://internal/db/migrations" "$NEGATIVE_DSN" 43)
+(cd "$SCRATCH/backend" && GRADEX_COMPAT46_DSN="$NEGATIVE_DSN" GRADEX_COMPAT46_EXPECT_REFUSED=1 \
+    go run -tags=integration ./cmd/schema46-rollback-probe)
+echo "schema 43: correctly refused"
+
+printf 'schema46 rollback compatibility PASS: base=%s patch_sha256=%s supported_range=44..46 (ceiling 46, floor 44, schema 43 refused)\n' \
     "$BASE" "$PATCH_SHA256"

@@ -24,29 +24,56 @@ original `0fee657` artifact and must never be labelled as one.
 |---|---|
 | Base commit | `0fee657897c939cb679c9d804d184542bb2f692f` |
 | Patch | [`rollback-compat.patch`](rollback-compat.patch) |
-| Patch SHA-256 | `290ececcd67842996ca5007f8c0d101f9a9dbe972c6479f230fb883505093f4b` |
+| Patch SHA-256 | `bdca30dd085889334bf937b4a7efdd9aa1181033d92e41cf407562acfd217eff` |
+| Supported schema range | **44 .. 46** |
 | Compatibility ceiling | schema 46 |
-| API readiness floor | schema 43 — **unchanged from `0fee657`** |
+| API readiness floor | schema 44 — **corrected from `0fee657`'s 43** |
 | Worker media floor | schema 42 — unchanged |
 | Runs automatic enhancement recovery | no |
 | Serves Lesson public preview | no |
 | Serves legacy course-level preview | yes, exactly as today |
 
-The patch changes seven files and nothing else:
+The patch changes nine files and nothing else:
 
 - the four 0045/0046 migration files, byte-identical to the current tree, so the
   migrator source matches the database the artifact will serve;
 - `internal/db/schema.go` — the ceiling and the two named constants;
 - `internal/db/schema_test.go` — the assertions for them;
+- `cmd/api/main.go` — the corrected readiness floor;
+- `cmd/api/main_test.go` — the floor assertion, corrected and extended;
 - `cmd/schema46-rollback-probe/main.go` — new, integration-tagged.
 
-### What is deliberately not cherry-picked
+### The API readiness floor is 44, not 43
 
-`requiredSchemaVersion` stays at `AutoDeviceReplacementSchemaVersion` (43).
-Raising it to 44 is a correctness fix that belongs to the forward release, not a
-compatibility change, and pulling it in here would make this artifact something
-other than `0fee657` behaviour. It cannot matter for a rollback target anyway:
-the database being rolled back onto is at 46, which satisfies either floor.
+`requiredSchemaVersion` is `DirectPurchaseAccessGrantSchemaVersion` (44).
+
+An earlier revision of this artifact left it at `0fee657`'s 43 and argued the
+difference could not matter, because the database being rolled back onto is at
+46 and satisfies either floor. **That argument was wrong.**
+Release/application selection checks a *maximum* supported schema and no
+minimum, so nothing prevented this artifact from being selected on a schema-43
+database, reporting ready, and then failing at runtime.
+
+It would fail because this build carries the direct Course grant, and that
+behaviour genuinely requires schema 44. Migration 0044 drops
+`ent_purchase_needs_invitation` and replaces it with `ent_purchase_source_valid`;
+below 44 the old constraint still demands `source_invitation_id IS NOT NULL`, so
+a direct grant — which writes `source_purchase_request_id` and no invitation — is
+refused by the database at write time. Readiness that passes while those writes
+cannot succeed is untruthful readiness.
+
+Raising the floor is therefore a **truthfulness correction to the artifact's
+declared supported range**, not forward behaviour cherry-picked into a rollback
+target. The artifact's behaviour is unchanged; only its self-description is.
+
+`0fee657`'s own floor assertion had additionally drifted — it still named schema
+38 while the build required 43 — and the verification script ran `cmd/api`'s
+tests without the `integration` tag, so the assertion was never executed. Both
+are corrected, and the script now names that test explicitly.
+
+**The truthful supported range is 44..46.** The artifact serves 44, 45 and 46,
+and refuses 43 and below. The refusal is proven, not asserted: see step 8 of the
+verification script.
 
 No other forward behaviour is included. The artifact runs no scheduler, exposes
 no Lesson preview, and keeps the existing access, device and media behaviour.
@@ -97,7 +124,10 @@ covers:
 - the negative: the artifact writes no scheduler row and marks no Lesson
   previewable
 
-It creates and drops one disposable database and touches nothing else.
+It also migrates a second disposable database to clean schema 43 and proves the
+artifact **refuses** it, which is the negative half of the 44..46 range claim.
+
+It creates and drops two disposable databases and touches nothing else.
 
 ## What this is not
 

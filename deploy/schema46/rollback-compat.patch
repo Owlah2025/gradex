@@ -1,9 +1,80 @@
+diff --git a/backend/cmd/api/main.go b/backend/cmd/api/main.go
+index 3fb16a6..377d503 100644
+--- a/backend/cmd/api/main.go
++++ b/backend/cmd/api/main.go
+@@ -298,7 +298,23 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
+ // introduces the table, not the one before it. Automatic device rotation also
+ // writes AUTO_REPLACED, introduced in schema 43; readiness requires that enum.
+ func requiredSchemaVersion(cfg *config.Config) int64 {
+-	return db.AutoDeviceReplacementSchemaVersion
++	// SCHEMA-46 ROLLBACK COMPATIBILITY: corrected from
++	// AutoDeviceReplacementSchemaVersion (43) to 44.
++	//
++	// This build carries the direct Course grant behaviour, and that behaviour
++	// REQUIRES schema 44. Migration 0044 drops ent_purchase_needs_invitation and
++	// replaces it with ent_purchase_source_valid; on schema 43 the old constraint
++	// still demands source_invitation_id IS NOT NULL, so a direct grant — which
++	// writes source_purchase_request_id and no invitation — is refused by the
++	// database at write time.
++	//
++	// A floor of 43 therefore made this build's readiness untruthful: it would
++	// report ready on a schema-43 database and then fail direct-grant writes at
++	// runtime. Because application selection checks a maximum supported schema
++	// and not a minimum, nothing else would have caught it.
++	//
++	// The truthful supported range for this artifact is 44..46.
++	return db.DirectPurchaseAccessGrantSchemaVersion
+ }
+ 
+ func buildLearningFoundation(
+diff --git a/backend/cmd/api/main_test.go b/backend/cmd/api/main_test.go
+index ff0ddfb..2d04f5b 100644
+--- a/backend/cmd/api/main_test.go
++++ b/backend/cmd/api/main_test.go
+@@ -740,8 +740,35 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
+ // not exist, and every one of those routes would then fail on a missing
+ // relation instead of the deployment being held out of the load balancer.
+ func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
+-	if got := requiredSchemaVersion(nil); got != db.SubjectDemandSignalSchemaVersion {
+-		t.Fatalf("required schema = %d, want %d", got, db.SubjectDemandSignalSchemaVersion)
++	// SCHEMA-46 ROLLBACK COMPATIBILITY: the floor is 44, not 38.
++	//
++	// This assertion had drifted behind the code it guards: it still named
++	// schema 38 while the build already required 43, so under the integration
++	// tag it failed, and the rollback verification never ran it because that
++	// script omitted the tag. Both halves are corrected here.
++	//
++	// The floor is the newest schema this build's behaviour actually needs. The
++	// direct Course grant needs 44: migration 0044 replaces
++	// ent_purchase_needs_invitation with ent_purchase_source_valid, and below it
++	// the database refuses an entitlement that carries a purchase request and no
++	// invitation. Reporting ready on 43 and then failing those writes is exactly
++	// the untruthful readiness this floor exists to prevent.
++	if got := requiredSchemaVersion(nil); got != db.DirectPurchaseAccessGrantSchemaVersion {
++		t.Fatalf("required schema = %d, want %d", got, db.DirectPurchaseAccessGrantSchemaVersion)
++	}
++	// The artifact's truthful supported range is 44..46: it must refuse 43 and
++	// below, and serve 44, 45 and 46.
++	if got := requiredSchemaVersion(nil); got != 44 {
++		t.Fatalf("rollback-compat API floor = %d, want 44", got)
++	}
++	if db.MaxSchemaVersion != int64(db.LessonPublicPreviewSchemaVersion) {
++		t.Fatalf("rollback-compat ceiling = %d, want LessonPublicPreviewSchemaVersion", db.MaxSchemaVersion)
++	}
++	if db.MaxSchemaVersion != 46 {
++		t.Fatalf("rollback-compat ceiling = %d, want 46", db.MaxSchemaVersion)
++	}
++	if db.AutoDeviceReplacementSchemaVersion >= requiredSchemaVersion(nil) {
++		t.Fatalf("schema 43 must sit strictly below the readiness floor %d", requiredSchemaVersion(nil))
+ 	}
+ 	// The floor must never exceed what this build can serve, or readiness would
+ 	// be unsatisfiable at every version.
 diff --git a/backend/cmd/schema46-rollback-probe/main.go b/backend/cmd/schema46-rollback-probe/main.go
 new file mode 100644
-index 0000000..f44e0be
+index 0000000..b1ed746
 --- /dev/null
 +++ b/backend/cmd/schema46-rollback-probe/main.go
-@@ -0,0 +1,350 @@
+@@ -0,0 +1,392 @@
 +//go:build integration
 +
 +// schema46-rollback-probe exercises the 0fee657 application behaviour against a
@@ -46,6 +117,17 @@ index 0000000..f44e0be
 +	}
 +	defer pool.Close()
 +
++	// GRADEX_COMPAT46_EXPECT_REFUSED asserts the NEGATIVE half of the supported
++	// range: this artifact must refuse a database below its floor.
++	//
++	// The range claim is 44..46, and a claim about a minimum is only worth as
++	// much as the proof that the minimum is enforced. Run against a schema-43
++	// database, readiness must fail; if it passed, the artifact would be
++	// selectable on 43 and would then fail direct-grant writes at runtime.
++	if os.Getenv("GRADEX_COMPAT46_EXPECT_REFUSED") != "" {
++		return checkRefusesBelowFloor(ctx, pool)
++	}
++
 +	// 1. The ceiling. This build must accept clean 46; without the compatibility
 +	//    patch its supported range ends at 44 and it refuses to start.
 +	state, err := db.ReadSchemaState(ctx, pool)
@@ -59,13 +141,22 @@ index 0000000..f44e0be
 +		return fmt.Errorf("compat build ceiling = %d, want 46", db.MaxSchemaVersion)
 +	}
 +
-+	// 2. API readiness, using the floor THIS build declares. It is deliberately
-+	//    still 43 — the schema-44 correction belongs to the forward release — and
-+	//    a schema-46 database satisfies it.
++	// 2. API readiness, using the floor THIS build declares.
++	//
++	//    The floor is 44, corrected from 0fee657's 43. This build carries the
++	//    direct Course grant, and that behaviour requires schema 44: below it,
++	//    ent_purchase_needs_invitation still refuses an entitlement that carries
++	//    a purchase request and no invitation. A floor of 43 made readiness
++	//    untruthful, because application selection checks a maximum supported
++	//    schema and not a minimum, so the artifact could be selected on 43,
++	//    report ready, and then fail direct-grant writes.
++	//
++	//    The truthful supported range is 44..46, and a schema-46 database
++	//    satisfies it.
 +	apiFloor := requiredSchemaVersionForProbe()
-+	if apiFloor != int64(db.AutoDeviceReplacementSchemaVersion) {
++	if apiFloor != int64(db.DirectPurchaseAccessGrantSchemaVersion) {
 +		return fmt.Errorf("compat API floor = %d, want the unchanged 0fee657 floor %d",
-+			apiFloor, db.AutoDeviceReplacementSchemaVersion)
++			apiFloor, db.DirectPurchaseAccessGrantSchemaVersion)
 +	}
 +	if err := db.CheckSchemaAtLeast(ctx, pool, apiFloor); err != nil {
 +		return fmt.Errorf("API readiness against schema 46: %w", err)
@@ -231,7 +322,7 @@ index 0000000..f44e0be
 +// than imported because cmd/api is package main; the verify script asserts the
 +// two agree by also running cmd/api's own test.
 +func requiredSchemaVersionForProbe() int64 {
-+	return int64(db.AutoDeviceReplacementSchemaVersion)
++	return int64(db.DirectPurchaseAccessGrantSchemaVersion)
 +}
 +
 +type compatFixture struct {
@@ -353,6 +444,28 @@ index 0000000..f44e0be
 +		return f, err
 +	}
 +	return f, nil
++}
++
++// checkRefusesBelowFloor proves the artifact refuses a database below its
++// truthful minimum supported schema.
++func checkRefusesBelowFloor(ctx context.Context, pool *pgxpool.Pool) error {
++	state, err := db.ReadSchemaState(ctx, pool)
++	if err != nil {
++		return fmt.Errorf("reading schema state: %w", err)
++	}
++	if state.Version != int64(db.AutoDeviceReplacementSchemaVersion) || state.Dirty {
++		return fmt.Errorf("negative probe database is at %+v, want clean 43", state)
++	}
++	floor := requiredSchemaVersionForProbe()
++	if floor != int64(db.DirectPurchaseAccessGrantSchemaVersion) {
++		return fmt.Errorf("compat API floor = %d, want 44", floor)
++	}
++	if err := db.CheckSchemaAtLeast(ctx, pool, floor); err == nil {
++		return errors.New("the rollback-compat artifact reported ready on schema 43; " +
++			"it must refuse every schema below its floor of 44")
++	}
++	fmt.Println("schema46 rollback compatibility: schema 43 correctly REFUSED")
++	return nil
 +}
 diff --git a/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql b/backend/internal/db/migrations/0045_auto_enhancement_recovery.down.sql
 new file mode 100644
