@@ -117,8 +117,18 @@ RETURNING id \gset attempt_
 INSERT INTO video_renditions
   (asset_version_id, name, storage_object_key, width, height, bitrate_kbps,
    duration_ms, processing_operation_id)
+-- The width, height and video bitrate of every row MUST equal the compiled HLS
+-- ladder rung of the same name (media.hlsLadder): 720p is 1280x720 at 2800
+-- kbps and 480p is 854x480 at 1400 kbps.
+--
+-- This is not cosmetic. Master-manifest generation re-derives each rendition
+-- through persistedVideoRendition, which refuses any row that does not match
+-- the ladder, and the refusal surfaces as an inventory-safe 404. An earlier
+-- version of this fixture wrote 480p at 1200 kbps; preview AUTHORIZATION still
+-- succeeded, because issuance only asks whether renditions exist, and the
+-- manifest GET then 404'd. The product is right and is not relaxed here.
 VALUES
-  (:'video_version_id', '480p', 'media/drill/hls/lesson/480p/playlist.m3u8', 854, 480, 1200, 480000, 'drill-full-1'),
+  (:'video_version_id', '480p', 'media/drill/hls/lesson/480p/playlist.m3u8', 854, 480, 1400, 480000, 'drill-full-1'),
   (:'video_version_id', '720p', 'media/drill/hls/lesson/720p/playlist.m3u8', 1280, 720, 2800, 480000, 'drill-full-1');
 
 UPDATE media_asset_versions

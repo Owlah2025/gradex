@@ -181,12 +181,18 @@ CURL_IMAGE=curlimages/curl:8.11.1
 # the drill is the point; the drill adapts instead.
 COOKIES=""
 
+# Origin is sent on every request because the CSRF boundary is browser-context
+# aware: a state-changing POST from an unrecognised origin is refused, which is
+# correct and is not relaxed here. The drill presents the configured public
+# origin, exactly as a real browser on that site would.
 http() {
   if [ -n "$COOKIES" ]; then
     docker run --rm --network "${PROJECT}_app" "$CURL_IMAGE" \
-      --silent --show-error --header "Cookie: $COOKIES" "$@"
+      --silent --show-error --header "Origin: ${PUBLIC_ORIGIN}" \
+      --header "Referer: ${PUBLIC_ORIGIN}/" --header "Cookie: $COOKIES" "$@"
   else
-    docker run --rm --network "${PROJECT}_app" "$CURL_IMAGE" --silent --show-error "$@"
+    docker run --rm --network "${PROJECT}_app" "$CURL_IMAGE" --silent --show-error \
+      --header "Origin: ${PUBLIC_ORIGIN}" --header "Referer: ${PUBLIC_ORIGIN}/" "$@"
   fi
 }
 
