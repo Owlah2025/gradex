@@ -161,6 +161,57 @@ def stage_application_floor(state, tooling, fixture):
             "ceilings": {images["BACKEND"]: "41"}}
 
 
+def restage_release_capability(state, sha, capability, *, fixture):
+    """Re-stage the imported candidate release under a different boundary marker.
+
+    A deploy bundle declares exactly ONE boundary capability, because a boundary
+    is a closed one-release contract: the schema46 bundle this tree builds
+    carries SCHEMA46_CAPABILITY and therefore, correctly, refuses every
+    schema41/schema42 boundary command. That refusal is why an earlier revision
+    of this proof placed an unconditional `return` in front of the historical
+    coverage — the historical section asserts those commands SUCCEED, and they
+    cannot succeed against a schema46 bundle.
+
+    Skipping the coverage was the wrong answer. The host logic under test is
+    still present in host.sh and still has to be proven. So the release is
+    re-staged under each capability in turn and every historical assertion runs
+    verbatim against a bundle that legitimately declares the boundary it is
+    exercising.
+
+    This is a re-stage, not an edit: release-tooling.env is rewritten, the
+    tooling inventory is recomputed, the bundle is rebuilt and re-checksummed,
+    and the manifest binding is updated, so the release still satisfies bundle
+    inventory, extracted-tooling checksum and manifest-binding verification.
+    Rewriting the file in place would break all three, which is exactly what the
+    drift sub-tests below prove.
+    """
+    destination = state / "releases" / sha
+    run(["chmod", "-R", "u+w", str(destination)])
+    staging = fixture / f"restage-{capability.split('=', 1)[0].lower()}"
+    if staging.exists():
+        run(["chmod", "-R", "u+w", str(staging)])
+        shutil.rmtree(staging)
+    shutil.copytree(destination / "tooling", staging)
+    run(["chmod", "-R", "u+w", str(staging)])
+    (staging / "release-tooling.env").write_text(
+        f"RELEASE_SHA={sha}\nDEPLOY_BUNDLE_FORMAT=1\n{capability}\n")
+    (staging / "tooling.sha256").unlink()
+    run(["bash", "-c", "find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256"], cwd=staging)
+
+    run(["tar", "-czf", str(destination / "deploy-bundle.tar.gz"), "-C", str(staging), "--transform", "s,^./,,", "."])
+    digest = hashlib.sha256((destination / "deploy-bundle.tar.gz").read_bytes()).hexdigest()
+    (destination / "deploy-bundle.tar.gz.sha256").write_text(f"{digest}  deploy-bundle.tar.gz\n")
+    shutil.rmtree(destination / "tooling")
+    (destination / "tooling").mkdir()
+    run(["tar", "-xzf", str(destination / "deploy-bundle.tar.gz"), "-C", str(destination / "tooling")])
+    fields = manifest(destination / "release.env")
+    fields["GRADEX_DEPLOY_BUNDLE_SHA256"] = digest
+    (destination / "release.env").write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
+    run(["chmod", "-R", "a-w", str(destination)])
+    assert os.access(destination / "tooling/deploy/hostinger/host.sh", os.X_OK)
+    return fields
+
+
 def stage_schema46_rollback_artifact(state, tooling, fixture):
     """Stage a distinct old-behaviour artifact for the schema46 boundary."""
     base = "0fee657897c939cb679c9d804d184542bb2f692f"
@@ -196,6 +247,10 @@ def stage_schema46_rollback_artifact(state, tooling, fixture):
 def main():
     if not shutil.which("bwrap"):
         raise SystemExit("bwrap is required for the isolated no-Git host test (workstation only)")
+    # Each section appends its marker below and main() returns them. The caller
+    # verifies the complete set, so an early return anywhere inside main() fails
+    # the proof instead of silently skipping coverage the way one once did.
+    covered = []
     with tempfile.TemporaryDirectory(prefix="gradex-bundle-") as temporary:
         fixture = Path(temporary)
         source = fixture / "source"
@@ -301,16 +356,6 @@ def main():
         # until the floor is present.
         floor = stage_application_floor(state, tooling, fixture)
         config = {**config, "revisions": floor["revisions"], "ceilings": floor["ceilings"]}
-        rollback_sha, rollback_images = stage_schema46_rollback_artifact(state, tooling, fixture)
-        config = {**config, **rollback_images}
-        values["GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA"] = rollback_sha
-        backup_dir = state / "backups"
-        backup_dir.mkdir(exist_ok=True)
-        snapshot = "a" * 64
-        (backup_dir / "latest.offsite.snapshot").write_text(snapshot + "\n")
-        (backup_dir / "latest.completed-at").write_text(str(int(__import__("time").time())) + "\n")
-        (backup_dir / "restored-source").write_text(snapshot + "\n")
-        (backup_dir / "restored-schema-state").write_text("44|false\n")
 
         def host(command, overrides=None, configuration=None):
             for started in fixture.glob("started-*"):
@@ -330,40 +375,25 @@ def main():
             calls = [json.loads(line) for line in (fixture / "docker.log").read_text().splitlines()]
             return result, calls
 
-        # Schema46 uses two independently immutable artifacts. The release
-        # wrapper runs only from extracted candidate tooling and sees no Git.
-        schema46 = "up-core-schema-46-media-preview"
-        result, calls = host(schema46, configuration={**config, "schema_state": "44|false"})
-        assert result.returncode == 0, result.stderr
-        runs = [call for call in calls if call[0] == "compose" and "run" in call]
-        assert any("up-schema-45" in call for call in runs), runs
-        assert any("up-schema-46" in call for call in runs), runs
 
-        result, calls = host("rollback-schema46-application", configuration={**config, "schema_state": "46|false"})
-        assert result.returncode == 0, result.stderr
-        assert any(call[0] == "compose" and "api" in call and "--force-recreate" in call for call in calls), calls
+        # ---- Historical schema41/schema42 coverage. It runs FIRST and in full;
+        # the schema46 sections below are additional coverage, never a replacement.
+        #
+        # The release is re-staged under the schema42 boundary marker so the
+        # historical commands are exercised against a bundle that legitimately
+        # declares the boundary they belong to. See restage_release_capability.
+        restage_release_capability(state, sha, "SCHEMA42_CAPABILITY=manual-enhancement-v1", fixture=fixture)
+        # Each section states the image ceiling and post-migration marker it is
+        # exercising instead of leaning on the mock's default. The schema46 work
+        # moved that default from 42 to 46, which silently broke this section and
+        # was the second reason it had been fenced off behind an early return.
+        config = {**config, "ceiling": "42", "schema_state_after_up": "42|false"}
 
-        # Exact marker, capability, backup/restore identity, auto-off and both
-        # compiled ranges are pre-mutation gates. Every failure occurs before a
-        # migration container is run.
-        for mutation in (
-            {"schema_state": "43|false"}, {"schema_state": "44|true"},
-            {"schema_state": "45|false"}, {"schema_state": "46|false"},
-            {"range": "45 46"}, {"range": "44 45"},
-            {"ranges": {next(iter(rollback_images["ranges"])): "43 46"}},
-        ):
-            result, denied = host(schema46, configuration={**config, **mutation})
-            assert result.returncode and not any("up-schema-45" in call for call in denied), (mutation, result.stderr)
-        result, denied = host(schema46, overrides={"MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED": "true"}, configuration={**config, "schema_state": "44|false"})
-        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
-        moved = state / "releases" / (rollback_sha + ".missing")
-        (state / "releases" / rollback_sha).rename(moved)
-        result, denied = host(schema46, configuration={**config, "schema_state": "44|false"})
-        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
-        moved.rename(state / "releases" / rollback_sha)
-
-        print("deploy-bundle: schema46 dual-artifact no-Git proof passed")
-        return
+        # Capability separation, proven in both directions rather than assumed.
+        # Under the schema42 marker the schema46 boundary command must refuse,
+        # and below, under the schema46 marker, the schema42 commands must too.
+        result, calls = host("up-core-schema-46-media-preview", configuration={**config, "schema_state": "44|false"})
+        assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
 
         forward_command = "up-core-schema-42-enhancement-recovery"
         rollback_command = "rollback-schema-42-enhancement-recovery"
@@ -484,12 +514,83 @@ def main():
         old_sha = "a272011620296569f180a02c11c33fbbc8d97c73"
         result, calls = host(forward_command, overrides={"GRADEX_RELEASE_SHA": old_sha}, configuration={"sha": old_sha})
         assert result.returncode and not any(a[0] == "compose" for a in calls)
+
+        covered.append("schema41-42-historical")
+        print("deploy-bundle: schema41/schema42 historical no-Git coverage passed "
+              "(forward, supervised rollback, identity, drift, quiescence, floor and scope)")
+
+        # ---- Schema46 dual-artifact coverage, staged on top of the same fixture.
+        # Back to the boundary marker the candidate bundle actually ships with.
+        fields = restage_release_capability(
+            state, sha, "SCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1", fixture=fixture)
+        values["GRADEX_DEPLOY_BUNDLE_SHA256"] = fields["GRADEX_DEPLOY_BUNDLE_SHA256"]
+        config = {**config, "ceiling": "46", "schema_state_after_up": "46|false"}
+
+        # The other direction of capability separation: a schema46 bundle refuses
+        # the closed schema41 and schema42 boundary commands.
+        for closed in ("up-core-schema-41-foundation", "rollback-schema-41-foundation",
+                       "up-core-schema-42-enhancement-recovery", "rollback-schema-42-enhancement-recovery"):
+            result, calls = host(closed, configuration={**config, "schema_state": "42|false"})
+            assert result.returncode and not any(a[0] == "compose" for a in calls), (closed, result.stderr)
+
+        rollback_sha, rollback_images = stage_schema46_rollback_artifact(state, tooling, fixture)
+        config = {**config, **rollback_images}
+        values["GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA"] = rollback_sha
+        backup_dir = state / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        snapshot = "a" * 64
+        (backup_dir / "latest.offsite.snapshot").write_text(snapshot + "\n")
+        (backup_dir / "latest.completed-at").write_text(str(int(__import__("time").time())) + "\n")
+        (backup_dir / "restored-source").write_text(snapshot + "\n")
+        (backup_dir / "restored-schema-state").write_text("44|false\n")
+        # Schema46 uses two independently immutable artifacts. The release
+        # wrapper runs only from extracted candidate tooling and sees no Git.
+        schema46 = "up-core-schema-46-media-preview"
+        result, calls = host(schema46, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode == 0, result.stderr
+        runs = [call for call in calls if call[0] == "compose" and "run" in call]
+        assert any("up-schema-45" in call for call in runs), runs
+        assert any("up-schema-46" in call for call in runs), runs
+
+        result, calls = host("rollback-schema46-application", configuration={**config, "schema_state": "46|false"})
+        assert result.returncode == 0, result.stderr
+        assert any(call[0] == "compose" and "api" in call and "--force-recreate" in call for call in calls), calls
+
+        # Exact marker, capability, backup/restore identity, auto-off and both
+        # compiled ranges are pre-mutation gates. Every failure occurs before a
+        # migration container is run.
+        for mutation in (
+            {"schema_state": "43|false"}, {"schema_state": "44|true"},
+            {"schema_state": "45|false"}, {"schema_state": "46|false"},
+            {"range": "45 46"}, {"range": "44 45"},
+            {"ranges": {next(iter(rollback_images["ranges"])): "43 46"}},
+        ):
+            result, denied = host(schema46, configuration={**config, **mutation})
+            assert result.returncode and not any("up-schema-45" in call for call in denied), (mutation, result.stderr)
+        result, denied = host(schema46, overrides={"MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED": "true"}, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
+        moved = state / "releases" / (rollback_sha + ".missing")
+        (state / "releases" / rollback_sha).rename(moved)
+        result, denied = host(schema46, configuration={**config, "schema_state": "44|false"})
+        assert result.returncode and not any("up-schema-45" in call for call in denied), result.stderr
+        moved.rename(state / "releases" / rollback_sha)
+
+        print("deploy-bundle: schema46 dual-artifact no-Git proof passed")
+        covered.append("schema46-dual-artifact")
         # Read-only imported trees need write permission solely for test cleanup.
         for directory, _, files in os.walk(fixture):
             Path(directory).chmod(0o700)
             for file in files: (Path(directory) / file).chmod(0o600)
     print("deploy-bundle: export, import, identity, drift, no-Git CLI, scope and local-producer checks passed")
+    return covered
+
+
+REQUIRED_COVERAGE = ("schema41-42-historical", "schema46-dual-artifact")
 
 
 if __name__ == "__main__":
-    main()
+    executed = main() or []
+    absent = [name for name in REQUIRED_COVERAGE if name not in executed]
+    if absent:
+        raise SystemExit("deploy-bundle: coverage did not run: " + ", ".join(absent))
+    print("deploy-bundle: coverage verified: " + ", ".join(REQUIRED_COVERAGE))
