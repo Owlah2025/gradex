@@ -160,14 +160,18 @@ schema 42 and later such a row additionally carries
 
 ## Attempt policy
 
-Three consecutive automatic failures, then `NEEDS_OPERATOR`:
+A maximum of **three failed automatic executions**, then `NEEDS_OPERATOR`:
 
 | Consecutive failures | Next automatic attempt |
 |---|---|
 | 1 | 15 minutes |
 | 2 | 1 hour |
-| 3 | 4 hours |
-| 4 | none — `NEEDS_OPERATOR` |
+| 3 | none — `NEEDS_OPERATOR` immediately |
+
+There is no fourth automatic execution, and therefore no third backoff stage. An
+earlier revision of this table named a 4-hour third backoff; the runtime has
+always exhausted on failure #3, so that interval was unreachable and the table
+was describing a stage no asset could ever wait in.
 
 **Progress resets the budget.** If an automatic execution commits at least one
 new canonical `video_renditions` row against the baseline the intent recorded,

@@ -36,9 +36,12 @@ const (
 	autoRecoveryNeedsOperator = "NEEDS_OPERATOR"
 )
 
-// MaxAutoEnhancementFailures is the consecutive automatic failure budget. The
-// fourth consecutive failure does not run: the third one lands on
-// NEEDS_OPERATOR instead of scheduling again.
+// MaxAutoEnhancementFailures is the consecutive automatic failure budget.
+//
+// Three failed automatic executions is the maximum. Failure #1 and #2 schedule a
+// backoff; failure #3 lands on NEEDS_OPERATOR immediately rather than scheduling
+// a fourth execution. There is deliberately no fourth automatic attempt and
+// therefore no third backoff stage.
 const MaxAutoEnhancementFailures = 3
 
 // autoRecoveryIntentLease bounds how long a DISPATCHED SCHEDULED intent stays
@@ -93,15 +96,21 @@ var ErrEnhancementIntentSuperseded = errors.New("media enhancement intent is sup
 
 // autoEnhancementBackoff is the automatic retry schedule. Deadlines are written
 // as database timestamps, so the schedule is not held in any process.
+//
+// The schedule is total over the only inputs that can reach it. A backoff is
+// scheduled only for a failure count strictly below MaxAutoEnhancementFailures,
+// so the reachable failure arguments are exactly 1 and 2; failure #3 reaches
+// NEEDS_OPERATOR without consulting this schedule. The override and release
+// paths ask for the first-failure interval explicitly.
+//
+// A third backoff stage would be unreachable, so it is not offered: a schedule
+// that named an interval no execution can ever wait is a claim the runtime does
+// not honour.
 func autoEnhancementBackoff(consecutiveFailures int) time.Duration {
-	switch {
-	case consecutiveFailures <= 1:
-		return 15 * time.Minute
-	case consecutiveFailures == 2:
+	if consecutiveFailures >= 2 {
 		return time.Hour
-	default:
-		return 4 * time.Hour
 	}
+	return 15 * time.Minute
 }
 
 // AutoRecoveryPhase names one safe, structured observation from the automatic
