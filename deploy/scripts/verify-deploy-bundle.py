@@ -4,6 +4,7 @@
 Docker is the only external service mocked. bwrap gives the host its real
 production paths without accessing or changing any existing host state.
 """
+import gzip
 import hashlib
 import json
 import os
@@ -212,37 +213,88 @@ def restage_release_capability(state, sha, capability, *, fixture):
     return fields
 
 
-def stage_schema46_rollback_artifact(state, tooling, fixture):
-    """Stage a distinct old-behaviour artifact for the schema46 boundary."""
+def stage_schema46_rollback_artifact(state, source, fixture, importer, host_env):
+    """Build a distinct old-behaviour artifact and IMPORT it the ordinary way.
+
+    This used to copy the candidate's already-imported tooling tree and hand-place
+    the result under releases/, which meant it proved nothing about how the
+    rollback builder actually packages its bundle. The schema46 production
+    release then found that the builder emitted `deploy/*` where the importer
+    looks for `deploy/hostinger/*`, so the real artifact could not be imported at
+    all and had to be staged by hand.
+
+    So two things changed. The tooling tree is staged by the SAME
+    `stage_release_tooling` the real builder calls, out of the release closure
+    both builders share, and the finished artifact is handed to the real
+    `import-release.sh` instead of being unpacked into place. A builder that
+    emits an unimportable layout now fails here.
+
+    Docker is still mocked, so this proves packaging and import, not image
+    contents; `deploy/schema46/verify-rollback-artifact-import.sh` runs the same
+    path against a genuinely built artifact.
+    """
     base = "0fee657897c939cb679c9d804d184542bb2f692f"
     patch = hashlib.sha256(b"schema46-rollback-compat").hexdigest()
     release = hashlib.sha256((base + patch).encode()).hexdigest()[:40]
     staging = fixture / "schema46-rollback-staging"
-    shutil.copytree(tooling, staging)
-    run(["chmod", "-R", "u+w", str(staging)])
+    staging.mkdir()
+    # The real packaging code path, not a copy of somebody else's output.
+    run(["bash", "-c",
+         '. "$1/deploy/hostinger/release-closure.sh"\n'
+         'stage_release_tooling "$1" "$2"\n'
+         'assert_release_tooling_importable "$2"\n',
+         "stage-rollback-tooling", str(source), str(staging)])
+    # The exact invariant the production release discovered was missing.
+    assert (staging / "deploy/hostinger/release-artifact.sh").is_file(), \
+        "rollback tooling does not expose the importer's entrypoint"
     (staging / "release-tooling.env").write_text(
         f"RELEASE_SHA={release}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA46_CAPABILITY=auto-enhancement-lesson-preview-v1\n")
-    (staging / "tooling.sha256").unlink()
     run(["bash", "-c", "find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256"], cwd=staging)
-    destination = state / "releases" / release
-    destination.mkdir(parents=True)
-    run(["tar", "-czf", str(destination / "deploy-bundle.tar.gz"), "-C", str(staging), "--transform", "s,^./,,", "."])
-    digest = hashlib.sha256((destination / "deploy-bundle.tar.gz").read_bytes()).hexdigest()
-    (destination / "deploy-bundle.tar.gz.sha256").write_text(f"{digest}  deploy-bundle.tar.gz\n")
-    (destination / "images.tar.gz").write_bytes(b"schema46 rollback images\n")
-    (destination / "images.tar.gz.sha256").write_text(f"{hashlib.sha256((destination / 'images.tar.gz').read_bytes()).hexdigest()}  images.tar.gz\n")
-    (destination / "tooling").mkdir()
-    run(["tar", "-xzf", str(destination / "deploy-bundle.tar.gz"), "-C", str(destination / "tooling")])
+
+    incoming = state / "incoming" / release
+    incoming.mkdir(parents=True)
+    run(["tar", "-czf", str(incoming / "deploy-bundle.tar.gz"), "-C", str(staging), "--transform", "s,^./,,", "."])
+    digest = hashlib.sha256((incoming / "deploy-bundle.tar.gz").read_bytes()).hexdigest()
+    (incoming / "deploy-bundle.tar.gz.sha256").write_text(f"{digest}  deploy-bundle.tar.gz\n")
+    # A real gzip member: the importer pipes this through `gzip -dc` before the
+    # mocked `docker load` ever sees it.
+    (incoming / "images.tar.gz").write_bytes(gzip.compress(b"schema46 rollback images\n"))
+    (incoming / "images.tar.gz.sha256").write_text(
+        f"{hashlib.sha256((incoming / 'images.tar.gz').read_bytes()).hexdigest()}  images.tar.gz\n")
     images = {role: f"gradex-{'backend-proof' if role == 'PROOF' else role.lower()}:schema46-rollback-{release[:12]}" for role in ("BACKEND", "FRONTEND", "PROOF")}
     lines = [f"GRADEX_RELEASE_SHA={release}", f"GRADEX_SCHEMA46_ROLLBACK_BASE_SHA={base}", f"GRADEX_SCHEMA46_ROLLBACK_PATCH_SHA256={patch}", "GRADEX_SCHEMA_MIN_VERSION=44", "GRADEX_SCHEMA_MAX_VERSION=46"]
     for role, image in images.items(): lines.append(f"GRADEX_{role}_IMAGE={image}")
     for role, image in images.items(): lines.append(f"GRADEX_{role}_IMAGE_ID=sha256:{hashlib.sha256(image.encode()).hexdigest()}")
     lines.append(f"GRADEX_DEPLOY_BUNDLE_SHA256={digest}")
-    (destination / "release.env").write_text("\n".join(lines) + "\n")
+    (incoming / "release.env").write_text("\n".join(lines) + "\n")
+
+    # The importer verifies image revision labels, so the mock has to answer for
+    # these images before it runs.
+    configuration = {"revisions": {image: release for image in images.values()},
+                     "ranges": {images["BACKEND"]: "44 46"},
+                     "ceilings": {images["BACKEND"]: "46"}}
+    previous = json.loads((fixture / "docker.json").read_text())
+    merged = {**previous}
+    for key, value in configuration.items():
+        merged[key] = {**previous.get(key, {}), **value}
+    (fixture / "docker.json").write_text(json.dumps(merged))
+
+    # THE regression. No rearrangement, no hand-placement: the ordinary importer
+    # consumes the ordinary artifact.
+    run(["bash", str(importer), release], env=host_env)
+    destination = state / "releases" / release
+    assert (destination / "tooling/deploy/hostinger/release-artifact.sh").is_file(), \
+        "imported rollback tooling is not at the canonical path"
+    assert all(path.stat().st_mode & 0o222 == 0 for path in destination.rglob("*")), \
+        "imported rollback artifact is not immutable"
+
+    # Patch evidence is the one artifact file the generic importer does not carry,
+    # because only the schema46 rollback artifact has it. The builder writes it
+    # beside the manifest; stage it the same way here.
+    run(["chmod", "u+w", str(destination)])
     (destination / "schema46-rollback-compat.sha256").write_text(f"{patch}  rollback-compat.patch\n")
     run(["chmod", "-R", "a-w", str(destination)])
-    return release, {"revisions": {image: release for image in images.values()}, "ranges": {images["BACKEND"]: "44 46"}, "ceilings": {images["BACKEND"]: "46"}}
-
+    return release, configuration
 
 def main():
     if not shutil.which("bwrap"):
@@ -357,20 +409,28 @@ def main():
         floor = stage_application_floor(state, tooling, fixture)
         config = {**config, "revisions": floor["revisions"], "ceilings": floor["ceilings"]}
 
-        def host(command, overrides=None, configuration=None):
+        def host(command, overrides=None, configuration=None, args=(), keep_runtime=False, release=None):
+            """Run one host.sh command inside the no-Git production filesystem.
+
+            `args` appends command arguments. `keep_runtime` leaves runtime.env
+            exactly as the previous call left it, which is what the release
+            selection tests need: they assert on what the command wrote, so the
+            harness must not rewrite the file underneath them.
+            """
             for started in fixture.glob("started-*"):
                 started.unlink()
             (fixture / "schema-state").unlink(missing_ok=True)
             (fixture / "docker.log").write_text("")
             (fixture / "docker.json").write_text(json.dumps(configuration or config))
-            runtime = dict(values, **(overrides or {}))
-            (state / "runtime.env").write_text("".join(f"{k}={shlex.quote(v)}\n" for k, v in runtime.items()))
-            (state / "runtime.env").chmod(0o600)
+            if not keep_runtime:
+                runtime = dict(values, **(overrides or {}))
+                (state / "runtime.env").write_text("".join(f"{k}={shlex.quote(v)}\n" for k, v in runtime.items()))
+                (state / "runtime.env").chmod(0o600)
             result = run(["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/home", "--dir", "/home/deploy",
                           "--bind", str(state), HOST_STATE, "--tmpfs", "/tmp", "--bind", str(fixture), "/tmp/fixture",
                           "--chdir", "/tmp/fixture", "--setenv", "FIXTURE", "/tmp/fixture", "--setenv", "PATH", "/tmp/fixture/bin:/usr/bin:/bin",
                           "--setenv", "GRADEX_HOST_STATE_DIR", HOST_STATE, "--setenv", "GRADEX_HOST_PROJECT", "gradex-production",
-                          "bash", f"{HOST_STATE}/releases/{sha}/tooling/deploy/hostinger/host.sh", command], ok=False)
+                          "bash", f"{HOST_STATE}/releases/{release or sha}/tooling/deploy/hostinger/host.sh", command, *args], ok=False)
             assert not (fixture / "GIT_CALLED").exists(), "production wrapper called Git"
             calls = [json.loads(line) for line in (fixture / "docker.log").read_text().splitlines()]
             return result, calls
@@ -533,7 +593,7 @@ def main():
             result, calls = host(closed, configuration={**config, "schema_state": "42|false"})
             assert result.returncode and not any(a[0] == "compose" for a in calls), (closed, result.stderr)
 
-        rollback_sha, rollback_images = stage_schema46_rollback_artifact(state, tooling, fixture)
+        rollback_sha, rollback_images = stage_schema46_rollback_artifact(state, source, fixture, importer, host_env)
         config = {**config, **rollback_images}
         values["GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA"] = rollback_sha
         backup_dir = state / "backups"
@@ -577,6 +637,153 @@ def main():
 
         print("deploy-bundle: schema46 dual-artifact no-Git proof passed")
         covered.append("schema46-dual-artifact")
+
+        # ---- Release selection. The schema46 production release had to select
+        # its release by hand-editing runtime.env, because the boundary reads the
+        # selection from there and only apply-release — which starts containers —
+        # wrote it. `select-release` closes that, and these tests are what say it
+        # actually closed it.
+        runtime_env = state / "runtime.env"
+
+        def selection_of(text):
+            """The release-selection keys only, in file order."""
+            return [line for line in text.splitlines()
+                    if line.startswith(("GRADEX_RELEASE_SHA=", "GRADEX_BACKEND_IMAGE=",
+                                        "GRADEX_FRONTEND_IMAGE=", "GRADEX_PROOF_IMAGE=",
+                                        "GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA="))]
+
+        def select(*args, configuration=None, keep=True):
+            return host("select-release", args=args, configuration=configuration or config, keep_runtime=keep)
+
+        # A runtime.env that names an OLD release and carries no rollback key at
+        # all: exactly the shape the production host was in before the release.
+        stale = dict(values, GRADEX_RELEASE_SHA="9"*40,
+                     GRADEX_BACKEND_IMAGE="gradex-backend:hostinger-999999999999",
+                     GRADEX_FRONTEND_IMAGE="gradex-frontend:hostinger-999999999999",
+                     GRADEX_PROOF_IMAGE="gradex-backend-proof:hostinger-999999999999")
+        stale.pop("GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA", None)
+        stale_text = "".join(f"{k}={shlex.quote(v)}\n" for k, v in stale.items())
+        # A comment and an unrelated secret, to prove neither is disturbed.
+        stale_text = "# gradex production runtime\n" + stale_text + "UNRELATED_SECRET='keep me'\n"
+
+        def reset_runtime():
+            runtime_env.write_text(stale_text)
+            runtime_env.chmod(0o600)
+
+        # Happy path: candidate + rollback selected in one atomic write.
+        reset_runtime()
+        result, calls = select(sha, rollback_sha)
+        assert result.returncode == 0, result.stderr
+        selected = runtime_env.read_text()
+        assert f"GRADEX_RELEASE_SHA={sha}" in selected
+        assert f"GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA={rollback_sha}" in selected
+        for key in ("GRADEX_BACKEND_IMAGE", "GRADEX_FRONTEND_IMAGE", "GRADEX_PROOF_IMAGE"):
+            assert f"{key}={fields[key]}" in selected, key
+        # Selection is selection: nothing was started, migrated or recreated.
+        assert not any(call[0] == "compose" for call in calls), calls
+        assert not any("up-schema-45" in call or "up-schema-46" in call for call in calls), calls
+        # Comments, unrelated variables and secrets survive untouched.
+        assert selected.startswith("# gradex production runtime\n")
+        assert "UNRELATED_SECRET='keep me'" in selected
+        assert oct(runtime_env.stat().st_mode & 0o777) == "0o600"
+        # The command prints no secret value.
+        assert "keep me" not in result.stdout + result.stderr
+
+        # Idempotence: the same valid pair again is a no-op, byte for byte.
+        again, _ = select(sha, rollback_sha)
+        assert again.returncode == 0, again.stderr
+        assert runtime_env.read_text() == selected, "second identical selection drifted"
+        assert len(selection_of(selected)) == 5, selection_of(selected)
+        assert selected.count("GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA=") == 1
+
+        # Read-only inspection of what was selected, with no secret in the output.
+        shown, show_calls = host("show-release-selection", keep_runtime=True)
+        assert shown.returncode == 0, shown.stderr
+        assert sha in shown.stdout and rollback_sha in shown.stdout
+        assert "auto-enhancement-lesson-preview-v1" in shown.stdout
+        assert "keep me" not in shown.stdout
+        assert not any(call[0] == "compose" for call in show_calls), show_calls
+
+        # The boundary consumes exactly that selected state, with no hand editing
+        # in between. This is the operator workflow the release had to improvise.
+        result, calls = host(schema46, configuration={**config, "schema_state": "44|false"}, keep_runtime=True)
+        assert result.returncode == 0, result.stderr
+        runs = [call for call in calls if call[0] == "compose" and "run" in call]
+        assert any("up-schema-45" in call for call in runs), runs
+        assert any("up-schema-46" in call for call in runs), runs
+
+        # ---- Negative matrix. Every one of these must refuse, and every one of
+        # these must leave runtime.env byte-identical to what it found.
+        absent_release = "1"*40
+        moved_rollback = state / "releases" / (rollback_sha + ".hidden")
+        wrong_capability_sha = FLOOR_SHA  # staged under the schema41 marker
+
+        def refuses(label, args, configuration=None, before=None):
+            reset_runtime()
+            if before:
+                before()
+            untouched = runtime_env.read_text()
+            rejected, rejected_calls = select(*args, configuration=configuration)
+            assert rejected.returncode, f"{label}: selection was accepted"
+            assert runtime_env.read_text() == untouched, f"{label}: runtime.env was modified by a failed selection"
+            assert not any(call[0] == "compose" for call in rejected_calls), f"{label}: touched Compose"
+            # No half-written temporary left behind next to the real file.
+            assert not list(state.glob("runtime.env.next.*")), f"{label}: left a temporary runtime.env"
+
+        refuses("unknown candidate", (absent_release, rollback_sha))
+        refuses("missing rollback artifact", (sha, absent_release))
+        refuses("schema46 candidate with no rollback", (sha,))
+        refuses("candidate and rollback are the same identity", (sha, sha))
+        refuses("malformed candidate", ("not-a-sha", rollback_sha))
+        refuses("wrong capability carries a rollback", (wrong_capability_sha, rollback_sha))
+        refuses("candidate compiled range is not 44..46", (sha, rollback_sha),
+                configuration={**config, "ranges": {fields["GRADEX_BACKEND_IMAGE"]: "45 46"}})
+        refuses("rollback compiled range is not 44..46", (sha, rollback_sha),
+                configuration={**config, "ranges": {next(iter(rollback_images["ranges"])): "43 46"}})
+        refuses("candidate image revision disagrees with its manifest", (sha, rollback_sha),
+                configuration={**config, "bad_revision": {fields["GRADEX_BACKEND_IMAGE"]: "3"*40}})
+        refuses("rollback artifact is not imported", (sha, rollback_sha),
+                before=lambda: (state / "releases" / rollback_sha).rename(moved_rollback))
+        moved_rollback.rename(state / "releases" / rollback_sha)
+
+        # Corrupt manifest and corrupt checksum, restored afterwards so the rest
+        # of the fixture still sees a valid artifact.
+        candidate_release = state / "releases" / sha
+        run(["chmod", "-R", "u+w", str(candidate_release)])
+        manifest_path = candidate_release / "release.env"
+        original_release_env = manifest_path.read_text()
+        manifest_path.write_text(original_release_env.replace(fields["GRADEX_DEPLOY_BUNDLE_SHA256"], "0"*64))
+        refuses("corrupt candidate manifest", (sha, rollback_sha))
+        manifest_path.write_text(original_release_env)
+        checksum_path = candidate_release / "deploy-bundle.tar.gz.sha256"
+        original_checksum = checksum_path.read_text()
+        checksum_path.write_text(f"{'0'*64}  deploy-bundle.tar.gz\n")
+        refuses("corrupt candidate bundle checksum", (sha, rollback_sha))
+        checksum_path.write_text(original_checksum)
+
+        rollback_release = state / "releases" / rollback_sha
+        run(["chmod", "-R", "u+w", str(rollback_release)])
+        patch_evidence = rollback_release / "schema46-rollback-compat.sha256"
+        original_evidence = patch_evidence.read_text()
+        patch_evidence.write_text(f"{'0'*64}  rollback-compat.patch\n")
+        refuses("rollback patch evidence disagrees with its manifest", (sha, rollback_sha))
+        patch_evidence.write_text(original_evidence)
+        rollback_manifest = rollback_release / "release.env"
+        original_rollback_env = rollback_manifest.read_text()
+        rollback_manifest.write_text(original_rollback_env.replace(
+            "GRADEX_SCHEMA46_ROLLBACK_BASE_SHA=0fee657897c939cb679c9d804d184542bb2f692f",
+            "GRADEX_SCHEMA46_ROLLBACK_BASE_SHA=" + "4"*40))
+        refuses("rollback artifact has the wrong old-behaviour base", (sha, rollback_sha))
+        rollback_manifest.write_text(original_rollback_env)
+        run(["chmod", "-R", "a-w", str(candidate_release), str(rollback_release)])
+
+        # Restore a valid selection so nothing downstream inherits a stale file.
+        reset_runtime()
+        assert select(sha, rollback_sha)[0].returncode == 0
+
+        print("deploy-bundle: release selection, negative matrix, idempotence and "
+              "failed-write atomicity passed")
+        covered.append("release-selection")
         # Read-only imported trees need write permission solely for test cleanup.
         for directory, _, files in os.walk(fixture):
             Path(directory).chmod(0o700)
@@ -585,7 +792,7 @@ def main():
     return covered
 
 
-REQUIRED_COVERAGE = ("schema41-42-historical", "schema46-dual-artifact")
+REQUIRED_COVERAGE = ("schema41-42-historical", "schema46-dual-artifact", "release-selection")
 
 
 if __name__ == "__main__":

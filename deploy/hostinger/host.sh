@@ -1319,18 +1319,44 @@ manifest_value() {
   printf '%s' "$value"
 }
 
+# The single writer of release selection in runtime.env. Every caller reaches
+# the file through here, so there is exactly one place that can leave it
+# half-written — and it cannot, because the rewrite lands on a temporary file in
+# the same directory and becomes visible by rename. A failure anywhere before
+# that rename removes the temporary and leaves runtime.env byte-identical.
+#
+# The optional fifth argument is the schema46 rollback release identity. Callers
+# that do not manage it (apply-release, which selects one already-verified
+# application and must not touch the boundary's rollback binding) omit it and
+# the key is carried through untouched. Passing it inserts the key when the file
+# does not already carry one, so a host that predates the boundary does not have
+# to be hand-edited once.
 persist_release_selection() {
-  local release="$1" backend="$2" frontend="$3" proof="$4" temporary
+  local release="$1" backend="$2" frontend="$3" proof="$4" rollback="${5:-}" temporary
   temporary="$(mktemp "$S12_HOST_STATE_DIR/runtime.env.next.XXXXXX")"
   chmod 600 "$temporary"
-  if ! awk -v release="$release" -v backend="$backend" -v frontend="$frontend" -v proof="$proof" '
-    BEGIN { release_count = backend_count = frontend_count = proof_count = 0 }
+  if ! awk -v release="$release" -v backend="$backend" -v frontend="$frontend" -v proof="$proof" \
+    -v rollback="$rollback" '
+    BEGIN { release_count = backend_count = frontend_count = proof_count = rollback_count = 0 }
     /^GRADEX_RELEASE_SHA=/ { print "GRADEX_RELEASE_SHA=" release; release_count++; next }
     /^GRADEX_BACKEND_IMAGE=/ { print "GRADEX_BACKEND_IMAGE=" backend; backend_count++; next }
     /^GRADEX_FRONTEND_IMAGE=/ { print "GRADEX_FRONTEND_IMAGE=" frontend; frontend_count++; next }
     /^GRADEX_PROOF_IMAGE=/ { print "GRADEX_PROOF_IMAGE=" proof; proof_count++; next }
+    /^GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA=/ {
+      rollback_count++
+      # Rewrite in place when this call manages the key; otherwise carry the
+      # existing line through unchanged.
+      if (rollback != "") { print "GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA=" rollback } else { print }
+      next
+    }
     { print }
-    END { if (release_count != 1 || backend_count != 1 || frontend_count != 1 || proof_count != 1) exit 42 }
+    END {
+      # Append only when the key is genuinely absent, so selecting the same pair
+      # twice cannot duplicate the line.
+      if (rollback != "" && rollback_count == 0) print "GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA=" rollback
+      if (release_count != 1 || backend_count != 1 || frontend_count != 1 || proof_count != 1) exit 42
+      if (rollback_count > 1) exit 42
+    }
   ' "$S12_ENV_FILE" >"$temporary"; then
     rm -f -- "$temporary"
     die "runtime environment release keys are missing or duplicated"
@@ -1499,6 +1525,122 @@ rollback_schema46_application() {
   note "schema46 application rollback completed without a database migration"
 }
 
+# Selection/staging only. It writes the release-selection keys in runtime.env and
+# does nothing else: no container is started or stopped, no migration runs, no
+# schema is touched and no feature is enabled.
+#
+# It exists because the named schema46 boundary reads its selection from
+# runtime.env while `apply-release` — which starts containers — was the only
+# thing that wrote it. The schema46 production release therefore needed the
+# operator to hand-edit runtime.env, including inserting the rollback release
+# identity, before the boundary could run. That is an easy file to get wrong at
+# exactly the wrong moment.
+#
+# Selecting is not permission to skip anything: the boundary re-verifies every
+# identity independently afterwards. This command's job is to refuse an
+# incoherent pair early, while refusing is still free.
+select_release() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die "select-release requires a candidate release SHA and an optional rollback release SHA"
+  require_tools
+  load_environment
+  validate_local_targets
+  assert_production_project_scope
+  local candidate="$1" rollback="${2:-}" candidate_dir rollback_dir capability
+  local backend frontend proof patch_hash
+  [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || die "candidate release SHA must be 40 lowercase hexadecimal characters"
+  candidate_dir="$S12_HOST_STATE_DIR/releases/$candidate"
+  [ -d "$candidate_dir" ] || die "candidate release $candidate is not imported"
+
+  # Bundle first: it is what names the capability, and an artifact whose bundle
+  # does not validate cannot be trusted to describe its own images.
+  verify_release_bundle "$candidate_dir" "$candidate"
+  capability="$(bundle_capability "$candidate_dir/tooling")"
+  verify_release_images "$candidate_dir/release.env" "$candidate"
+  backend="$(artifact_value "$candidate_dir/release.env" GRADEX_BACKEND_IMAGE)"
+  frontend="$(artifact_value "$candidate_dir/release.env" GRADEX_FRONTEND_IMAGE)"
+  proof="$(artifact_value "$candidate_dir/release.env" GRADEX_PROOF_IMAGE)"
+  case "$backend $frontend $proof" in
+    *:latest*|*' 'latest*) die "release selection refuses latest image tags" ;;
+  esac
+
+  # Per-boundary requirements. A schema46 candidate is selectable only together
+  # with the rollback artifact that boundary refuses to run without, so the pair
+  # can never be left half-selected: candidate pointing at release A while the
+  # rollback key still names an artifact from an unrelated release.
+  case "$capability" in
+    "$SCHEMA46_BUNDLE_CAPABILITY")
+      require_image_schema_range "$backend" 44 46
+      [ -n "$rollback" ] ||
+        die "a schema46 candidate requires its rollback release identity; the boundary will not run without one"
+      ;;
+    *)
+      [ -z "$rollback" ] ||
+        die "a rollback release identity was given but this candidate's capability does not use one"
+      ;;
+  esac
+
+  if [ -n "$rollback" ]; then
+    [[ "$rollback" =~ ^[0-9a-f]{40}$ ]] || die "rollback release SHA must be 40 lowercase hexadecimal characters"
+    [ "$rollback" != "$candidate" ] || die "the rollback artifact cannot be the forward candidate"
+    rollback_dir="$S12_HOST_STATE_DIR/releases/$rollback"
+    [ -d "$rollback_dir" ] || die "rollback release $rollback is not imported"
+    verify_release_bundle "$rollback_dir" "$rollback"
+    verify_release_images "$rollback_dir/release.env" "$rollback"
+    require_image_schema_range "$(artifact_value "$rollback_dir/release.env" GRADEX_BACKEND_IMAGE)" 44 46
+    [ -f "$rollback_dir/schema46-rollback-compat.sha256" ] ||
+      die "schema46 rollback patch verification evidence is absent"
+    patch_hash="$(artifact_value "$rollback_dir/release.env" GRADEX_SCHEMA46_ROLLBACK_PATCH_SHA256)"
+    [[ "$patch_hash" =~ ^[0-9a-f]{64}$ ]] || die "schema46 rollback patch hash is invalid"
+    [ "$(awk '{print $1}' "$rollback_dir/schema46-rollback-compat.sha256")" = "$patch_hash" ] ||
+      die "schema46 rollback patch verification evidence disagrees with its manifest"
+    [ "$(artifact_value "$rollback_dir/release.env" GRADEX_SCHEMA46_ROLLBACK_BASE_SHA)" = 0fee657897c939cb679c9d804d184542bb2f692f ] ||
+      die "schema46 rollback artifact has an unexpected old-behaviour base"
+  fi
+
+  # Everything above refuses without touching the file. Only now is anything
+  # written, and that write is a rename.
+  persist_release_selection "$candidate" "$backend" "$frontend" "$proof" "$rollback"
+  note "selected release $candidate ($capability)${rollback:+ with rollback artifact $rollback}; nothing was started, migrated or enabled"
+}
+
+# Read-only. Prints the selection and the identities behind it, and nothing that
+# is a secret: runtime.env carries database, Redis, object-store and signing
+# credentials, and this command is meant to be safe to run and paste.
+show_release_selection() {
+  require_tools
+  load_environment
+  validate_local_targets
+  local release="${GRADEX_RELEASE_SHA:-}" rollback="${GRADEX_SCHEMA46_ROLLBACK_RELEASE_SHA:-}"
+  local release_dir="$S12_HOST_STATE_DIR/releases/${GRADEX_RELEASE_SHA:-}"
+  printf 'candidate release: %s\n' "${release:-<unset>}"
+  if [ -n "$release" ] && [ -f "$release_dir/tooling/release-tooling.env" ]; then
+    printf 'candidate capability: %s\n' "$(bundle_capability "$release_dir/tooling")"
+  else
+    printf 'candidate capability: <not imported on this host>\n'
+  fi
+  printf 'candidate backend image: %s\n' "${GRADEX_BACKEND_IMAGE:-<unset>}"
+  printf 'candidate frontend image: %s\n' "${GRADEX_FRONTEND_IMAGE:-<unset>}"
+  printf 'candidate proof image: %s\n' "${GRADEX_PROOF_IMAGE:-<unset>}"
+  if [ -n "${GRADEX_BACKEND_IMAGE:-}" ] && docker image inspect "$GRADEX_BACKEND_IMAGE" >/dev/null 2>&1; then
+    printf 'candidate backend image ID: %s\n' "$(docker image inspect --format '{{.Id}}' "$GRADEX_BACKEND_IMAGE")"
+    printf 'candidate compiled schema range: %s\n' "$(image_schema_range "$GRADEX_BACKEND_IMAGE")"
+  else
+    printf 'candidate backend image ID: <image not loaded>\n'
+  fi
+  printf 'schema46 rollback release: %s\n' "${rollback:-<unset>}"
+  if [ -n "$rollback" ] && [ -f "$S12_HOST_STATE_DIR/releases/$rollback/release.env" ]; then
+    local rollback_backend
+    rollback_backend="$(artifact_value "$S12_HOST_STATE_DIR/releases/$rollback/release.env" GRADEX_BACKEND_IMAGE)"
+    printf 'schema46 rollback backend image: %s\n' "$rollback_backend"
+    if docker image inspect "$rollback_backend" >/dev/null 2>&1; then
+      printf 'schema46 rollback backend image ID: %s\n' "$(docker image inspect --format '{{.Id}}' "$rollback_backend")"
+      printf 'schema46 rollback compiled schema range: %s\n' "$(image_schema_range "$rollback_backend")"
+    else
+      printf 'schema46 rollback backend image ID: <image not loaded>\n'
+    fi
+  fi
+}
+
 # PostgreSQL is the authority on the marker. The migration commands check it too;
 # this reads it from the host side so the wrapper never starts an application
 # against a version it did not verify.
@@ -1627,7 +1769,7 @@ rollback_schema_42_enhancement_recovery() {
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-core-schema-42-enhancement-recovery|up-core-schema-46-media-preview|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|rollback-schema-42-enhancement-recovery|rollback-schema46-application|enhancement-drain|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-core-schema-42-enhancement-recovery|up-core-schema-46-media-preview|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|select-release CANDIDATE_SHA [ROLLBACK_SHA]|show-release-selection|rollback-schema-41-foundation|rollback-schema-42-enhancement-recovery|rollback-schema46-application|enhancement-drain|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1652,6 +1794,8 @@ case "${1:-}" in
   restore) [ "$#" -le 2 ] || usage; shift; restore_backup "$@" ;;
   verify-restore) [ "$#" = 1 ] || usage; verify_restore ;;
   apply-release) shift; apply_release "$@" ;;
+  select-release) shift; select_release "$@" ;;
+  show-release-selection) [ "$#" = 1 ] || usage; show_release_selection ;;
   rollback-schema-41-foundation) [ "$#" = 1 ] || usage; rollback_schema_41_foundation ;;
   rollback-schema-42-enhancement-recovery) [ "$#" = 1 ] || usage; rollback_schema_42_enhancement_recovery ;;
   rollback-schema46-application) [ "$#" = 1 ] || usage; rollback_schema46_application ;;
