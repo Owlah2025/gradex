@@ -15,6 +15,13 @@ The command applies 0045, verifies `45|false`, then applies 0046 and verifies
 force, or marker repair. A dirty marker after either step means no application is
 selected automatically; preserve the actual marker and make a recovery decision.
 
+The disposable application-selection drill is
+`deploy/schema46/verify-application-rollback.sh`. It runs the extracted no-Git
+dual-artifact boundary and the pinned rollback compatibility proof, covering the
+candidate selection, rollback selection on the unchanged clean46 marker, return
+to the candidate, and the schema43 refusal. This is release-tooling evidence,
+not production evidence.
+
 If the candidate cannot start or a post-start smoke fails on clean schema 46,
 select the separately imported schema46 rollback-compatible old-behaviour
 artifact through application release selection. Its compiled range is `44..46`;
