@@ -2123,6 +2123,7 @@ export const en = {
           "Choose which lessons visitors can preview from the Curriculum. Open a lesson and turn on \u201cOffer as a free preview\u201d \u2014 visitors watch it on the course page before buying.",
         lessonFirstAction: "Go to Curriculum",
         legacyTitle: "Legacy course preview",
+        legacyDisclosure: "Legacy course preview (compatibility)",
         legacyDescription:
           "This separate preview is kept for existing courses. New previews should be enabled on individual lessons in the Curriculum.",
       },

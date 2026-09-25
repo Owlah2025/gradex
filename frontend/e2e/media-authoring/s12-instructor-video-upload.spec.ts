@@ -275,6 +275,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // It is intentionally completed before any Lesson exists, which proves the
   // Instructor UI cannot be selecting or reusing protected Lesson media.
   const mp4Path = makeSampleMP4();
+  // Reached through the compatibility disclosure: public preview is a Lesson
+  // permission now, so a revision with no legacy preview no longer presents the
+  // course-level uploader directly. This journey covers the legacy shape.
+  await page.getByTestId("legacy-preview-disclosure").locator("summary").click();
   const publicPreviewAuthoring = page.getByTestId("public-preview-authoring");
   await expect(
     publicPreviewAuthoring.getByTestId("public-preview-state"),

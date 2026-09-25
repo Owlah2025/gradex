@@ -170,7 +170,14 @@ test("an Admin plays the real public preview belonging to the candidate revision
 
   // The public preview is its own PREVIEW Asset Version, uploaded before any Lesson exists — which
   // is also the proof that this control cannot be reusing protected Lesson media.
+  //
+  // Public preview is a Lesson permission now, so the course-level uploader is no longer what an
+  // Instructor lands on: a revision with no legacy preview reaches it only through a closed
+  // compatibility disclosure. This journey is specifically the LEGACY course-level preview — the
+  // shape existing courses already carry — so it deliberately opens that disclosure rather than
+  // pretending the old control is still the primary workflow.
   const previewFile = makeSampleMP4(3);
+  await page.getByTestId("legacy-preview-disclosure").locator("summary").click();
   const previewAuthoring = page.getByTestId("public-preview-authoring");
   await expect(previewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is attached");
   await previewAuthoring.locator('input[type="file"]').setInputFiles(previewFile);

@@ -998,6 +998,9 @@ export function CourseBuilder() {
                           would be more legacy data to carry. */}
                       <LessonPreviewGuidance copy={instructor.media.preview} />
                       {revision.preview_asset_version_id ? (
+                        // Already has one: it stays a first-class management
+                        // surface, because an Instructor who needs to replace or
+                        // remove it should not have to go looking.
                         <PublicPreviewUpload
                           courseID={selectedCourse.id}
                           revisionID={revision.id}
@@ -1008,7 +1011,31 @@ export function CourseBuilder() {
                           locale={locale}
                           onChanged={refreshSelectedCourse}
                         />
-                      ) : null}
+                      ) : (
+                        // Does not have one: still reachable, but closed and
+                        // named as compatibility, so it is never what an
+                        // Instructor lands on when creating a preview.
+                        <details
+                          data-testid="legacy-preview-disclosure"
+                          className="rounded-lg border border-dashed border-border p-3"
+                        >
+                          <summary className="cursor-pointer text-sm font-semibold text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                            {instructor.media.preview.legacyDisclosure}
+                          </summary>
+                          <div className="mt-3">
+                            <PublicPreviewUpload
+                              courseID={selectedCourse.id}
+                              revisionID={revision.id}
+                              hasPreview={false}
+                              legacy
+                              previewAssetVersionID={revision.preview_asset_version_id}
+                              previewAssetState={revision.preview_asset_state}
+                              locale={locale}
+                              onChanged={refreshSelectedCourse}
+                            />
+                          </div>
+                        </details>
+                      )}
                       <AuthoringContinue section="PREVIEW" label={authoring.continueAction} />
                     </div>
                   ),

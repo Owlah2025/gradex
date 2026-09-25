@@ -30,17 +30,30 @@ const BUILDER = "src/components/instructor/course-builder.tsx";
 const GUIDANCE = "src/components/instructor/lesson-preview-guidance.tsx";
 const UPLOADER = "src/components/instructor/public-preview-upload.tsx";
 
-test("a course with no legacy preview is never offered the old uploader", () => {
+test("a course with no legacy preview never lands on the old uploader", () => {
   const builder = readSource(BUILDER);
-  // The uploader is mounted only behind the presence of legacy preview data, so
-  // a new course cannot reach it at all.
+  // A revision that already has a legacy preview keeps a first-class management
+  // surface, so replacing or removing it does not require hunting.
   assert.match(
     builder,
-    /\{revision\.preview_asset_version_id \? \(\s*<PublicPreviewUpload/,
-    "the legacy uploader must be conditional on existing legacy preview data",
+    /\{revision\.preview_asset_version_id \? \(/,
+    "the legacy uploader must branch on existing legacy preview data",
   );
-  // And when it is mounted, it is mounted as the legacy surface.
-  assert.match(builder, /<PublicPreviewUpload[\s\S]{0,400}?legacy/);
+  // A revision that has none reaches it only through a closed disclosure named
+  // as compatibility, so creating a preview never starts there.
+  assert.match(builder, /<details\s+data-testid="legacy-preview-disclosure"/);
+  assert.doesNotMatch(
+    builder,
+    /<details\s+data-testid="legacy-preview-disclosure"[\s\S]{0,200}?\sopen[\s=>]/,
+    "the compatibility disclosure must start closed",
+  );
+  assert.match(builder, /legacyDisclosure/);
+  // Both mounts are the legacy surface; neither is the generic one.
+  const mounts = builder.match(/<PublicPreviewUpload/g) ?? [];
+  assert.equal(mounts.length, 2, "expected exactly the legacy-present and legacy-absent mounts");
+  for (const segment of builder.split("<PublicPreviewUpload").slice(1)) {
+    assert.match(segment.slice(0, 400), /\blegacy\b/, "every uploader mount must be the legacy surface");
+  }
 });
 
 test("the Lesson preview workflow is the unconditional primary surface", () => {
