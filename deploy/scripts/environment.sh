@@ -4,14 +4,18 @@ set -euo pipefail
 
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_COMPOSE_FILE="$S12_ROOT/deploy/compose/compose.production-like.yml"
-S12_STATE_DIR="$S12_ROOT/deploy/.state"
-S12_ENV_FILE="$S12_STATE_DIR/production-like.env"
+# The disposable topology's identity. These default to the shared local S12
+# environment exactly as before; an isolated drill (deploy/schema46) overrides
+# them so it gets its own Compose project, volumes and generated secrets and
+# can never touch, reuse or clobber the developer's S12 state.
+S12_STATE_DIR="${S12_STATE_DIR:-$S12_ROOT/deploy/.state}"
+S12_ENV_FILE="${S12_ENV_FILE:-$S12_STATE_DIR/production-like.env}"
 S12_CA_FILE="$S12_STATE_DIR/caddy-root.crt"
 S12_REDIS_TLS_DIR="$S12_STATE_DIR/redis-tls"
 S12_REDIS_TLS_CA_FILE="$S12_REDIS_TLS_DIR/ca.crt"
 S12_REDIS_TLS_SERVER_CERT_FILE="$S12_REDIS_TLS_DIR/server.crt"
 S12_REDIS_TLS_SERVER_KEY_FILE="$S12_REDIS_TLS_DIR/server.key"
-S12_PROJECT="gradex-s12"
+S12_PROJECT="${S12_PROJECT:-gradex-s12}"
 
 note() { printf 's12-environment: %s\n' "$*" >&2; }
 die() { note "$*"; exit 1; }
