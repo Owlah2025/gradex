@@ -4,6 +4,7 @@ package media
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -400,6 +401,36 @@ func TestNonReadySelectedLessonVideoIsUnavailableToStudentsAndAdminPreview(t *te
 	}
 }
 
+// tamperPlaybackToken flips one bit of a token's decoded bytes and re-encodes
+// it, so the result is guaranteed to differ from the original AS BYTES.
+//
+// Substituting the last base64 character does NOT guarantee that. Playback
+// tokens are base64.RawURLEncoding, and when the encoded byte length is not a
+// multiple of three the final character carries spare low-order bits that
+// decode away. Several distinct final characters therefore decode to identical
+// bytes, so a "tampered" token built that way could still verify — producing an
+// intermittent nil error in a test asserting rejection, at a rate set purely by
+// the random token's length and final character.
+//
+// The last byte is the tail of the signature, so flipping a bit in it is exactly
+// the forgery this test means to reject.
+func tamperPlaybackToken(t *testing.T, token string) string {
+	t.Helper()
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		t.Fatalf("decoding the playback session token: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("the playback session token decoded to no bytes")
+	}
+	raw[len(raw)-1] ^= 0x01
+	tampered := base64.RawURLEncoding.EncodeToString(raw)
+	if tampered == token {
+		t.Fatal("tampering did not change the token")
+	}
+	return tampered
+}
+
 func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
@@ -409,10 +440,7 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 	if err != nil {
 		t.Fatalf("issuing playback: %v", err)
 	}
-	tampered := issued.PlaybackSession[:len(issued.PlaybackSession)-1] + "A"
-	if tampered == issued.PlaybackSession {
-		tampered = issued.PlaybackSession[:len(issued.PlaybackSession)-1] + "B"
-	}
+	tampered := tamperPlaybackToken(t, issued.PlaybackSession)
 	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(tampered)); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("tampered session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
