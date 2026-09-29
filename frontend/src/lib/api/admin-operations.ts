@@ -233,7 +233,7 @@ export function provenanceLabel(source: string, labels: Record<string, string>):
 }
 
 export function isRecentAuthRequired(error: unknown): boolean {
-  return error instanceof ProblemError && error.problem.code === "recent-authentication-required";
+  return error instanceof ProblemError && error.problem.code === "RECENT_AUTHENTICATION_REQUIRED";
 }
 
 export function buildAdminAccountQuery(filters: AdminAccountFilters): string {

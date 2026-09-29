@@ -249,6 +249,54 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 }
 
+func TestAdminUser360MigrationRollbackWithSecurityEvent(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Migrate(uint(AdminUser360SchemaVersion)); err != nil {
+		t.Fatalf("migrating through admin User 360 schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+	accountID := "10000000-0000-0000-0000-000000000099"
+	if _, err := pool.Exec(ctx, `INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ($1::uuid, 'migration-event@example.test', 'migration-event@example.test', 'STUDENT', 'ACTIVE', 'Migration Event')`, accountID); err != nil {
+		t.Fatalf("seeding security-event account: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO identity_security_events (event_type, account_id, request_id, evidence)
+		VALUES ('ADMIN_SESSIONS_REVOKED', $1::uuid, 'migration-event', '{}'::jsonb)`, accountID); err != nil {
+		t.Fatalf("seeding widened security event: %v", err)
+	}
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back populated admin User 360 migration: %v", err)
+	}
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after User 360 down: %v", err)
+	}
+	if state.Version != AdminOperationsSchemaVersion || state.Dirty {
+		t.Fatalf("schema after User 360 down = %+v, want clean version %d", state, AdminOperationsSchemaVersion)
+	}
+	var eventCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_security_events WHERE event_type = 'ADMIN_SESSIONS_REVOKED'`).Scan(&eventCount); err != nil {
+		t.Fatalf("checking preserved security event: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("preserved security events = %d, want 1", eventCount)
+	}
+
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying populated admin User 360 migration: %v", err)
+	}
+	state, err = ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after User 360 up: %v", err)
+	}
+	if state.Version != AdminUser360SchemaVersion || state.Dirty {
+		t.Fatalf("schema after User 360 up = %+v, want clean version %d", state, AdminUser360SchemaVersion)
+	}
+}
+
 // TestMediaMigrationRollbackHandlesD7Data proves 0012 can be rolled back from
 // a database that actually contains its owned media rows and committed outbox
 // work. The pre-D7 source-module constraint cannot be restored while a D7
@@ -722,9 +770,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("admin User 360 schema = %d, want one past admin operations %d",
 			AdminUser360SchemaVersion, AdminOperationsSchemaVersion)
 	}
-	if MaxSchemaVersion != AdminUser360SchemaVersion {
+	if AdminUser360HardeningSchemaVersion != AdminUser360SchemaVersion+1 {
+		t.Fatalf("admin User 360 hardening schema = %d, want one past admin User 360 %d",
+			AdminUser360HardeningSchemaVersion, AdminUser360SchemaVersion)
+	}
+	if MaxSchemaVersion != AdminUser360HardeningSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, AdminUser360SchemaVersion)
+			MaxSchemaVersion, AdminUser360HardeningSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

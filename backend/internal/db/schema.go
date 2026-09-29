@@ -84,7 +84,9 @@ const (
 	// T2 Admin User 360 adds append-only internal notes and the security-event
 	// vocabulary needed by sign-out-everywhere.
 	AdminUser360SchemaVersion = AdminOperationsSchemaVersion + 1
-	MaxSchemaVersion          = AdminUser360SchemaVersion
+	// T2 hardening makes the append-only note subject foreign key explicit.
+	AdminUser360HardeningSchemaVersion = AdminUser360SchemaVersion + 1
+	MaxSchemaVersion                   = AdminUser360HardeningSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

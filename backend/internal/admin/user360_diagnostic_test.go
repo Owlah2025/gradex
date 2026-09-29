@@ -30,10 +30,11 @@ func TestDiagnosticPrimaryMapsEvaluatorAndAccountFacts(t *testing.T) {
 		{name: "unverified", decision: entitlement.Decision{Reason: entitlement.ReasonAllowed, Allowed: true}, status: "ACTIVE", verified: false, lifecycle: "PUBLISHED", want: DiagnosticAccountUnverified},
 		{name: "course suspended", decision: entitlement.Decision{Reason: entitlement.ReasonCourseSuspended}, status: "ACTIVE", verified: true, lifecycle: "PUBLISHED", suspended: true, want: DiagnosticCourseSuspended},
 		{name: "course retired", decision: entitlement.Decision{Reason: entitlement.ReasonRetired}, status: "ACTIVE", verified: true, lifecycle: "PUBLISHED", retiredAt: &past, want: DiagnosticCourseRetired},
+		{name: "retired fact does not override allowed evaluator", decision: entitlement.Decision{Allowed: true, Reason: entitlement.ReasonAllowed}, status: "ACTIVE", verified: true, lifecycle: "ARCHIVED", retiredAt: &past, want: DiagnosticAllowed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := diagnosticPrimary(tc.decision, tc.status, tc.verified, tc.lifecycle, tc.suspended, tc.retiredAt, "lesson", tc.rows, now)
+			got := diagnosticPrimary(tc.decision, tc.status, tc.verified, tc.suspended, tc.retiredAt, tc.rows, now, tc.name == "active")
 			if got != tc.want {
 				t.Fatalf("diagnostic code = %q, want %q", got, tc.want)
 			}

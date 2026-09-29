@@ -66,7 +66,7 @@ func (r *Repository) GetUser360(ctx context.Context, req User360Request) (User36
 		Module:        catalog.AuditModuleIdentityAndAccess,
 		TargetType:    User360TargetType,
 		TargetID:      req.AccountID,
-		Reason:        "privileged read: User 360 account view",
+		Reason:        AuditReasonUserViewed,
 		Metadata: map[string]any{
 			"role":     string(identityView.Role),
 			"sections": user360Sections(identityView.Role),

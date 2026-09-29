@@ -11,17 +11,25 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
-func queryEntitlements(ctx context.Context, tx pgx.Tx, locale identity.Locale, accountID string) ([]UserEntitlement, error) {
+func queryEntitlements(ctx context.Context, tx pgx.Tx, locale identity.Locale, accountID string, courseID ...string) ([]UserEntitlement, error) {
+	courseFilter := ""
+	limitPlaceholder := "$3"
+	queryArgs := []any{accountID, string(locale), user360EntitlementLimit}
+	if len(courseID) > 0 && strings.TrimSpace(courseID[0]) != "" {
+		courseFilter = " AND e.course_id = $3::uuid"
+		limitPlaceholder = "$4"
+		queryArgs = []any{accountID, string(locale), courseID[0], user360EntitlementLimit}
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT e.id::text, e.course_id::text, COALESCE(live.title_ar, draft.title_ar, ''),
 		       COALESCE(live.title_en, draft.title_en, ''), e.scope_kind, e.scope_id::text,
 		       e.grant_source, e.original_access_ends_at, e.access_ends_at, e.revoked_at,
 		       e.state, e.revision, e.created_at,
 		       CASE e.grant_source
-		         WHEN 'MANUAL_INVITATION' THEN COALESCE(NULLIF(i.external_reference, ''), 'Course access invitation')
-		         WHEN 'PURCHASE_REQUEST' THEN COALESCE(pr.reference_code, 'Purchase request')
-		         WHEN 'BUNDLE_PURCHASE' THEN COALESCE(CASE WHEN $2 = 'ar' THEN b.title_ar ELSE b.title_en END, 'Bundle purchase')
-		         ELSE 'Access grant'
+		         WHEN 'MANUAL_INVITATION' THEN COALESCE(NULLIF(i.external_reference, ''), '')
+		         WHEN 'PURCHASE_REQUEST' THEN COALESCE(pr.reference_code, '')
+		         WHEN 'BUNDLE_PURCHASE' THEN COALESCE(CASE WHEN $2 = 'ar' THEN b.title_ar ELSE b.title_en END, '')
+		         ELSE ''
 		       END,
 		       COALESCE(grantor.display_name, grantor.email, '')
 		  FROM entitlements e
@@ -35,9 +43,9 @@ func queryEntitlements(ctx context.Context, tx pgx.Tx, locale identity.Locale, a
 		  LEFT JOIN purchase_requests pr ON pr.id = e.source_purchase_request_id
 		  LEFT JOIN bundles b ON b.id = pr.bundle_id
 		  LEFT JOIN accounts grantor ON grantor.id = COALESCE(i.created_by_account_id, pr.payment_confirmed_by_account_id)
-		 WHERE e.student_account_id = $1::uuid
+		 WHERE e.student_account_id = $1::uuid`+courseFilter+`
 		 ORDER BY e.created_at DESC, e.id DESC
-		 LIMIT $3`, accountID, string(locale), user360EntitlementLimit)
+		 LIMIT `+limitPlaceholder, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("querying account entitlements: %w", err)
 	}

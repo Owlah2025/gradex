@@ -1,4 +1,5 @@
 import { authenticatedRequest } from "./http";
+import type { AdminDeviceOverview } from "./admin-operations";
 
 /**
  * The Student trusted-device surface.
@@ -76,15 +77,9 @@ export function removeDevice(
 }
 
 export function listAdminDevices(accountID: string, locale: "ar" | "en") {
-  return authenticatedRequest<{
-    devices: (TrustedDevice & { state: string; first_seen_at?: string; revoked_at?: string | null; revocation_reason?: string })[];
-    device_limit: number;
-    replacement_cooldown_until?: string | null;
-  }>(`/admin/students/${encodeURIComponent(accountID)}/devices`, "GET", locale) as Promise<{
-    devices: (TrustedDevice & { state: string; first_seen_at?: string; revoked_at?: string | null; revocation_reason?: string })[];
-    device_limit: number;
-    replacement_cooldown_until?: string | null;
-  }>;
+  return authenticatedRequest<AdminDeviceOverview>(
+    `/admin/students/${encodeURIComponent(accountID)}/devices`, "GET", locale,
+  ) as Promise<AdminDeviceOverview>;
 }
 
 export function revokeAdminDevice(accountID: string, deviceID: string, locale: "ar" | "en", csrf: string) {

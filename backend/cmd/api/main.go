@@ -854,7 +854,11 @@ func buildAdminFoundation(
 	limiter *ratelimit.Limiter,
 	recentAuthWindow time.Duration,
 ) (*httpapi.AdminFoundation, error) {
-	repository, err := adminread.NewRepositoryWithOptions(pool, adminread.RepositoryOptions{Devices: devices})
+	options := adminread.RepositoryOptions{}
+	if devices != nil {
+		options.Devices = devices
+	}
+	repository, err := adminread.NewRepositoryWithOptions(pool, options)
 	if err != nil {
 		return nil, fmt.Errorf("building admin read repository: %w", err)
 	}

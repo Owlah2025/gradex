@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ProblemError } from "./problem";
 import {
   accessReasonMessage,
   auditActionLabel,
@@ -7,6 +8,7 @@ import {
   buildAdminAccountQuery,
   buildAdminAuditQuery,
   provenanceLabel,
+  isRecentAuthRequired,
 } from "./admin-operations";
 
 test("account directory query builder keeps filters explicit and stable", () => {
@@ -70,6 +72,16 @@ test("known audit labels localize while unknown codes remain visible", () => {
   assert.equal(auditActionLabel("FUTURE_ACTION", labels), "FUTURE_ACTION");
   assert.equal(auditModuleLabel("IDENTITY_AND_ACCESS", labels), "Identity & access");
   assert.equal(auditModuleLabel("FUTURE_MODULE", labels), "FUTURE_MODULE");
+});
+
+test("recent-auth problems prompt a fresh sign-in", () => {
+  const error = new ProblemError({
+    type: "https://gradex.example/problems/recent-authentication-required",
+    title: "Recent authentication required",
+    status: 403,
+    code: "RECENT_AUTHENTICATION_REQUIRED",
+  });
+  assert.equal(isRecentAuthRequired(error), true);
 });
 
 test("diagnostic reasons and provenance use localized labels with safe fallbacks", () => {

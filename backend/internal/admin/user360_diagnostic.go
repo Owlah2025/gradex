@@ -70,10 +70,10 @@ func (r *Repository) DiagnoseAccess(ctx context.Context, req AccessDiagnosticReq
 		return AccessDiagnostic{}, ErrCourseNotFound
 	}
 	var (
-		status, courseLifecycle, courseTitleAr, courseTitleEn, lessonID string
-		verified                                                        bool
-		courseSuspended                                                 bool
-		courseRetiredAt                                                 *time.Time
+		status, courseLifecycle, courseTitleAr, courseTitleEn, lessonID, liveRevisionID string
+		verified                                                                        bool
+		courseSuspended                                                                 bool
+		courseRetiredAt                                                                 *time.Time
 	)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -82,7 +82,7 @@ func (r *Repository) DiagnoseAccess(ctx context.Context, req AccessDiagnosticReq
 	defer func() { _ = tx.Rollback(ctx) }()
 	err = tx.QueryRow(ctx, `
 		SELECT a.status::text, a.email_verified_at IS NOT NULL,
-		       c.lifecycle::text, c.access_suspended_at IS NOT NULL, c.retired_at,
+		       c.lifecycle::text, COALESCE(c.live_revision_id::text, ''), c.access_suspended_at IS NOT NULL, c.retired_at,
 		       COALESCE(live.title_ar, draft.title_ar, ''), COALESCE(live.title_en, draft.title_en, ''),
 		       COALESCE(target.lesson_identity_id::text, '')
 		  FROM accounts a
@@ -101,7 +101,7 @@ func (r *Repository) DiagnoseAccess(ctx context.Context, req AccessDiagnosticReq
 			 ORDER BY cs.position, cs.id, cl.position, cl.id LIMIT 1
 		  ) target ON TRUE
 		 WHERE a.id = $1::uuid AND c.id = $2::uuid`, req.AccountID, req.CourseID).Scan(
-		&status, &verified, &courseLifecycle, &courseSuspended, &courseRetiredAt,
+		&status, &verified, &courseLifecycle, &liveRevisionID, &courseSuspended, &courseRetiredAt,
 		&courseTitleAr, &courseTitleEn, &lessonID,
 	)
 	if err == pgx.ErrNoRows {
@@ -111,28 +111,30 @@ func (r *Repository) DiagnoseAccess(ctx context.Context, req AccessDiagnosticReq
 		return AccessDiagnostic{}, fmt.Errorf("loading access diagnostic facts: %w", err)
 	}
 
-	decision := r.evaluator.Evaluate(ctx, req.AccountID, lessonID, req.Now)
-	entitlements, err := queryEntitlements(ctx, tx, req.Locale, req.AccountID)
+	entitlements, err := queryEntitlements(ctx, tx, req.Locale, req.AccountID, req.CourseID)
 	if err != nil {
 		return AccessDiagnostic{}, err
 	}
-	filtered := make([]UserEntitlement, 0, len(entitlements))
-	for _, item := range entitlements {
-		if item.CourseID == req.CourseID {
-			filtered = append(filtered, item)
-		}
+	published := liveRevisionID != "" && lessonID != ""
+	decision := entitlement.Decision{Reason: entitlement.ReasonDependency}
+	courseWide := false
+	if published {
+		decision, courseWide = r.diagnosticDecision(ctx, req.AccountID, req.CourseID, lessonID, req.Now, entitlements)
 	}
-	primary := diagnosticPrimary(decision, status, verified, courseLifecycle, courseSuspended, courseRetiredAt, lessonID, filtered, req.Now)
-	facts := diagnosticFacts(status, verified, courseLifecycle, courseSuspended, courseRetiredAt, decision, filtered)
+	primary := DiagnosticNotPublished
+	if published {
+		primary = diagnosticPrimary(decision, status, verified, courseSuspended, courseRetiredAt, entitlements, req.Now, courseWide)
+	}
+	facts := diagnosticFacts(status, verified, courseLifecycle, courseSuspended, courseRetiredAt, decision, entitlements, published)
 	result := AccessDiagnostic{
 		AccountID: req.AccountID, CourseID: req.CourseID, CourseTitle: localizedTitle(req.Locale, courseTitleAr, courseTitleEn),
 		PrimaryReasonCode: primary, ReasonCode: primary, EvaluatorReason: string(decision.Reason), Allowed: decision.Allowed && primary == DiagnosticAllowed,
-		Facts: facts, Entitlements: filtered,
+		Facts: facts, Entitlements: entitlements,
 	}
 	if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
 		Principal: req.Principal, CorrelationID: req.CorrelationID, Action: ActionAccessDiagnosed,
 		Module: catalog.AuditModuleIdentityAndAccess, TargetType: User360TargetType, TargetID: req.AccountID,
-		Reason:   "privileged read: account access diagnostic",
+		Reason:   AuditReasonAccessDiagnosed,
 		Metadata: map[string]any{"course_id": req.CourseID, "reason_code": primary, "evaluator_reason": string(decision.Reason)},
 	}); err != nil {
 		return AccessDiagnostic{}, fmt.Errorf("auditing access diagnostic: %w", err)
@@ -143,25 +145,23 @@ func (r *Repository) DiagnoseAccess(ctx context.Context, req AccessDiagnosticReq
 	return result, nil
 }
 
+// diagnosticPrimary receives the retirement timestamp only as supporting fact data;
+// the evaluator's retirement reason, not lifecycle context, determines the primary code.
 func diagnosticPrimary(
 	decision entitlement.Decision,
 	status string,
 	verified bool,
-	lifecycle string,
 	suspended bool,
-	retiredAt *time.Time,
-	lessonID string,
+	_retiredAt *time.Time,
 	entitlements []UserEntitlement,
 	now time.Time,
+	courseWide bool,
 ) string {
 	if status == string(identity.StatusSuspended) {
 		return DiagnosticAccountSuspended
 	}
 	if !verified {
 		return DiagnosticAccountUnverified
-	}
-	if lifecycle == "ARCHIVED" || retiredAt != nil {
-		return DiagnosticCourseRetired
 	}
 	if suspended && decision.Reason == entitlement.ReasonCourseSuspended {
 		return DiagnosticCourseSuspended
@@ -182,11 +182,7 @@ func diagnosticPrimary(
 		active := false
 		revoked := false
 		expired := false
-		sectionOnly := true
 		for _, item := range entitlements {
-			if item.ScopeKind != string(entitlement.ScopeSection) {
-				sectionOnly = false
-			}
 			if item.State == "REVOKED" || item.RevokedAt != nil {
 				revoked = true
 			}
@@ -203,13 +199,38 @@ func diagnosticPrimary(
 		if expired && !active {
 			return "EXPIRED"
 		}
-		if sectionOnly && lessonID != "" {
-			return DiagnosticScopeMismatch
+		if active && !courseWide {
+			return DiagnosticSectionOnly
 		}
 		return DiagnosticNoEntitlement
 	default:
 		return string(decision.Reason)
 	}
+}
+
+func (r *Repository) diagnosticDecision(
+	ctx context.Context,
+	accountID, courseID, lessonID string,
+	now time.Time,
+	entitlements []UserEntitlement,
+) (entitlement.Decision, bool) {
+	classifications, err := r.evaluator.EvaluateCourseReads(ctx, accountID, now)
+	if err != nil {
+		return entitlement.Decision{Reason: entitlement.ReasonDependency}, false
+	}
+	if read, ok := classifications[courseID]; ok {
+		return entitlement.Decision{Allowed: read.State == entitlement.ReadActive, Reason: read.Reason}, read.CourseWide
+	}
+	return r.evaluator.Evaluate(ctx, accountID, lessonID, now), courseWideFromEntitlements(entitlements)
+}
+
+func courseWideFromEntitlements(entitlements []UserEntitlement) bool {
+	for _, item := range entitlements {
+		if item.ScopeKind == string(entitlement.ScopeCourse) && item.State != "REVOKED" {
+			return true
+		}
+	}
+	return false
 }
 
 func diagnosticFacts(
@@ -220,13 +241,18 @@ func diagnosticFacts(
 	retiredAt *time.Time,
 	decision entitlement.Decision,
 	entitlements []UserEntitlement,
+	published bool,
 ) []DiagnosticFact {
 	facts := []DiagnosticFact{
 		{Code: "ACCOUNT_STATUS", Value: status},
 		{Code: "EMAIL_VERIFIED", Value: fmt.Sprintf("%t", verified)},
 		{Code: "COURSE_LIFECYCLE", Value: lifecycle},
-		{Code: "EVALUATOR_REASON", Value: string(decision.Reason)},
 		{Code: "ENTITLEMENT_COUNT", Value: fmt.Sprintf("%d", len(entitlements))},
+	}
+	if published {
+		facts = append(facts, DiagnosticFact{Code: "EVALUATOR_REASON", Value: string(decision.Reason)})
+	} else {
+		facts = append(facts, DiagnosticFact{Code: "COURSE_PUBLICATION", Value: DiagnosticNotPublished})
 	}
 	if suspended {
 		facts = append(facts, DiagnosticFact{Code: "COURSE_ACCESS_SUSPENDED", Value: "true"})

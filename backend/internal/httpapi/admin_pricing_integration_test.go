@@ -29,6 +29,10 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
+type adminUser360DeviceReader interface {
+	AdminOverview(context.Context, string, time.Time) (identity.AdminDeviceOverview, error)
+}
+
 type tokenSessionRepo struct {
 	sessions map[string]identity.SessionView
 }
@@ -67,6 +71,14 @@ func (r *tokenSessionRepo) Resolve(_ context.Context, request identity.SessionRe
 }
 
 func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
+	return setupAdminPricingAPIServerWithDevices(t, 15*time.Minute, nil)
+}
+
+func setupAdminPricingAPIServerWithRecentAuthWindow(t *testing.T, recentAuthWindow time.Duration) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
+	return setupAdminPricingAPIServerWithDevices(t, recentAuthWindow, nil)
+}
+
+func setupAdminPricingAPIServerWithDevices(t *testing.T, recentAuthWindow time.Duration, devices adminUser360DeviceReader) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
 	t.Helper()
 	freshSchema(t)
 	p, ctx := pool(t)
@@ -126,11 +138,11 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)
 	}
-	adminRepository, err := adminread.NewRepository(p)
+	adminRepository, err := adminread.NewRepositoryWithOptions(p, adminread.RepositoryOptions{Devices: devices})
 	if err != nil {
 		t.Fatalf("admin repository: %v", err)
 	}
-	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{Service: adminRepository})
+	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{Service: adminRepository, RecentAuthWindow: recentAuthWindow})
 	if err != nil {
 		t.Fatalf("NewAdminFoundation: %v", err)
 	}

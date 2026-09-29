@@ -874,8 +874,12 @@ func TestFreshAdminSucceedsAndStaleAdminIsRefusedOnStaffEndpoints(t *testing.T) 
 				t.Fatalf("stale admin got status %d, want 403: %s", rec.Code, rec.Body.String())
 			}
 			p := assertProblemEnvelope(t, rec)
-			if p.Code != "NOT_AUTHORIZED" {
-				t.Errorf("code = %q, want NOT_AUTHORIZED", p.Code)
+			wantCode := "NOT_AUTHORIZED"
+			if ep.name == "suspend-account" || ep.name == "reinstate-account" {
+				wantCode = "RECENT_AUTHENTICATION_REQUIRED"
+			}
+			if p.Code != wantCode {
+				t.Errorf("code = %q, want %s", p.Code, wantCode)
 			}
 		})
 	}

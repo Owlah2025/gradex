@@ -11,6 +11,9 @@ const (
 	ActionAccessDiagnosed       = "ADMIN_ACCESS_DIAGNOSED"
 	ActionNoteAdded             = "ADMIN_NOTE_ADDED"
 	ActionSessionsRevoked       = "ADMIN_SESSIONS_REVOKED"
+	AuditReasonUserViewed       = "ADMIN_USER_VIEWED"
+	AuditReasonIdentityViewed   = "ACCOUNT_IDENTITY_VIEWED"
+	AuditReasonAccessDiagnosed  = "ADMIN_ACCESS_DIAGNOSED"
 	User360TargetType           = "ACCOUNT"
 	DiagnosticAllowed           = "ACTIVE"
 	DiagnosticNoEntitlement     = "NO_ENTITLEMENT"
@@ -19,6 +22,8 @@ const (
 	DiagnosticAccountUnverified = "ACCOUNT_UNVERIFIED"
 	DiagnosticCourseSuspended   = "COURSE_ACCESS_SUSPENDED"
 	DiagnosticCourseRetired     = "COURSE_RETIRED"
+	DiagnosticNotPublished      = "NOT_PUBLISHED"
+	DiagnosticSectionOnly       = "SECTION_ONLY"
 	DiagnosticScopeMismatch     = "SCOPE_MISMATCH"
 	maxUser360Page              = 10_000
 	maxUser360QueryLength       = 200

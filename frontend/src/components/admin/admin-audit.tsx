@@ -272,7 +272,7 @@ function AuditTable({
               <TableCell><AuditAction event={event} copy={copy} /></TableCell>
               <TableCell><AuditActor event={event} copy={copy} /></TableCell>
               <TableCell><AuditTarget event={event} copy={copy} /></TableCell>
-              <TableCell className="max-w-xs">{humanLabel(event.reason, copy.reasonUnavailable)}</TableCell>
+              <TableCell className="max-w-xs">{auditReasonLabel(event.reason, copy)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -309,7 +309,7 @@ function AuditCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <dt className="text-muted-foreground">{copy.reason}:</dt>
-          <dd className="text-foreground">{humanLabel(event.reason, copy.reasonUnavailable)}</dd>
+          <dd className="text-foreground">{auditReasonLabel(event.reason, copy)}</dd>
         </div>
       </dl>
     </article>
@@ -386,6 +386,13 @@ function AuditPagination({
       </Button>
     </nav>
   );
+}
+
+function auditReasonLabel(value: string, copy: ReturnType<typeof useLocale>["t"]["adminAudit"]): string {
+  const known = (copy.reasonLabels as Record<string, string>)[value];
+  if (known) return known;
+  if (!value.trim()) return copy.reasonUnavailable;
+  return copy.operatorReason + ": " + value;
 }
 
 function humanLabel(value: string, fallback: string): string {

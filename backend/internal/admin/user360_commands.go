@@ -82,7 +82,7 @@ func (r *Repository) AddNote(ctx context.Context, req AddNoteRequest) (AdminNote
 		Module:          catalog.AuditModuleIdentityAndAccess,
 		TargetType:      User360TargetType,
 		TargetID:        req.AccountID,
-		Reason:          "Internal admin note added",
+		Reason:          ActionNoteAdded,
 		Metadata: map[string]any{
 			"body_length": utf8.RuneCountInString(body),
 		},
@@ -107,17 +107,25 @@ func (r *Repository) RevokeAccountSessions(ctx context.Context, req SessionRevoc
 	if strings.TrimSpace(req.Reason) == "" || utf8.RuneCountInString(req.Reason) > 1000 {
 		return SessionRevocationResult{}, ErrInvalidInput
 	}
-	if req.Principal.AccountID == req.AccountID {
-		return SessionRevocationResult{}, fmt.Errorf("%w: self-target is not permitted", ErrUnauthorized)
+	principalID, err := uuid.Parse(req.Principal.AccountID)
+	if err != nil {
+		return SessionRevocationResult{}, fmt.Errorf("%w: invalid principal account", ErrUnauthorized)
 	}
-	if _, err := uuid.Parse(req.AccountID); err != nil {
+	targetID, err := uuid.Parse(req.AccountID)
+	if err != nil {
 		return SessionRevocationResult{}, ErrAccountNotFound
+	}
+	if principalID == targetID {
+		return SessionRevocationResult{}, fmt.Errorf("%w: self-target is not permitted", ErrUnauthorized)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return SessionRevocationResult{}, fmt.Errorf("beginning account session revocation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := ensureAccountExists(ctx, tx, req.AccountID); err != nil {
+		return SessionRevocationResult{}, err
+	}
 	epoch, revoked, err := identity.RevokeAllSessionsInTransaction(ctx, tx, req.AccountID, identity.RevokedByAdmin, req.Now)
 	if err != nil {
 		return SessionRevocationResult{}, err

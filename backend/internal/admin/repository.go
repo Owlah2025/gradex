@@ -109,7 +109,7 @@ func (r *Repository) GetAccount(
 		Module:        catalog.AuditModuleIdentityAndAccess,
 		TargetType:    "ACCOUNT",
 		TargetID:      req.AccountID,
-		Reason:        "privileged read: account identity view",
+		Reason:        AuditReasonIdentityViewed,
 		Metadata:      map[string]any{"sections": []string{"identity"}},
 	}); err != nil {
 		return AccountDirectoryEntry{}, fmt.Errorf("auditing account identity read: %w", err)

@@ -5,6 +5,8 @@ DROP TABLE IF EXISTS admin_notes;
 ALTER TABLE identity_security_events
     DROP CONSTRAINT identity_security_events_type;
 
+-- Keep the post-0048 event vocabulary unvalidated on rollback: append-only rows may
+-- already contain ADMIN_SESSIONS_REVOKED, and the trigger forbids deleting them.
 ALTER TABLE identity_security_events
     ADD CONSTRAINT identity_security_events_type CHECK (
         event_type IN (
@@ -36,4 +38,4 @@ ALTER TABLE identity_security_events
             'ADMIN_DEVICE_REVOKED',
             'ADMIN_DEVICE_COOLDOWN_RESET'
         )
-    );
+    ) NOT VALID;

@@ -407,7 +407,11 @@ func (h *staffHandlers) suspendStaff(c *gin.Context) {
 			writeProblem(c, problem.NotFound())
 			return
 		}
-		if errors.Is(err, identity.ErrRecentAuthRequired) || errors.Is(err, identity.ErrUnauthorized) {
+		if errors.Is(err, identity.ErrRecentAuthRequired) {
+			writeRecentAuthRequiredProblem(c)
+			return
+		}
+		if errors.Is(err, identity.ErrUnauthorized) {
 			writeProblem(c, problem.NotAuthorized())
 			return
 		}
@@ -455,7 +459,11 @@ func (h *staffHandlers) reinstateStaff(c *gin.Context) {
 			writeProblem(c, problem.NotFound())
 			return
 		}
-		if errors.Is(err, identity.ErrRecentAuthRequired) || errors.Is(err, identity.ErrUnauthorized) {
+		if errors.Is(err, identity.ErrRecentAuthRequired) {
+			writeRecentAuthRequiredProblem(c)
+			return
+		}
+		if errors.Is(err, identity.ErrUnauthorized) {
 			writeProblem(c, problem.NotAuthorized())
 			return
 		}
@@ -466,6 +474,11 @@ func (h *staffHandlers) reinstateStaff(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"already_active": res.AlreadyActive,
 	})
+}
+
+func writeRecentAuthRequiredProblem(c *gin.Context) {
+	writeProblem(c, problem.New(http.StatusForbidden, "recent-authentication-required",
+		"Recent authentication required", "This operation requires recent authentication"))
 }
 
 func sessionFromContext(c *gin.Context) (identity.Session, bool) {

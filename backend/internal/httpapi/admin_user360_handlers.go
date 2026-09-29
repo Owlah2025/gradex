@@ -165,6 +165,7 @@ func (h *adminHandlers) listCourseOptions(c *gin.Context) {
 		writeAdminUserError(c, err)
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"courses": options})
 }
 
@@ -191,6 +192,7 @@ func (h *adminHandlers) diagnoseAccess(c *gin.Context) {
 		writeAdminUserError(c, err)
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, result)
 }
 
@@ -198,7 +200,7 @@ func writeAdminUserError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, adminread.ErrInvalidInput):
 		writeProblem(c, problem.ValidationFailed())
-	case errors.Is(err, adminread.ErrAccountNotFound), errors.Is(err, adminread.ErrCourseNotFound):
+	case errors.Is(err, adminread.ErrAccountNotFound), errors.Is(err, adminread.ErrCourseNotFound), errors.Is(err, identity.ErrAccountNotFound):
 		writeProblem(c, problem.NotFound())
 	case errors.Is(err, adminread.ErrUnauthorized):
 		writeProblem(c, problem.NotAuthorized())
