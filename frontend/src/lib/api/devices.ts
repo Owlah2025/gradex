@@ -74,3 +74,34 @@ export function removeDevice(
     csrf,
   ) as Promise<DeviceRemoved>;
 }
+
+export function listAdminDevices(accountID: string, locale: "ar" | "en") {
+  return authenticatedRequest<{
+    devices: (TrustedDevice & { state: string; first_seen_at?: string; revoked_at?: string | null; revocation_reason?: string })[];
+    device_limit: number;
+    replacement_cooldown_until?: string | null;
+  }>(`/admin/students/${encodeURIComponent(accountID)}/devices`, "GET", locale) as Promise<{
+    devices: (TrustedDevice & { state: string; first_seen_at?: string; revoked_at?: string | null; revocation_reason?: string })[];
+    device_limit: number;
+    replacement_cooldown_until?: string | null;
+  }>;
+}
+
+export function revokeAdminDevice(accountID: string, deviceID: string, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<{ revoked: number }>(
+    `/admin/students/${encodeURIComponent(accountID)}/devices/${encodeURIComponent(deviceID)}/revocations`,
+    "POST", locale, csrf,
+  );
+}
+
+export function revokeAllAdminDevices(accountID: string, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<{ revoked: number }>(
+    `/admin/students/${encodeURIComponent(accountID)}/devices/revocations`, "POST", locale, csrf,
+  );
+}
+
+export function resetAdminDeviceCooldown(accountID: string, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<{ cooldown_cleared: boolean }>(
+    `/admin/students/${encodeURIComponent(accountID)}/devices/cooldown-resets`, "POST", locale, csrf,
+  );
+}

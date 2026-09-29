@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  accessReasonMessage,
   auditActionLabel,
   auditModuleLabel,
   buildAdminAccountQuery,
   buildAdminAuditQuery,
+  provenanceLabel,
 } from "./admin-operations";
 
 test("account directory query builder keeps filters explicit and stable", () => {
@@ -55,4 +57,13 @@ test("known audit labels localize while unknown codes remain visible", () => {
   assert.equal(auditActionLabel("FUTURE_ACTION", labels), "FUTURE_ACTION");
   assert.equal(auditModuleLabel("IDENTITY_AND_ACCESS", labels), "Identity & access");
   assert.equal(auditModuleLabel("FUTURE_MODULE", labels), "FUTURE_MODULE");
+});
+
+test("diagnostic reasons and provenance use localized labels with safe fallbacks", () => {
+  const reasons = { ACTIVE: "Access is active", UNKNOWN: "Review the account facts" };
+  const provenance = { MANUAL_INVITATION: "Invitation", UNKNOWN: "Other source" };
+  assert.equal(accessReasonMessage("ACTIVE", reasons), "Access is active");
+  assert.equal(accessReasonMessage("FUTURE_REASON", reasons), "Review the account facts");
+  assert.equal(provenanceLabel("MANUAL_INVITATION", provenance), "Invitation");
+  assert.equal(provenanceLabel("FUTURE_SOURCE", provenance), "Other source");
 });
