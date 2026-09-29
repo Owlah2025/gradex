@@ -848,12 +848,25 @@ func buildCatalogFoundation(
 	})
 }
 
-func buildAdminFoundation(pool *pgxpool.Pool) (*httpapi.AdminFoundation, error) {
-	repository, err := adminread.NewRepository(pool)
+func buildAdminFoundation(
+	pool *pgxpool.Pool,
+	devices *identity.DeviceService,
+	limiter *ratelimit.Limiter,
+	recentAuthWindow time.Duration,
+) (*httpapi.AdminFoundation, error) {
+	repository, err := adminread.NewRepositoryWithOptions(pool, adminread.RepositoryOptions{Devices: devices})
 	if err != nil {
 		return nil, fmt.Errorf("building admin read repository: %w", err)
 	}
-	foundation, err := httpapi.NewAdminFoundation(httpapi.AdminFoundationOptions{Service: repository})
+	foundation, err := httpapi.NewAdminFoundation(httpapi.AdminFoundationOptions{
+		Service: repository,
+		Limiter: limiter,
+		EndpointPolicies: map[string]ratelimit.Policy{
+			"admin-notes":               ratelimit.AdminMutationPolicy("admin-notes"),
+			"admin-session-revocations": ratelimit.AdminMutationPolicy("admin-session-revocations"),
+		},
+		RecentAuthWindow: recentAuthWindow,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("building admin operations foundation: %w", err)
 	}
@@ -1093,7 +1106,9 @@ func buildProductionFoundationsWithStaffSource(
 	}
 
 	if cfg.Sessions().Enabled() {
-		adminFoundation, err := buildAdminFoundation(pool)
+		adminFoundation, err := buildAdminFoundation(
+			pool, pf.Devices, admissionFoundation.RateLimiter(), cfg.Sessions().HighestRiskRecentAuthWindow(),
+		)
 		if err != nil {
 			pf.Close()
 			return nil, fmt.Errorf("composing admin operations: %w", err)

@@ -132,6 +132,7 @@ var (
 	bundleTables             = []string{"bundles", "bundle_courses", "bundle_price_changes", "purchase_request_bundle_items", "bundle_purchase_grants"}
 	trustedDeviceTables      = []string{"identity_trusted_devices", "identity_device_replacement_state"}
 	subjectDemandTables      = []string{"subject_demand_signals"}
+	adminUser360Tables       = []string{"admin_notes"}
 )
 
 func allTables() []string {
@@ -149,7 +150,8 @@ func allTables() []string {
 	all = append(all, purchaseRequestTables...)
 	all = append(all, bundleTables...)
 	all = append(all, trustedDeviceTables...)
-	return append(all, subjectDemandTables...)
+	all = append(all, subjectDemandTables...)
+	return append(all, adminUser360Tables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -716,9 +718,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("admin operations schema = %d, want one past lesson public preview %d",
 			AdminOperationsSchemaVersion, LessonPublicPreviewSchemaVersion)
 	}
-	if MaxSchemaVersion != AdminOperationsSchemaVersion {
+	if AdminUser360SchemaVersion != AdminOperationsSchemaVersion+1 {
+		t.Fatalf("admin User 360 schema = %d, want one past admin operations %d",
+			AdminUser360SchemaVersion, AdminOperationsSchemaVersion)
+	}
+	if MaxSchemaVersion != AdminUser360SchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, AdminOperationsSchemaVersion)
+			MaxSchemaVersion, AdminUser360SchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -763,6 +769,36 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	if SubjectCodeIdentitySchemaVersion != CourseAcademicIdentitySchemaVersion+1 {
 		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
 			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
+	}
+}
+
+func TestAdminNotesMigrationIsAppendOnly(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating admin notes schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+	authorID := "10000000-0000-0000-0000-000000000901"
+	subjectID := "10000000-0000-0000-0000-000000000902"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ($1::uuid, 'notes-author@example.com', 'notes-author@example.com', 'ADMIN', 'ACTIVE', 'Notes Author'),
+		       ($2::uuid, 'notes-subject@example.com', 'notes-subject@example.com', 'STUDENT', 'ACTIVE', 'Notes Subject')`, authorID, subjectID); err != nil {
+		t.Fatalf("seeding note accounts: %v", err)
+	}
+	var noteID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO admin_notes (subject_account_id, author_account_id, body)
+		VALUES ($1::uuid, $2::uuid, 'Keep the access review factual') RETURNING id::text`, subjectID, authorID).Scan(&noteID); err != nil {
+		t.Fatalf("inserting admin note: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE admin_notes SET body = 'changed' WHERE id = $1::uuid`, noteID); err == nil {
+		t.Fatal("admin note update unexpectedly succeeded")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM admin_notes WHERE id = $1::uuid`, noteID); err == nil {
+		t.Fatal("admin note delete unexpectedly succeeded")
 	}
 }
 

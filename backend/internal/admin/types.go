@@ -12,6 +12,7 @@ var (
 	ErrInvalidInput    = errors.New("admin read input is invalid")
 	ErrUnauthorized    = errors.New("admin read requires the user directory capability")
 	ErrAccountNotFound = errors.New("admin account was not found")
+	ErrCourseNotFound  = errors.New("admin course was not found")
 )
 
 const (

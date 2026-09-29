@@ -23,7 +23,9 @@ const (
 )
 
 type adminHandlers struct {
-	service AdminService
+	service          AdminService
+	userService      AdminUserService
+	recentAuthWindow time.Duration
 }
 
 func (h *adminHandlers) listAccounts(c *gin.Context) {

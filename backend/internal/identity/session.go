@@ -45,6 +45,17 @@ const (
 	RevokedByAdmin            RevocationReason = "ADMIN_REVOKED"
 )
 
+func (r RevocationReason) Valid() bool {
+	switch r {
+	case RevokedByLogout, RevokedByLogoutAll, RevokedByPasswordChange,
+		RevokedByPasswordReset, RevokedByAccountSuspended, RevokedByReuseDetected,
+		RevokedByAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Session is the server-authoritative family record.
 type Session struct {
 	ID                string

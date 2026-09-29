@@ -13,18 +13,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/entitlement"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/learning"
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	learning  *learning.Repository
+	evaluator *entitlement.Evaluator
+	devices   deviceReader
 }
 
 func NewRepository(pool *pgxpool.Pool) (*Repository, error) {
-	if pool == nil {
-		return nil, ErrRepositoryNil
-	}
-	return &Repository{pool: pool}, nil
+	return NewRepositoryWithOptions(pool, RepositoryOptions{})
 }
 
 func (r *Repository) SearchAccounts(

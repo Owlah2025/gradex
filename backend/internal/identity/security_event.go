@@ -17,6 +17,26 @@ type securityEventAppend struct {
 	evidence       map[string]any
 }
 
+// SecurityEventRequest is the narrow cross-package seam for a domain service
+// that must append identity evidence in its own transaction.
+type SecurityEventRequest struct {
+	EventType string
+	AccountID string
+	Revision  int
+	RequestID string
+	Evidence  map[string]any
+}
+
+func WriteSecurityEvent(ctx context.Context, tx pgx.Tx, request SecurityEventRequest) error {
+	return appendIdentitySecurityEvent(ctx, tx, securityEventAppend{
+		eventType: request.EventType,
+		accountID: request.AccountID,
+		revision:  request.Revision,
+		requestID: request.RequestID,
+		evidence:  request.Evidence,
+	})
+}
+
 func appendIdentitySecurityEvent(
 	ctx context.Context,
 	tx pgx.Tx,

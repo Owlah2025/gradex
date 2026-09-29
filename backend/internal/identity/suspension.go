@@ -111,32 +111,24 @@ func SuspendAccount(
 	}
 
 	var newRevision int
-	var newEpoch int
 	err = tx.QueryRow(ctx,
 		`UPDATE accounts
 		    SET status = 'SUSPENDED',
-		        session_epoch = session_epoch + 1,
 		        revision = revision + 1,
 		        updated_at = $2
 		  WHERE id = $1::uuid
-		RETURNING revision, session_epoch`,
+		RETURNING revision`,
 		req.SubjectAccountID, req.Now,
-	).Scan(&newRevision, &newEpoch)
+	).Scan(&newRevision)
 
 	if err != nil {
 		return SuspendAccountResult{}, fmt.Errorf("updating account status to SUSPENDED: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE sessions
-		    SET state = 'REVOKED',
-		        revoked_at = $2,
-		        revocation_reason = 'ACCOUNT_SUSPENDED',
-		        updated_at = $2
-		  WHERE account_id = $1::uuid
-		    AND state = 'ACTIVE'`,
-		req.SubjectAccountID, req.Now,
-	); err != nil {
+	newEpoch, _, err := RevokeAllSessionsInTransaction(
+		ctx, tx, req.SubjectAccountID, RevokedByAccountSuspended, req.Now,
+	)
+	if err != nil {
 		return SuspendAccountResult{}, fmt.Errorf("revoking session families on account suspension: %w", err)
 	}
 

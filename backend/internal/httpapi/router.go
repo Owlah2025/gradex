@@ -98,7 +98,7 @@ func NewRouter(
 		mountStaffRoutes(v1, routerConfig.staff, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.admin != nil {
-		if err := mountAdminRoutes(v1, routerConfig.admin, authenticator, principals, logger); err != nil {
+		if err := mountAdminRoutes(v1, routerConfig.admin, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting admin operations routes: %w", err)
 		}
 	}

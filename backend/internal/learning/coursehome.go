@@ -67,6 +67,7 @@ type StudentCourseSummary struct {
 	TitleEn             string
 	EnrollmentCreatedAt time.Time
 	Progress            CourseProgressSummary
+	LastWatchedAt       *time.Time
 }
 
 // ReadCourseGraph reads only the current approved live revision. Two bounded
@@ -255,7 +256,8 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 	rows, err := r.pool.Query(ctx, `
 		SELECT e.course_id::text, e.created_at, cr.title_ar, cr.title_en,
 		       count(DISTINCT cli.id),
-		       count(DISTINCT p.course_lesson_identity_id) FILTER (WHERE p.completed_at IS NOT NULL)
+		       count(DISTINCT p.course_lesson_identity_id) FILTER (WHERE p.completed_at IS NOT NULL),
+		       max(p.last_watched_at)
 		FROM enrollments e
 		JOIN courses c ON c.id = e.course_id
 		JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id AND cr.state = 'APPROVED'
@@ -277,7 +279,7 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 	for rows.Next() {
 		var summary StudentCourseSummary
 		var total, completed int64
-		if err := rows.Scan(&summary.CourseID, &summary.EnrollmentCreatedAt, &summary.TitleAr, &summary.TitleEn, &total, &completed); err != nil {
+		if err := rows.Scan(&summary.CourseID, &summary.EnrollmentCreatedAt, &summary.TitleAr, &summary.TitleEn, &total, &completed, &summary.LastWatchedAt); err != nil {
 			return nil, fmt.Errorf("scanning student course summary: %w", err)
 		}
 		summary.Progress = CourseProgressSummary{CompletedLessons: int(completed), TotalLessons: int(total)}

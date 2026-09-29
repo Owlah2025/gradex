@@ -1129,6 +1129,42 @@ func revokeSessionFamily(
 	return nil
 }
 
+// RevokeAllSessionsInTransaction advances the Account epoch and revokes every
+// active session family for that Account. Suspension and operator sign-out use
+// this same low-level path so epoch invalidation and family revocation cannot
+// drift apart.
+func RevokeAllSessionsInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	reason RevocationReason,
+	now time.Time,
+) (int, int, error) {
+	if accountID == "" || !reason.Valid() {
+		return 0, 0, errors.New("complete session revocation facts are required")
+	}
+	var epoch int
+	if err := tx.QueryRow(ctx, `
+		UPDATE accounts
+		   SET session_epoch = session_epoch + 1, updated_at = $2
+		 WHERE id = $1::uuid
+		 RETURNING session_epoch`, accountID, now).Scan(&epoch); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, ErrAccountNotFound
+		}
+		return 0, 0, fmt.Errorf("advancing account session epoch: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE sessions
+		   SET state = 'REVOKED', revoked_at = $2,
+		       revocation_reason = $3::session_revocation_reason, updated_at = $2
+		 WHERE account_id = $1::uuid AND state = 'ACTIVE'`, accountID, now, reason)
+	if err != nil {
+		return 0, 0, fmt.Errorf("revoking account session families: %w", err)
+	}
+	return epoch, int(tag.RowsAffected()), nil
+}
+
 func (r *SessionRepository) window(role Role) config.SessionWindow {
 	switch role {
 	case RoleInstructor:

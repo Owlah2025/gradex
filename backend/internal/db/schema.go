@@ -81,7 +81,10 @@ const (
 	// T1 Admin Operations query-path indexes. Additive only; no existing row
 	// shape changes.
 	AdminOperationsSchemaVersion = LessonPublicPreviewSchemaVersion + 1
-	MaxSchemaVersion             = AdminOperationsSchemaVersion
+	// T2 Admin User 360 adds append-only internal notes and the security-event
+	// vocabulary needed by sign-out-everywhere.
+	AdminUser360SchemaVersion = AdminOperationsSchemaVersion + 1
+	MaxSchemaVersion          = AdminUser360SchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
