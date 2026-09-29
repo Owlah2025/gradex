@@ -147,9 +147,11 @@ export function CourseAcademicContext({
 export function CourseInstructor({
   course,
   copy,
+  locale,
 }: {
   course: PublicCourseDetail;
   copy: Copy;
+  locale: "ar" | "en";
 }) {
   return (
     <section
@@ -169,7 +171,16 @@ export function CourseInstructor({
         </Avatar>
         <div className="min-w-0">
           <p className="font-display text-[19px] font-bold leading-snug text-foreground">
-            <bdi>{course.instructor_display_name}</bdi>
+            {course.instructor_slug ? (
+              <Link
+                href={`/${locale}/instructors/${encodeURIComponent(course.instructor_slug)}`}
+                className="underline decoration-primary/40 underline-offset-4 hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <bdi>{course.instructor_display_name}</bdi>
+              </Link>
+            ) : (
+              <bdi>{course.instructor_display_name}</bdi>
+            )}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">{copy.instructorRole}</p>
           <Prose className="mt-3 max-w-xl text-[15.5px]">{copy.instructorNote}</Prose>

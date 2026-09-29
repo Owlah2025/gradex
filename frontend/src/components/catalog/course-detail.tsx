@@ -258,7 +258,7 @@ export function CourseDetail({
                     lessonsUnit={catalogue.lessons}
                   />
 
-                  <CourseInstructor course={state.course} copy={copy} />
+                  <CourseInstructor course={state.course} copy={copy} locale={locale} />
                 </div>
               </article>
 

@@ -20,6 +20,8 @@ export type WorkspaceNavigationKey =
   | "adminUsers"
   | "adminAudit"
   | "instructorStudio"
+  | "instructorProfile"
+  | "adminInstructorProfiles"
   | "courseBuilder";
 
 export type WorkspaceNavigationItem = {
@@ -69,6 +71,7 @@ export function roleWorkspaceNavigation(
     return [
       { key: "adminHome", href: home },
       { key: "adminAnalytics", href: `/${locale}/admin/analytics` },
+      { key: "adminInstructorProfiles", href: `/${locale}/admin/instructor-profiles` },
       // Courses leads, because it is the surface an Admin can start from without already knowing
       // which Course they are looking for. The review queue remains its own entry: it is the exact
       // set of pending decisions, and narrowing to it is a different job from browsing the
@@ -91,6 +94,7 @@ export function roleWorkspaceNavigation(
   }
   return [
     { key: "instructorStudio", href: home },
+    { key: "instructorProfile", href: `/${locale}/instructor/profile` },
     { key: "courseBuilder", href: `${home}#course-builder` },
   ];
 }

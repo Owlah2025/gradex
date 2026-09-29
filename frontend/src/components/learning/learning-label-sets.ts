@@ -75,6 +75,7 @@ export type NavigationLabels = Pick<
 export type ShellLabels = {
   learningNavigation: string;
   myCourses: string;
+  myProfile: string;
   /** The public catalogue, so a Student can find a Course they do not yet hold. */
   catalogue: string;
   /** The start of the product, reachable without the browser's own Back button. */
@@ -158,6 +159,7 @@ export function shellLabels(dictionary: Dictionary): ShellLabels {
   return {
     learningNavigation: dictionary.learning.learningNavigation,
     myCourses: dictionary.learning.myCourses,
+    myProfile: dictionary.learning.myProfile,
     catalogue: dictionary.learning.shellCatalogue,
     home: dictionary.learning.shellHome,
     openMenu: dictionary.meta.openMenu,

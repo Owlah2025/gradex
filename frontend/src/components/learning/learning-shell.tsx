@@ -64,6 +64,7 @@ export function LearningShell({
   // persists, which is exactly what got the reader here.
   const learningNavigation: Array<{ href: string; label: string }> = [
     { href: dashboardHref, label: labels.myCourses },
+    { href: `/${locale}/learn/profile`, label: labels.myProfile },
     { href: `/${locale}/catalog`, label: labels.catalogue },
     { href: "/", label: labels.home },
   ];

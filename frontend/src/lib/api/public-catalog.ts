@@ -14,6 +14,7 @@ export type PublicCourse = {
   slug: string;
   title: string;
   instructor_display_name: string;
+  instructor_slug?: string;
   university?: PublicTaxonomy;
   major?: PublicTaxonomy;
   subject?: PublicTaxonomy;

@@ -14,6 +14,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "en"), [
     { key: "adminHome", href: "/en/admin" },
     { key: "adminAnalytics", href: "/en/admin/analytics" },
+    { key: "adminInstructorProfiles", href: "/en/admin/instructor-profiles" },
     { key: "adminCourses", href: "/en/admin/courses" },
     { key: "courseReview", href: "/en/admin/catalog" },
     { key: "academicCatalog", href: "/en/admin/academic-catalog" },
@@ -29,6 +30,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "ar"), [
     { key: "adminHome", href: "/ar/admin" },
     { key: "adminAnalytics", href: "/ar/admin/analytics" },
+    { key: "adminInstructorProfiles", href: "/ar/admin/instructor-profiles" },
     { key: "adminCourses", href: "/ar/admin/courses" },
     { key: "courseReview", href: "/ar/admin/catalog" },
     { key: "academicCatalog", href: "/ar/admin/academic-catalog" },
@@ -46,6 +48,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
 test("Instructor workspace navigation exposes the existing authoring journey", () => {
   assert.deepEqual(roleWorkspaceNavigation("INSTRUCTOR", "en"), [
     { key: "instructorStudio", href: "/en/instructor/courses" },
+    { key: "instructorProfile", href: "/en/instructor/profile" },
     {
       key: "courseBuilder",
       href: "/en/instructor/courses#course-builder",
@@ -53,6 +56,7 @@ test("Instructor workspace navigation exposes the existing authoring journey", (
   ]);
   assert.deepEqual(roleWorkspaceNavigation("INSTRUCTOR", "ar"), [
     { key: "instructorStudio", href: "/ar/instructor/courses" },
+    { key: "instructorProfile", href: "/ar/instructor/profile" },
     {
       key: "courseBuilder",
       href: "/ar/instructor/courses#course-builder",
