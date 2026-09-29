@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -132,40 +133,36 @@ func (r *Repository) ListAuditEvents(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	where, args, filterKeys := auditWhere(req)
-	total, err := countAuditEvents(ctx, tx, where, args)
+	asOf, err := auditReadAsOf(ctx, tx, req.AsOf)
 	if err != nil {
 		return AuditEventResult{}, err
 	}
-	events, err := queryAuditEvents(ctx, tx, req, where, args)
+	where, args, filterKeys := auditWhere(req, asOf)
+	events, hasMore, err := queryAuditEvents(ctx, tx, req, where, args)
 	if err != nil {
 		return AuditEventResult{}, err
 	}
-	// Page 1 is the business action being opened. Later pages are continuation
-	// reads and are intentionally not audited so the viewer does not reorder its
-	// own result set on every pagination click.
-	if req.Page == 1 {
-		if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
-			Principal:     req.Principal,
-			CorrelationID: req.CorrelationID,
-			Action:        ActionAuditViewed,
-			Module:        catalog.AuditModuleAudit,
-			TargetType:    AuditTargetType,
-			TargetID:      AuditTargetID,
-			Reason:        "privileged read: audit event viewer",
-			Metadata: map[string]any{
-				"filter_keys_present": filterKeys,
-				"result_count":        len(events),
-				"page":                req.Page,
-			},
-		}); err != nil {
-			return AuditEventResult{}, fmt.Errorf("auditing audit viewer read: %w", err)
-		}
+	if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
+		Principal:     req.Principal,
+		CorrelationID: req.CorrelationID,
+		Action:        ActionAuditViewed,
+		Module:        catalog.AuditModuleAudit,
+		TargetType:    AuditTargetType,
+		TargetID:      AuditTargetID,
+		Reason:        "privileged read: audit event viewer",
+		Metadata: map[string]any{
+			"filter_keys_present": filterKeys,
+			"result_count":        len(events),
+			"has_more":            hasMore,
+			"page":                req.Page,
+		},
+	}); err != nil {
+		return AuditEventResult{}, fmt.Errorf("auditing audit viewer read: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AuditEventResult{}, fmt.Errorf("committing audit viewer read: %w", err)
 	}
-	return AuditEventResult{Events: events, Total: total, Page: req.Page, Limit: req.Limit}, nil
+	return AuditEventResult{Events: events, Page: req.Page, Limit: req.Limit, HasMore: hasMore, AsOf: asOf}, nil
 }
 
 func validateIdentityRead(principal identity.Principal) error {
@@ -197,7 +194,7 @@ func validateAccountDirectoryRequest(req AccountDirectoryRequest) error {
 			return ErrInvalidInput
 		}
 	}
-	if req.JoinedFrom != nil && req.JoinedTo != nil && req.JoinedFrom.After(*req.JoinedTo) {
+	if req.JoinedFrom != nil && req.JoinedTo != nil && !req.JoinedFrom.Before(*req.JoinedTo) {
 		return ErrInvalidInput
 	}
 	return nil
@@ -215,7 +212,10 @@ func validateAuditEventRequest(req AuditEventRequest) error {
 			return ErrInvalidInput
 		}
 	}
-	if req.OccurredFrom != nil && req.OccurredTo != nil && req.OccurredFrom.After(*req.OccurredTo) {
+	if req.OccurredFrom != nil && req.OccurredTo != nil && !req.OccurredFrom.Before(*req.OccurredTo) {
+		return ErrInvalidInput
+	}
+	if req.AsOf != nil && req.AsOf.IsZero() {
 		return ErrInvalidInput
 	}
 	return nil
@@ -254,7 +254,7 @@ func accountWhere(req AccountDirectoryRequest) (string, []any, []string) {
 	}
 	query := strings.TrimSpace(req.Query)
 	if query != "" {
-		add("q", "(LOWER(a.display_name) LIKE '%%' || LOWER($%[1]d) || '%%' OR a.normalized_email LIKE LOWER($%[1]d) || '%%')", query)
+		add("q", `(LOWER(a.display_name) LIKE '%%' || LOWER($%[1]d) || '%%' ESCAPE chr(92) OR a.normalized_email LIKE LOWER($%[1]d) || '%%' ESCAPE chr(92))`, escapeLikePattern(query))
 	}
 	if req.Role != "" {
 		add("role", "a.role = $%d::account_role", string(req.Role))
@@ -274,7 +274,7 @@ func accountWhere(req AccountDirectoryRequest) (string, []any, []string) {
 	return strings.Join(conditions, " AND "), args, filterKeys
 }
 
-func auditWhere(req AuditEventRequest) (string, []any, []string) {
+func auditWhere(req AuditEventRequest, asOf time.Time) (string, []any, []string) {
 	conditions := []string{"1=1"}
 	args := make([]any, 0, 7)
 	filterKeys := make([]string, 0, 7)
@@ -287,7 +287,7 @@ func auditWhere(req AuditEventRequest) (string, []any, []string) {
 		add("actorAccountId", "ae.actor_account_id = $%d::uuid", req.ActorAccountID)
 	}
 	if strings.TrimSpace(req.ActorQuery) != "" {
-		add("actor", "(LOWER(COALESCE(actor.display_name, '')) LIKE '%%' || LOWER($%[1]d) || '%%' OR LOWER(COALESCE(actor.email, '')) LIKE '%%' || LOWER($%[1]d) || '%%')", strings.TrimSpace(req.ActorQuery))
+		add("actor", `(LOWER(COALESCE(actor.display_name, '')) LIKE '%%' || LOWER($%[1]d) || '%%' ESCAPE chr(92) OR LOWER(COALESCE(actor.email, '')) LIKE '%%' || LOWER($%[1]d) || '%%' ESCAPE chr(92))`, escapeLikePattern(strings.TrimSpace(req.ActorQuery)))
 	}
 	if req.TargetType != "" {
 		add("targetType", "ae.target_type = $%d", req.TargetType)
@@ -305,9 +305,15 @@ func auditWhere(req AuditEventRequest) (string, []any, []string) {
 		add("from", "ae.occurred_at >= $%d", *req.OccurredFrom)
 	}
 	if req.OccurredTo != nil {
-		add("to", "ae.occurred_at < $%d", req.OccurredTo)
+		add("to", "ae.occurred_at < $%d", *req.OccurredTo)
 	}
+	args = append(args, asOf)
+	conditions = append(conditions, fmt.Sprintf("ae.occurred_at < $%d", len(args)))
 	return strings.Join(conditions, " AND "), args, filterKeys
+}
+
+func escapeLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(value)
 }
 
 func queryKind(query string) string {
@@ -338,17 +344,27 @@ func queryAccounts(
 	args []any,
 ) ([]AccountDirectoryEntry, error) {
 	queryArgs := append(append([]any(nil), args...), req.Limit, (req.Page-1)*req.Limit)
-	rows, err := tx.Query(ctx, `SELECT a.id::text, a.display_name, a.email, a.role::text, a.status::text,
-		a.locale, a.email_verified_at IS NOT NULL, a.created_at, i.name_ar, i.name_en,
-		MAX(s.last_activity_at)
+	rows, err := tx.Query(ctx, `WITH account_page AS (
+		SELECT a.id
 		FROM accounts a
 		LEFT JOIN student_academic_profiles sap ON sap.account_id = a.id
-		LEFT JOIN institutions i ON i.id = sap.institution_id
-		LEFT JOIN sessions s ON s.account_id = a.id
 		WHERE `+where+`
-		GROUP BY a.id, i.name_ar, i.name_en
 		ORDER BY a.created_at DESC, a.id DESC
-		LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs...)
+		LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2)+`
+	)
+	SELECT a.id::text, a.display_name, a.email, a.role::text, a.status::text,
+		a.locale, a.email_verified_at IS NOT NULL, a.created_at, i.name_ar, i.name_en,
+		activity.last_activity_at
+	FROM account_page
+	JOIN accounts a ON a.id = account_page.id
+	LEFT JOIN student_academic_profiles sap ON sap.account_id = a.id
+	LEFT JOIN institutions i ON i.id = sap.institution_id
+	LEFT JOIN LATERAL (
+		SELECT MAX(s.last_activity_at) AS last_activity_at
+		FROM sessions s
+		WHERE s.account_id = a.id
+	) activity ON TRUE
+	ORDER BY a.created_at DESC, a.id DESC`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("querying account directory: %w", err)
 	}
@@ -387,13 +403,17 @@ func queryAccount(
 	var institutionAr, institutionEn *string
 	err := tx.QueryRow(ctx, `SELECT a.id::text, a.display_name, a.email, a.role::text, a.status::text,
 		a.locale, a.email_verified_at IS NOT NULL, a.created_at, i.name_ar, i.name_en,
-		MAX(s.last_activity_at)
+		activity.last_activity_at
 		FROM accounts a
 		LEFT JOIN student_academic_profiles sap ON sap.account_id = a.id
 		LEFT JOIN institutions i ON i.id = sap.institution_id
-		LEFT JOIN sessions s ON s.account_id = a.id
+		LEFT JOIN LATERAL (
+			SELECT MAX(s.last_activity_at) AS last_activity_at
+			FROM sessions s
+			WHERE s.account_id = a.id
+		) activity ON TRUE
 		WHERE a.id = $1::uuid
-		GROUP BY a.id, i.name_ar, i.name_en`, accountID).Scan(
+		`, accountID).Scan(
 		&account.ID, &account.DisplayName, &account.Email, &role, &status, &accountLocale,
 		&account.EmailVerified, &account.CreatedAt, &institutionAr, &institutionEn,
 		&account.LastSignInActivityAt,
@@ -411,13 +431,15 @@ func queryAccount(
 	return account, nil
 }
 
-func countAuditEvents(ctx context.Context, tx pgx.Tx, where string, args []any) (int, error) {
-	var total int
-	err := tx.QueryRow(ctx, "SELECT count(*) FROM audit_events ae LEFT JOIN accounts actor ON actor.id = ae.actor_account_id WHERE "+where, args...).Scan(&total)
-	if err != nil {
-		return 0, fmt.Errorf("counting audit viewer rows: %w", err)
+func auditReadAsOf(ctx context.Context, tx pgx.Tx, requested *time.Time) (time.Time, error) {
+	if requested != nil {
+		return requested.UTC(), nil
 	}
-	return total, nil
+	var asOf time.Time
+	if err := tx.QueryRow(ctx, "SELECT now()").Scan(&asOf); err != nil {
+		return time.Time{}, fmt.Errorf("reading audit viewer snapshot time: %w", err)
+	}
+	return asOf, nil
 }
 
 func queryAuditEvents(
@@ -426,19 +448,19 @@ func queryAuditEvents(
 	req AuditEventRequest,
 	where string,
 	args []any,
-) ([]AuditEvent, error) {
-	queryArgs := append(append([]any(nil), args...), req.Limit, (req.Page-1)*req.Limit)
+) ([]AuditEvent, bool, error) {
+	queryArgs := append(append([]any(nil), args...), req.Limit+1, (req.Page-1)*req.Limit)
 	rows, err := tx.Query(ctx, `SELECT ae.id::text, ae.occurred_at, ae.actor_account_id::text,
 		COALESCE(actor.display_name, ae.actor_descriptor), ae.actor_role, ae.action, ae.module::text,
 		ae.target_type, ae.target_id, COALESCE(target.display_name, ''), ae.reason, ae.metadata
 		FROM audit_events ae
 		LEFT JOIN accounts actor ON actor.id = ae.actor_account_id
-		LEFT JOIN accounts target ON target.id::text = ae.target_id AND ae.target_type = 'ACCOUNT'
+		LEFT JOIN accounts target ON CASE WHEN ae.target_type = 'ACCOUNT' THEN ae.target_id::uuid END = target.id
 		WHERE `+where+`
 		ORDER BY ae.occurred_at DESC, ae.id DESC
 		LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("querying audit viewer rows: %w", err)
+		return nil, false, fmt.Errorf("querying audit viewer rows: %w", err)
 	}
 	defer rows.Close()
 
@@ -451,22 +473,26 @@ func queryAuditEvents(
 		if err := rows.Scan(&event.ID, &event.OccurredAt, &actorAccountID, &event.ActorDisplayName,
 			&event.ActorRole, &event.Action, &event.Module, &event.TargetType, &event.TargetID,
 			&targetLabel, &event.Reason, &metadata); err != nil {
-			return nil, fmt.Errorf("scanning audit viewer row: %w", err)
+			return nil, false, fmt.Errorf("scanning audit viewer row: %w", err)
 		}
 		event.ActorAccountID = actorAccountID
 		event.TargetLabel = targetLabel
 		event.Metadata = map[string]any{}
 		if len(metadata) > 0 {
 			if err := json.Unmarshal(metadata, &event.Metadata); err != nil {
-				return nil, fmt.Errorf("decoding audit viewer metadata: %w", err)
+				return nil, false, fmt.Errorf("decoding audit viewer metadata: %w", err)
 			}
 		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating audit viewer rows: %w", err)
+		return nil, false, fmt.Errorf("iterating audit viewer rows: %w", err)
 	}
-	return events, nil
+	hasMore := len(events) > req.Limit
+	if hasMore {
+		events = events[:req.Limit]
+	}
+	return events, hasMore, nil
 }
 
 func localizedInstitution(locale identity.Locale, arabic, english *string) string {

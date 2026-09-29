@@ -369,8 +369,9 @@ func queryInstructorUser360(ctx context.Context, tx pgx.Tx, locale identity.Loca
 }
 
 func queryTargetAuditEvents(ctx context.Context, tx pgx.Tx, accountID string, limit int) ([]AuditEvent, error) {
-	return queryAuditEvents(ctx, tx, AuditEventRequest{Page: 1, Limit: limit},
+	events, _, err := queryAuditEvents(ctx, tx, AuditEventRequest{Page: 1, Limit: limit},
 		"ae.target_type = 'ACCOUNT' AND ae.target_id = $1", []any{accountID})
+	return events, err
 }
 
 func queryNotes(ctx context.Context, tx pgx.Tx, accountID string, limit int) ([]AdminNote, error) {

@@ -10,19 +10,24 @@ import {
 } from "./admin-operations";
 
 test("account directory query builder keeps filters explicit and stable", () => {
-  assert.equal(
-    buildAdminAccountQuery({
-      q: " alice@example.com ",
-      role: "STUDENT",
-      status: "ACTIVE",
-      institutionId: "institution-1",
-      joinedFrom: "2026-09-01",
-      joinedTo: "2026-09-29",
-      page: 2,
-      limit: 25,
-    }),
-    "q=alice%40example.com&role=STUDENT&status=ACTIVE&institutionId=institution-1&joinedFrom=2026-09-01&joinedTo=2026-09-29&page=2&limit=25",
-  );
+  const query = new URLSearchParams(buildAdminAccountQuery({
+    q: " alice@example.com ",
+    role: "STUDENT",
+    status: "ACTIVE",
+    institutionId: "institution-1",
+    joinedFrom: "2026-09-01",
+    joinedTo: "2026-09-29",
+    page: 2,
+    limit: 25,
+  }));
+  assert.equal(query.get("q"), "alice@example.com");
+  assert.equal(query.get("role"), "STUDENT");
+  assert.equal(query.get("status"), "ACTIVE");
+  assert.equal(query.get("institutionId"), "institution-1");
+  assert.match(query.get("joinedFrom") ?? "", /^2026-09-01T00:00:00[+-]\d{2}:\d{2}$/);
+  assert.match(query.get("joinedTo") ?? "", /^2026-09-30T00:00:00[+-]\d{2}:\d{2}$/);
+  assert.equal(query.get("page"), "2");
+  assert.equal(query.get("limit"), "25");
 });
 
 test("empty filters do not leak empty query parameters", () => {
@@ -31,20 +36,28 @@ test("empty filters do not leak empty query parameters", () => {
 });
 
 test("audit query builder supports human actor and server-side target filters", () => {
-  assert.equal(
-    buildAdminAuditQuery({
-      actor: "Admin User",
-      targetType: "ACCOUNT",
-      targetId: "account-1",
-      action: "ADMIN_USER_VIEWED",
-      module: "IDENTITY_AND_ACCESS",
-      from: "2026-09-01",
-      to: "2026-09-29",
-      page: 1,
-      limit: 20,
-    }),
-    "actor=Admin+User&targetType=ACCOUNT&targetId=account-1&action=ADMIN_USER_VIEWED&module=IDENTITY_AND_ACCESS&from=2026-09-01&to=2026-09-29&page=1&limit=20",
-  );
+  const query = new URLSearchParams(buildAdminAuditQuery({
+    actor: "Admin User",
+    targetType: "ACCOUNT",
+    targetId: "account-1",
+    action: "ADMIN_USER_VIEWED",
+    module: "IDENTITY_AND_ACCESS",
+    from: "2026-09-01",
+    to: "2026-09-29",
+    asOf: "2026-09-29T12:00:00Z",
+    page: 1,
+    limit: 20,
+  }));
+  assert.equal(query.get("actor"), "Admin User");
+  assert.equal(query.get("targetType"), "ACCOUNT");
+  assert.equal(query.get("targetId"), "account-1");
+  assert.equal(query.get("action"), "ADMIN_USER_VIEWED");
+  assert.equal(query.get("module"), "IDENTITY_AND_ACCESS");
+  assert.match(query.get("from") ?? "", /^2026-09-01T00:00:00[+-]\d{2}:\d{2}$/);
+  assert.match(query.get("to") ?? "", /^2026-09-30T00:00:00[+-]\d{2}:\d{2}$/);
+  assert.equal(query.get("asOf"), "2026-09-29T12:00:00Z");
+  assert.equal(query.get("page"), "1");
+  assert.equal(query.get("limit"), "20");
 });
 
 test("known audit labels localize while unknown codes remain visible", () => {

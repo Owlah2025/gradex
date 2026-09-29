@@ -55,10 +55,10 @@ export type AdminAuditEvent = {
 
 export type AdminAuditPage = {
   audit_events: AdminAuditEvent[];
-  total: number;
   page: number;
   limit: number;
   has_more: boolean;
+  as_of: string;
 };
 
 export type AdminAuditFilters = {
@@ -70,6 +70,7 @@ export type AdminAuditFilters = {
   module?: string;
   from?: string;
   to?: string;
+  asOf?: string;
   page?: number;
   limit?: number;
 };
@@ -241,8 +242,8 @@ export function buildAdminAccountQuery(filters: AdminAccountFilters): string {
   setText(query, "role", filters.role);
   setText(query, "status", filters.status);
   setText(query, "institutionId", filters.institutionId);
-  setText(query, "joinedFrom", filters.joinedFrom);
-  setText(query, "joinedTo", filters.joinedTo);
+  setLocalDateBoundary(query, "joinedFrom", filters.joinedFrom, false);
+  setLocalDateBoundary(query, "joinedTo", filters.joinedTo, true);
   setNumber(query, "page", filters.page);
   setNumber(query, "limit", filters.limit);
   return query.toString();
@@ -256,8 +257,9 @@ export function buildAdminAuditQuery(filters: AdminAuditFilters): string {
   setText(query, "targetId", filters.targetId);
   setText(query, "action", filters.action);
   setText(query, "module", filters.module);
-  setText(query, "from", filters.from);
-  setText(query, "to", filters.to);
+  setLocalDateBoundary(query, "from", filters.from, false);
+  setLocalDateBoundary(query, "to", filters.to, true);
+  setText(query, "asOf", filters.asOf);
   setNumber(query, "page", filters.page);
   setNumber(query, "limit", filters.limit);
   return query.toString();
@@ -387,6 +389,32 @@ export async function listAdminAuditEvents(
 function setText(query: URLSearchParams, key: string, value: string | undefined): void {
   const trimmed = value?.trim();
   if (trimmed) query.set(key, trimmed);
+}
+
+function setLocalDateBoundary(
+  query: URLSearchParams,
+  key: string,
+  value: string | undefined,
+  endOfDate: boolean,
+): void {
+  if (!value?.trim()) return;
+  const date = new Date(`${value.trim()}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    query.set(key, value.trim());
+    return;
+  }
+  if (endOfDate) date.setDate(date.getDate() + 1);
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetRemainder = String(absoluteOffset % 60).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  query.set(
+    key,
+    `${date.getFullYear()}-${month}-${day}T00:00:00${sign}${offsetHours}:${offsetRemainder}`,
+  );
 }
 
 function setNumber(query: URLSearchParams, key: string, value: number | undefined): void {

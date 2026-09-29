@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/devices";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
+import { ProblemError } from "@/lib/api/problem";
 import { formatDate, formatDateTime } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ErrorState } from "@/components/common/error-state";
@@ -52,6 +53,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   const [model, setModel] = React.useState<AdminUser360 | null>(null);
   const [state, setState] = React.useState<"loading" | "ready" | "failed">("loading");
   const [error, setError] = React.useState<string | null>(null);
+  const [notFound, setNotFound] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<Tab>("overview");
   const [pending, setPending] = React.useState<PendingAction | null>(null);
   const [reason, setReason] = React.useState("");
@@ -66,8 +68,13 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   const load = React.useCallback(async () => {
     setState("loading");
     setError(null);
+    setNotFound(false);
     try { setModel(await getAdminUser360(accountID, locale)); setState("ready"); }
-    catch (cause) { setError(describeApiError(cause, locale)); setState("failed"); }
+    catch (cause) {
+      setNotFound(cause instanceof ProblemError && cause.problem.status === 404);
+      setError(describeApiError(cause, locale));
+      setState("failed");
+    }
   }, [accountID, locale]);
 
   React.useEffect(() => { void load(); }, [load]);
@@ -98,7 +105,20 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   };
 
   if (state === "loading") return <WorkspacePage testID="admin-user-detail-page"><LoadingState label={copy.loading} testID="admin-user-detail-loading" /></WorkspacePage>;
-  if (state === "failed" || !model) return <WorkspacePage testID="admin-user-detail-page"><ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => void load()} testID="admin-user-detail-error" /></WorkspacePage>;
+  if (state === "failed" || !model) return <WorkspacePage testID="admin-user-detail-page">
+    <ErrorState
+      title={notFound ? copy.notFound : copy.loadFailed}
+      detail={error}
+      retryLabel={notFound ? undefined : copy.retry}
+      onRetry={notFound ? undefined : () => void load()}
+      testID="admin-user-detail-error"
+    />
+    <div className="mt-4">
+      <Button asChild variant="outline" size="sm">
+        <Link href={`/${locale}/admin/users`}>{copy.backToUsers}</Link>
+      </Button>
+    </div>
+  </WorkspacePage>;
 
   const account = model.identity;
   const student = model.student;

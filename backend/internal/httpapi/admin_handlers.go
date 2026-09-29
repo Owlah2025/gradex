@@ -98,10 +98,10 @@ func (h *adminHandlers) listAuditEvents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"audit_events": result.Events,
-		"total":        result.Total,
 		"page":         result.Page,
 		"limit":        result.Limit,
-		"has_more":     hasMore(result.Total, result.Page, result.Limit),
+		"has_more":     result.HasMore,
+		"as_of":        result.AsOf,
 	})
 }
 
@@ -143,7 +143,7 @@ func parseAccountDirectoryRequest(c *gin.Context, principal identity.Principal) 
 	if !ok {
 		return adminread.AccountDirectoryRequest{}, false
 	}
-	if joinedFrom != nil && joinedTo != nil && joinedFrom.After(*joinedTo) {
+	if joinedFrom != nil && joinedTo != nil && !joinedFrom.Before(*joinedTo) {
 		writeProblem(c, problem.ValidationFailed())
 		return adminread.AccountDirectoryRequest{}, false
 	}
@@ -189,8 +189,12 @@ func parseAuditEventRequest(c *gin.Context, principal identity.Principal) (admin
 	if !ok {
 		return adminread.AuditEventRequest{}, false
 	}
-	if occurredFrom != nil && occurredTo != nil && occurredFrom.After(*occurredTo) {
+	if occurredFrom != nil && occurredTo != nil && !occurredFrom.Before(*occurredTo) {
 		writeProblem(c, problem.ValidationFailed())
+		return adminread.AuditEventRequest{}, false
+	}
+	asOf, ok := parseAdminTimestamp(c, c.Query("asOf"))
+	if !ok {
 		return adminread.AuditEventRequest{}, false
 	}
 
@@ -205,6 +209,7 @@ func parseAuditEventRequest(c *gin.Context, principal identity.Principal) (admin
 		Module:         strings.TrimSpace(c.Query("module")),
 		OccurredFrom:   occurredFrom,
 		OccurredTo:     occurredTo,
+		AsOf:           asOf,
 		Page:           page,
 		Limit:          limit,
 	}, true
@@ -258,12 +263,27 @@ func parseAdminDate(c *gin.Context, raw string, endOfDate bool) (*time.Time, boo
 	}
 	parsed, err := time.Parse("2006-01-02", value)
 	if err == nil {
+		// Date-only bounds are UTC days for non-browser callers. Browser clients
+		// send offset-aware RFC3339 bounds so an administrator's local day is kept.
 		if endOfDate {
 			parsed = parsed.AddDate(0, 0, 1)
 		}
 		return &parsed, true
 	}
 	parsed, err = time.Parse(time.RFC3339, value)
+	if err != nil {
+		writeProblem(c, problem.ValidationFailed())
+		return nil, false
+	}
+	return &parsed, true
+}
+
+func parseAdminTimestamp(c *gin.Context, raw string) (*time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
 		writeProblem(c, problem.ValidationFailed())
 		return nil, false

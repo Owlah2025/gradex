@@ -78,6 +78,7 @@ type AuditEventRequest struct {
 	Module         string
 	OccurredFrom   *time.Time
 	OccurredTo     *time.Time
+	AsOf           *time.Time
 	Page           int
 	Limit          int
 }
@@ -98,8 +99,9 @@ type AuditEvent struct {
 }
 
 type AuditEventResult struct {
-	Events []AuditEvent `json:"audit_events"`
-	Total  int          `json:"total"`
-	Page   int          `json:"page"`
-	Limit  int          `json:"limit"`
+	Events  []AuditEvent `json:"audit_events"`
+	Page    int          `json:"page"`
+	Limit   int          `json:"limit"`
+	HasMore bool         `json:"has_more"`
+	AsOf    time.Time    `json:"as_of"`
 }

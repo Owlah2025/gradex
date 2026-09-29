@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   auditActionLabel,
   auditModuleLabel,
@@ -55,7 +55,7 @@ const EMPTY_DRAFT: AuditDraft = {
 };
 
 const PAGE_LIMIT = 20;
-const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f-]{27,}/i;
+const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 export function AdminAudit() {
   const { locale, t } = useLocale();
@@ -65,15 +65,19 @@ export function AdminAudit() {
   const [result, setResult] = useState<AdminAuditPage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
   const loadEvents = useCallback(async () => {
+    const requestID = ++requestSequence.current;
     setState("loading");
     setError(null);
     try {
       const next = await listAdminAuditEvents(locale, filters);
+      if (requestID !== requestSequence.current) return;
       setResult(next);
       setState("ready");
     } catch (cause) {
+      if (requestID !== requestSequence.current) return;
       setError(describeApiError(cause, locale));
       setState("failed");
     }
@@ -114,7 +118,7 @@ export function AdminAudit() {
         status={
           result ? (
             <span className="text-sm font-semibold text-muted-foreground" aria-live="polite">
-              {result.total} {copy.resultCount}
+              {result.audit_events.length} {copy.resultCount}
             </span>
           ) : null
         }
@@ -137,9 +141,9 @@ export function AdminAudit() {
               onChange={(event) => updateDraft("action", event.target.value)}
             >
               <option value="">{copy.allActions}</option>
-              <option value="ADMIN_USER_SEARCHED">{copy.actions.ADMIN_USER_SEARCHED}</option>
-              <option value="ADMIN_USER_VIEWED">{copy.actions.ADMIN_USER_VIEWED}</option>
-              <option value="ADMIN_AUDIT_VIEWED">{copy.actions.ADMIN_AUDIT_VIEWED}</option>
+              {Object.entries(copy.actions).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </Select>
           </Field>
           <Field label={copy.moduleLabel} htmlFor="admin-audit-module">
@@ -149,8 +153,9 @@ export function AdminAudit() {
               onChange={(event) => updateDraft("module", event.target.value)}
             >
               <option value="">{copy.allModules}</option>
-              <option value="IDENTITY_AND_ACCESS">{copy.modules.IDENTITY_AND_ACCESS}</option>
-              <option value="AUDIT">{copy.modules.AUDIT}</option>
+              {Object.entries(copy.modules).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </Select>
           </Field>
           <Field label={copy.targetLabel} htmlFor="admin-audit-target">
@@ -160,9 +165,9 @@ export function AdminAudit() {
               onChange={(event) => updateDraft("targetType", event.target.value)}
             >
               <option value="">{copy.allTargets}</option>
-              <option value="ACCOUNT">{copy.targets.ACCOUNT}</option>
-              <option value="ACCOUNT_DIRECTORY">{copy.targets.ACCOUNT_DIRECTORY}</option>
-              <option value="AUDIT_LOG">{copy.targets.AUDIT_LOG}</option>
+              {Object.entries(copy.targets).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3 sm:col-span-2 lg:col-span-2">
@@ -225,7 +230,11 @@ export function AdminAudit() {
           <AuditPagination
             page={result.page}
             hasMore={result.has_more}
-            onPageChange={(page) => setFilters((current) => ({ ...current, page }))}
+            onPageChange={(page) => setFilters((current) => ({
+              ...current,
+              page,
+              asOf: page === 1 ? undefined : result.as_of,
+            }))}
             copy={copy}
           />
         </>
@@ -380,5 +389,6 @@ function AuditPagination({
 }
 
 function humanLabel(value: string, fallback: string): string {
-  return UUID_LIKE.test(value) ? fallback : value;
+  if (!value.trim()) return fallback;
+  return value.replace(UUID_LIKE, fallback);
 }

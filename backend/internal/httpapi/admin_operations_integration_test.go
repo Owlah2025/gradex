@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -66,13 +67,13 @@ func TestAdminOperationsReadsAndAudits(t *testing.T) {
 		}
 	}
 
-	pageOne := getAdminAccountPage(t, client, ts.URL, adminToken, 1)
-	pageTwo := getAdminAccountPage(t, client, ts.URL, adminToken, 2)
-	if pageOne.Total != 3 || pageTwo.Total != 3 || len(pageOne.Accounts) != 1 || len(pageTwo.Accounts) != 1 {
-		t.Fatalf("account pages = page1=%+v page2=%+v", pageOne, pageTwo)
+	accountPageOne := getAdminAccountPage(t, client, ts.URL, adminToken, 1)
+	accountPageTwo := getAdminAccountPage(t, client, ts.URL, adminToken, 2)
+	if accountPageOne.Total != 3 || accountPageTwo.Total != 3 || len(accountPageOne.Accounts) != 1 || len(accountPageTwo.Accounts) != 1 {
+		t.Fatalf("account pages = page1=%+v page2=%+v", accountPageOne, accountPageTwo)
 	}
-	if pageOne.Accounts[0].ID != studentIDs[2] || pageTwo.Accounts[0].ID != studentIDs[1] {
-		t.Fatalf("account ordering = page1 %s page2 %s", pageOne.Accounts[0].ID, pageTwo.Accounts[0].ID)
+	if accountPageOne.Accounts[0].ID != studentIDs[2] || accountPageTwo.Accounts[0].ID != studentIDs[1] {
+		t.Fatalf("account ordering = page1 %s page2 %s", accountPageOne.Accounts[0].ID, accountPageTwo.Accounts[0].ID)
 	}
 
 	detailResponse := doPricingRequest(t, client, http.MethodGet,
@@ -97,10 +98,11 @@ func TestAdminOperationsReadsAndAudits(t *testing.T) {
 			ActorDisplayName string `json:"actor_display_name"`
 			TargetType       string `json:"target_type"`
 		} `json:"audit_events"`
-		Total int `json:"total"`
+		HasMore bool   `json:"has_more"`
+		AsOf    string `json:"as_of"`
 	}
 	decodeAdminResponse(t, auditResponse, http.StatusOK, &auditResult)
-	if auditResult.Total < 2 || len(auditResult.Events) < 2 {
+	if len(auditResult.Events) < 2 || auditResult.HasMore {
 		t.Fatalf("filtered audit events = %+v", auditResult)
 	}
 	for _, event := range auditResult.Events {
@@ -127,6 +129,59 @@ func TestAdminOperationsReadsAndAudits(t *testing.T) {
 	}
 	if viewerCount != 1 {
 		t.Fatalf("audit-view audit count = %d, want 1", viewerCount)
+	}
+
+	viewerCountBeforePagination := viewerCount
+	pageOneResponse := doPricingRequest(t, client, http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-events?action=ADMIN_USER_SEARCHED&page=1&limit=1",
+		adminToken, "", adminToken, nil)
+	var pageOne struct {
+		Events []struct {
+			ID string `json:"id"`
+		} `json:"audit_events"`
+		HasMore bool   `json:"has_more"`
+		AsOf    string `json:"as_of"`
+	}
+	decodeAdminResponse(t, pageOneResponse, http.StatusOK, &pageOne)
+	if len(pageOne.Events) != 1 || !pageOne.HasMore || pageOne.AsOf == "" {
+		t.Fatalf("audit page one = %+v", pageOne)
+	}
+
+	pageTwoResponse := doPricingRequest(t, client, http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-events?action=ADMIN_USER_SEARCHED&page=2&limit=1&asOf="+url.QueryEscape(pageOne.AsOf),
+		adminToken, "", adminToken, nil)
+	var pageTwo struct {
+		Events []struct {
+			ID string `json:"id"`
+		} `json:"audit_events"`
+		HasMore bool `json:"has_more"`
+	}
+	decodeAdminResponse(t, pageTwoResponse, http.StatusOK, &pageTwo)
+	if len(pageTwo.Events) != 1 || pageTwo.Events[0].ID == pageOne.Events[0].ID || !pageTwo.HasMore {
+		t.Fatalf("audit pages = page1=%+v page2=%+v", pageOne, pageTwo)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events
+		WHERE actor_account_id = $1::uuid AND action = 'ADMIN_AUDIT_VIEWED'`, adminID).Scan(&viewerCount); err != nil {
+		t.Fatalf("counting paginated audit-view audits: %v", err)
+	}
+	if viewerCount != viewerCountBeforePagination+2 {
+		t.Fatalf("paginated audit-view audit count = %d, want %d", viewerCount, viewerCountBeforePagination+2)
+	}
+
+	invalidAdminRequests := []string{
+		"/api/v1/admin/accounts?limit=51",
+		"/api/v1/admin/accounts?page=0",
+		"/api/v1/admin/accounts?joinedFrom=2026-09-30&joinedTo=2026-09-29",
+		"/api/v1/admin/accounts?role=UNKNOWN",
+		"/api/v1/admin/accounts?status=UNKNOWN",
+		"/api/v1/admin/audit-events?module=UNKNOWN",
+	}
+	for _, path := range invalidAdminRequests {
+		response := doPricingRequest(t, client, http.MethodGet, ts.URL+path, adminToken, "", adminToken, nil)
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid admin request %s status = %d, want %d", path, response.StatusCode, http.StatusUnprocessableEntity)
+		}
 	}
 }
 
@@ -186,7 +241,8 @@ func decodeAdminResponse(t *testing.T, response *http.Response, wantStatus int, 
 	t.Helper()
 	defer response.Body.Close()
 	if response.StatusCode != wantStatus {
-		t.Fatalf("response status = %d, want %d", response.StatusCode, wantStatus)
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("response status = %d, want %d, body = %s", response.StatusCode, wantStatus, body)
 	}
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		t.Fatalf("decoding admin response: %v", err)

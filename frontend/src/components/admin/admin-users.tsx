@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { listInstitutions, type Institution } from "@/lib/api/academic";
 import {
   listAdminAccounts,
@@ -69,15 +69,19 @@ export function AdminUsers() {
   const [error, setError] = useState<string | null>(null);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [institutionsError, setInstitutionsError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
   const loadAccounts = useCallback(async () => {
+    const requestID = ++requestSequence.current;
     setLoadState("loading");
     setError(null);
     try {
       const next = await listAdminAccounts(locale, filters);
+      if (requestID !== requestSequence.current) return;
       setResult(next);
       setLoadState("ready");
     } catch (cause) {
+      if (requestID !== requestSequence.current) return;
       setError(describeApiError(cause, locale));
       setLoadState("failed");
     }
@@ -119,6 +123,14 @@ export function AdminUsers() {
   const goToPage = (page: number) => {
     setFilters((current) => ({ ...current, page }));
   };
+  const hasActiveFilters = Boolean(
+    filters.q ||
+      filters.role ||
+      filters.status ||
+      filters.institutionId ||
+      filters.joinedFrom ||
+      filters.joinedTo,
+  );
 
   return (
     <WorkspacePage testID="admin-users-page">
@@ -240,10 +252,10 @@ export function AdminUsers() {
             density="compact"
             headingLevel={2}
             testID="admin-users-empty"
-            title={filters.q || filters.role || filters.status || filters.institutionId ? copy.noMatches : copy.empty}
+            title={hasActiveFilters ? copy.noMatches : copy.empty}
             description={copy.emptyDescription}
             action={
-              filters.q || filters.role || filters.status || filters.institutionId ? (
+              hasActiveFilters ? (
                 <Button variant="outline" onClick={clearFilters}>
                   {copy.clearFilters}
                 </Button>
