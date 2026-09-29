@@ -712,9 +712,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("lesson public preview schema = %d, want one past automatic enhancement recovery %d",
 			LessonPublicPreviewSchemaVersion, AutoEnhancementRecoverySchemaVersion)
 	}
-	if MaxSchemaVersion != LessonPublicPreviewSchemaVersion {
+	if AdminOperationsSchemaVersion != LessonPublicPreviewSchemaVersion+1 {
+		t.Fatalf("admin operations schema = %d, want one past lesson public preview %d",
+			AdminOperationsSchemaVersion, LessonPublicPreviewSchemaVersion)
+	}
+	if MaxSchemaVersion != AdminOperationsSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, LessonPublicPreviewSchemaVersion)
+			MaxSchemaVersion, AdminOperationsSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

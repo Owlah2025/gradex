@@ -54,6 +54,15 @@ func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engi
 }
 
 func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver, session identity.Session) (*gin.Engine, *syncBuffer) {
+	return authzRouterWithSessionAndAuthenticator(t, principals, session, nil)
+}
+
+func authzRouterWithSessionAndAuthenticator(
+	t *testing.T,
+	principals identity.PrincipalResolver,
+	session identity.Session,
+	authenticator auth.Authenticator,
+) (*gin.Engine, *syncBuffer) {
 	t.Helper()
 
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
@@ -212,8 +221,17 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing access foundation: %v", err)
 	}
 
-	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
+	var routeAuthenticator auth.Authenticator = sessionFoundation.authenticator
+	if authenticator != nil {
+		routeAuthenticator = authenticator
+	}
+	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{Service: fakeAdminService{}})
+	if err != nil {
+		t.Fatalf("constructing admin foundation: %v", err)
+	}
+	r, err := NewRouter(cfg, logger, reporter, routeAuthenticator, principals,
 		WithStaffFoundation(staffFoundation),
+		WithAdminFoundation(adminFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
 		WithRecoveryFoundation(recoveryFoundation),
@@ -379,6 +397,9 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PUT /api/v1/learn/lessons/:lessonId/progress":                                      {Method: http.MethodPut, Path: "/api/v1/learn/lessons/:lessonId/progress", Class: ClassCapabilityProtected},
 	"POST /api/v1/learn/reports":                                                        {Method: http.MethodPost, Path: "/api/v1/learn/reports", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/reports":                                                         {Method: http.MethodGet, Path: "/api/v1/admin/reports", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts":                                                        {Method: http.MethodGet, Path: "/api/v1/admin/accounts", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts/:accountId":                                             {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/audit-events":                                                    {Method: http.MethodGet, Path: "/api/v1/admin/audit-events", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/reports/:id":                                                     {Method: http.MethodGet, Path: "/api/v1/admin/reports/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/reports/:id/resolve":                                            {Method: http.MethodPost, Path: "/api/v1/admin/reports/:id/resolve", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses/:id":                                                           {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
@@ -401,14 +422,14 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	// candidate mutation, exactly like attaching its video: only the owning
 	// Instructor may decide it, and only on a candidate revision.
 	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/public-preview": {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/public-preview", Class: ClassOwnershipProtected},
-	lessonVideoUploadCompletionRoute:                                                 {Method: http.MethodPost, Path: lessonVideoUploadCompletionPath, Class: ClassOwnershipProtected},
-	publicPreviewUploadCompletionRoute:                                               {Method: http.MethodPost, Path: publicPreviewUploadCompletionPath, Class: ClassOwnershipProtected},
-	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":          {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
-	"PUT /api/v1/courses/:id/revisions/:revisionId/preview":                          {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/revisions/:revisionId/preview":                       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
-	"POST /api/v1/courses/:id/revisions/:revisionId/submit":                          {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/submit", Class: ClassOwnershipProtected},
-	"POST /api/v1/courses/:id/revisions/:revisionId/publish":                         {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/publish", Class: ClassOwnershipProtected},
+	lessonVideoUploadCompletionRoute:                                           {Method: http.MethodPost, Path: lessonVideoUploadCompletionPath, Class: ClassOwnershipProtected},
+	publicPreviewUploadCompletionRoute:                                         {Method: http.MethodPost, Path: publicPreviewUploadCompletionPath, Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":    {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files": {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/preview":                    {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/preview":                 {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/submit":                    {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/submit", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/publish":                   {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/publish", Class: ClassOwnershipProtected},
 
 	"GET /api/v1/admin/review/queue":                                                                {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/review/courses/:id/revisions/:revisionId":                                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId", Class: ClassCapabilityProtected},

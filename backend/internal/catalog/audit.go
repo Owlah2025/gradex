@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	AuditModuleCatalog    = "CATALOG_AND_AUTHORING"
-	AuditModuleModeration = "MODERATION"
+	AuditModuleIdentityAndAccess = "IDENTITY_AND_ACCESS"
+	AuditModuleAudit             = "AUDIT"
+	AuditModuleCatalog           = "CATALOG_AND_AUTHORING"
+	AuditModuleModeration        = "MODERATION"
 )
 
 type AuditEvent struct {

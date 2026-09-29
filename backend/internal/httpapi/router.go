@@ -97,6 +97,11 @@ func NewRouter(
 	if routerConfig.staff != nil {
 		mountStaffRoutes(v1, routerConfig.staff, routerConfig.sessions, authenticator, principals, logger)
 	}
+	if routerConfig.admin != nil {
+		if err := mountAdminRoutes(v1, routerConfig.admin, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting admin operations routes: %w", err)
+		}
+	}
 	if routerConfig.catalog != nil {
 		if err := mountCatalogRoutes(v1, routerConfig.catalog, routerConfig.media, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting catalog routes: %w", err)
@@ -244,6 +249,7 @@ type routerOptions struct {
 	recovery             *RecoveryFoundation
 	sessions             *SessionFoundation
 	staff                *StaffFoundation
+	admin                *AdminFoundation
 	catalog              *CatalogFoundation
 	publicCatalog        *PublicCatalogFoundation
 	media                *MediaFoundation

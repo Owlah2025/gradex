@@ -84,8 +84,10 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapProviderOperations: true, CapContentManagement: true,
 			CapLearningAccess: false,
 			CapCatalogPublish: true, CapCatalogPricing: true, CapCatalogTaxonomy: true,
-			CapAcademicCatalog:   true,
-			CapCourseAccessGrant: true,
+			CapAcademicCatalog:    true,
+			CapCourseAccessGrant:  true,
+			CapUserDirectoryRead:  true,
+			CapUserAdministration: true,
 			// An operator acts on another Account's devices under
 			// CapSecurityOperations, never under the Student's own subject.
 			CapDeviceManagement: false,
@@ -97,9 +99,11 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapSecurityOperations: false, CapRetentionOperations: false,
 			CapProviderOperations: false, CapLearningAccess: false,
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
-			CapAcademicCatalog:   false,
-			CapCourseAccessGrant: false,
-			CapDeviceManagement:  false,
+			CapAcademicCatalog:    false,
+			CapCourseAccessGrant:  false,
+			CapUserDirectoryRead:  false,
+			CapUserAdministration: false,
+			CapDeviceManagement:   false,
 		},
 		RoleStudent: {
 			CapPasswordChange: true, CapSessionTerminate: true,
@@ -108,9 +112,11 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapSecurityOperations: false, CapRetentionOperations: false,
 			CapProviderOperations: false, CapContentManagement: false,
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
-			CapAcademicCatalog:   false,
-			CapCourseAccessGrant: false,
-			CapDeviceManagement:  true,
+			CapAcademicCatalog:    false,
+			CapCourseAccessGrant:  false,
+			CapUserDirectoryRead:  false,
+			CapUserAdministration: false,
+			CapDeviceManagement:   true,
 		},
 	}
 

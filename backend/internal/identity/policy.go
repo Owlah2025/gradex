@@ -44,6 +44,10 @@ const (
 	// S6 Course Access Grant capability — Admin only.
 	CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"
 
+	// T1 Admin Operations capability set.
+	CapUserDirectoryRead  Capability = "USER_DIRECTORY_READ"
+	CapUserAdministration Capability = "USER_ADMINISTRATION"
+
 	// CapDeviceManagement is a Student acting on their own trusted devices:
 	// listing them, completing a device-trust challenge, and removing one to
 	// make room for another.
@@ -75,6 +79,8 @@ var AllCapabilities = []Capability{
 	CapCatalogTaxonomy,
 	CapAcademicCatalog,
 	CapCourseAccessGrant,
+	CapUserDirectoryRead,
+	CapUserAdministration,
 	CapDeviceManagement,
 }
 
@@ -178,7 +184,8 @@ func Authorize(p Principal, c Capability) Decision {
 		case CapAdminOperations, CapFinancialOperations, CapSecurityOperations,
 			CapRetentionOperations, CapProviderOperations, CapContentManagement,
 			CapCatalogPublish, CapCatalogPricing, CapCatalogTaxonomy,
-			CapAcademicCatalog, CapCourseAccessGrant:
+			CapAcademicCatalog, CapCourseAccessGrant,
+			CapUserDirectoryRead, CapUserAdministration:
 			return allow()
 		}
 		// Deliberately not CapLearningAccess. Admin access to protected content

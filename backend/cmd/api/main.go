@@ -14,6 +14,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/academic"
 	"github.com/Owlah2025/gradex/backend/internal/access"
+	adminread "github.com/Owlah2025/gradex/backend/internal/admin"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
@@ -847,6 +848,18 @@ func buildCatalogFoundation(
 	})
 }
 
+func buildAdminFoundation(pool *pgxpool.Pool) (*httpapi.AdminFoundation, error) {
+	repository, err := adminread.NewRepository(pool)
+	if err != nil {
+		return nil, fmt.Errorf("building admin read repository: %w", err)
+	}
+	foundation, err := httpapi.NewAdminFoundation(httpapi.AdminFoundationOptions{Service: repository})
+	if err != nil {
+		return nil, fmt.Errorf("building admin operations foundation: %w", err)
+	}
+	return foundation, nil
+}
+
 func buildPublicCatalogFoundation(pool *pgxpool.Pool) (*httpapi.PublicCatalogFoundation, error) {
 	repository, err := catalogpublic.NewRepository(pool, catalogpublic.PublishedOnly)
 	if err != nil {
@@ -1077,6 +1090,15 @@ func buildProductionFoundationsWithStaffSource(
 		}
 		pf.StaffRedis = limiterClient
 		pf.Options = append(pf.Options, httpapi.WithStaffFoundation(foundation))
+	}
+
+	if cfg.Sessions().Enabled() {
+		adminFoundation, err := buildAdminFoundation(pool)
+		if err != nil {
+			pf.Close()
+			return nil, fmt.Errorf("composing admin operations: %w", err)
+		}
+		pf.Options = append(pf.Options, httpapi.WithAdminFoundation(adminFoundation))
 	}
 
 	catalogFoundation, err := buildCatalogFoundation(cfg, pool)

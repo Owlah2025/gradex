@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	adminread "github.com/Owlah2025/gradex/backend/internal/admin"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/config"
@@ -125,6 +126,14 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)
 	}
+	adminRepository, err := adminread.NewRepository(p)
+	if err != nil {
+		t.Fatalf("admin repository: %v", err)
+	}
+	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{Service: adminRepository})
+	if err != nil {
+		t.Fatalf("NewAdminFoundation: %v", err)
+	}
 
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -201,6 +210,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
+		WithAdminFoundation(adminFoundation),
 		WithCatalogFoundation(catalogFoundation),
 		WithMediaFoundation(reviewMediaFoundation(t, p)),
 	)

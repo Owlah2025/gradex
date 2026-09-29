@@ -78,7 +78,10 @@ const (
 	// BOOLEAN on course_lessons; the legacy course-level preview pointer, its
 	// PREVIEW assets and its renditions are untouched and keep serving.
 	LessonPublicPreviewSchemaVersion = AutoEnhancementRecoverySchemaVersion + 1
-	MaxSchemaVersion                 = LessonPublicPreviewSchemaVersion
+	// T1 Admin Operations query-path indexes. Additive only; no existing row
+	// shape changes.
+	AdminOperationsSchemaVersion = LessonPublicPreviewSchemaVersion + 1
+	MaxSchemaVersion             = AdminOperationsSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
