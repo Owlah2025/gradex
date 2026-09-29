@@ -28,14 +28,15 @@ registration_counts AS (
     FROM accounts a
     CROSS JOIN params p
 ),
-sign_in_activity AS (
-    SELECT
-        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= date_trunc('day', p.as_of)) AS today,
-        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '7 days') AS days_7,
-        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '30 days') AS days_30
-    FROM params p
-    LEFT JOIN identity_security_events ise
-      ON ise.event_type IN ('SESSION_CREATED', 'SESSION_RENEWED')
+	sign_in_activity AS (
+	    SELECT
+	        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= date_trunc('day', p.as_of, 'Asia/Kuwait')) AS today,
+	        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '7 days') AS days_7,
+	        count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '30 days') AS days_30
+	    FROM params p
+	    LEFT JOIN identity_security_events ise
+	      ON ise.event_type IN ('SESSION_CREATED', 'SESSION_RENEWED')
+	     AND ise.occurred_at >= p.as_of - interval '30 days'
     LEFT JOIN accounts a
       ON a.id = ise.account_id AND a.role = 'STUDENT'
 ),
@@ -63,7 +64,7 @@ current_course_lessons AS (
      AND cli.course_id = c.id
      AND cli.section_identity_id = cl.section_identity_id
 ),
-active_enrollment_progress AS (
+student_enrollment_progress AS (
     SELECT
         e.id AS enrollment_id,
         count(DISTINCT lesson.lesson_identity_id) AS total_lessons,
@@ -88,7 +89,7 @@ progress_summary AS (
             WHERE total_lessons > 0
               AND completed_lessons::numeric / total_lessons >= 0.9
         ) AS completions
-    FROM active_enrollment_progress
+    FROM student_enrollment_progress
 ),
 course_lifecycle_counts AS (
     SELECT lifecycle::text AS lifecycle, count(*) AS total
@@ -155,7 +156,7 @@ metric_rows AS (
     UNION ALL SELECT 44, 'learning.completions', to_jsonb(progress_summary.completions), 'learning.completions' FROM progress_summary
     UNION ALL SELECT 50, 'courses.draft', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'DRAFT'), 0)), 'courses.lifecycle'
     UNION ALL SELECT 51, 'courses.pending_review', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'PENDING_REVIEW'), 0)), 'courses.lifecycle'
-    UNION ALL SELECT 52, 'courses.revisions_pending_review', to_jsonb((SELECT count(*) FROM course_revisions WHERE state = 'PENDING_REVIEW')), 'courses.pending_review'
+	    UNION ALL SELECT 52, 'courses.revisions_pending_review', to_jsonb((SELECT count(*) FROM course_revisions WHERE state = 'PENDING_REVIEW')), 'courses.revisions_pending_review'
     UNION ALL SELECT 53, 'courses.changes_requested', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'CHANGES_REQUESTED'), 0)), 'courses.lifecycle'
     UNION ALL SELECT 54, 'courses.published', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'PUBLISHED'), 0)), 'courses.lifecycle'
     UNION ALL SELECT 55, 'courses.delisted', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'DELISTED'), 0)), 'courses.lifecycle'
@@ -175,8 +176,10 @@ metric_rows AS (
     UNION ALL SELECT 84, 'access_invitations.cancelled', to_jsonb((SELECT count(*) FROM course_access_invitations WHERE state = 'CANCELLED')), 'access_invitations.state'
     UNION ALL SELECT 90, 'entitlements.manual_invitation.active', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'MANUAL_INVITATION' AND state = 'ACTIVE')), 'entitlements.grant_source_and_state'
     UNION ALL SELECT 91, 'entitlements.manual_invitation.revoked', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'MANUAL_INVITATION' AND state = 'REVOKED')), 'entitlements.grant_source_and_state'
-    UNION ALL SELECT 92, 'entitlements.purchase_request.active', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'PURCHASE_REQUEST' AND state = 'ACTIVE')), 'entitlements.grant_source_and_state'
-    UNION ALL SELECT 93, 'entitlements.purchase_request.revoked', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'PURCHASE_REQUEST' AND state = 'REVOKED')), 'entitlements.grant_source_and_state'
+	    UNION ALL SELECT 92, 'entitlements.purchase_request.active', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'PURCHASE_REQUEST' AND state = 'ACTIVE')), 'entitlements.grant_source_and_state'
+	    UNION ALL SELECT 93, 'entitlements.purchase_request.revoked', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'PURCHASE_REQUEST' AND state = 'REVOKED')), 'entitlements.grant_source_and_state'
+	    UNION ALL SELECT 94, 'entitlements.bundle_purchase.active', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'BUNDLE_PURCHASE' AND state = 'ACTIVE')), 'entitlements.grant_source_and_state'
+	    UNION ALL SELECT 95, 'entitlements.bundle_purchase.revoked', to_jsonb((SELECT count(*) FROM entitlements WHERE grant_source = 'BUNDLE_PURCHASE' AND state = 'REVOKED')), 'entitlements.grant_source_and_state'
     UNION ALL SELECT 100, 'subject_demand.top', top_subject_demand.items, 'subject_demand.top'
     FROM top_subject_demand
 )
@@ -199,7 +202,7 @@ func (r *Repository) GetMetricsOverview(ctx context.Context, request MetricsOver
 	}
 	defer rows.Close()
 
-	metrics := make([]Metric, 0, 40)
+	metrics := make([]Metric, 0, 41)
 	var asOf time.Time
 	for rows.Next() {
 		var key, definitionKey string
@@ -256,17 +259,24 @@ course_rollup AS (
     GROUP BY course_id
 )
 SELECT
-    c.id::text,
-    CASE WHEN $1::text = 'ar' THEN COALESCE(cr.title_ar, '') ELSE COALESCE(cr.title_en, '') END,
-    COALESCE(owner.display_name, ''),
-    c.lifecycle::text,
-    COALESCE(rollup.enrolled, 0),
-    COALESCE(rollup.started, 0),
-    COALESCE(rollup.learning_active_7d, 0),
-    COALESCE(rollup.average_progress, 0),
-    COALESCE(rollup.completed, 0)
+	    c.id::text AS id,
+	    CASE WHEN $1::text = 'ar' THEN COALESCE(live.title_ar, latest.title_ar, '') ELSE COALESCE(live.title_en, latest.title_en, '') END AS title,
+	    COALESCE(owner.display_name, '') AS instructor,
+	    c.lifecycle::text AS lifecycle,
+	    COALESCE(rollup.enrolled, 0) AS enrolled,
+	    COALESCE(rollup.started, 0) AS started,
+	    COALESCE(rollup.learning_active_7d, 0) AS learning_active_7d,
+	    COALESCE(rollup.average_progress, 0) AS average_progress,
+	    COALESCE(rollup.completed, 0) AS completed
 FROM courses c
-LEFT JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id
+LEFT JOIN course_revisions live ON live.id = c.live_revision_id AND live.course_id = c.id
+LEFT JOIN LATERAL (
+    SELECT cr.title_ar, cr.title_en
+    FROM course_revisions cr
+    WHERE cr.course_id = c.id
+    ORDER BY cr.revision_number DESC
+    LIMIT 1
+) latest ON TRUE
 JOIN accounts owner ON owner.id = c.owner_account_id
 LEFT JOIN course_rollup rollup ON rollup.course_id = c.id
 ORDER BY %s
@@ -341,11 +351,11 @@ enrollment_totals AS (
     GROUP BY c.owner_account_id
 )
 SELECT
-    a.id::text,
-    a.display_name,
-    COALESCE(published.published_courses, 0),
-    COALESCE(enrollment_totals.total_enrollments, 0),
-    COALESCE(learning_active.active_students, 0)
+	    a.id::text AS id,
+	    COALESCE(a.display_name, '') AS name,
+	    COALESCE(published.published_courses, 0) AS published_courses,
+	    COALESCE(enrollment_totals.total_enrollments, 0) AS total_enrollments,
+	    COALESCE(learning_active.active_students, 0) AS learning_active_students_7d
 FROM accounts a
 LEFT JOIN published ON published.owner_account_id = a.id
 LEFT JOIN enrollment_totals ON enrollment_totals.owner_account_id = a.id
@@ -394,7 +404,7 @@ func validateMetricsOverviewRequest(request MetricsOverviewRequest) error {
 	if err := validateIdentityRead(request.Principal); err != nil {
 		return err
 	}
-	if !request.Locale.Valid() || (request.Window != "" && request.Window != "7d" && request.Window != "30d") {
+	if !request.Locale.Valid() {
 		return ErrInvalidInput
 	}
 	return nil
@@ -458,17 +468,17 @@ func metricsCourseOrder(sort, direction string) string {
 		"average_progress":   "average_progress",
 		"completed":          "completed",
 	}[sort]
-	return fmt.Sprintf("%s %s, c.id %s", column, strings.ToUpper(direction), strings.ToUpper(direction))
+	return fmt.Sprintf("%s %s NULLS LAST, c.id %s", column, strings.ToUpper(direction), strings.ToUpper(direction))
 }
 
 func metricsInstructorOrder(sort, direction string) string {
 	column := map[string]string{
-		"name":                        "a.display_name",
+		"name":                        "name",
 		"published_courses":           "published_courses",
 		"total_enrollments":           "total_enrollments",
 		"learning_active_students_7d": "learning_active_students_7d",
 	}[sort]
-	return fmt.Sprintf("%s %s, a.id %s", column, strings.ToUpper(direction), strings.ToUpper(direction))
+	return fmt.Sprintf("%s %s NULLS LAST, a.id %s", column, strings.ToUpper(direction), strings.ToUpper(direction))
 }
 
 var _ interface {

@@ -153,18 +153,7 @@ function InboxCard({
           <ul className="divide-y divide-border">
             {section.items.map((item) => (
               <li key={`${item.kind}-${item.target_id}`}>
-                <Link
-                  href={`/${locale}${item.route}`}
-                  className="group flex items-center justify-between gap-4 px-6 py-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-semibold text-foreground">{item.label}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {formatAge(item.age_seconds, locale)}
-                    </span>
-                  </span>
-                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden />
-                </Link>
+                <InboxItem item={item} locale={locale} />
               </li>
             ))}
           </ul>
@@ -172,6 +161,32 @@ function InboxCard({
       </CardContent>
     </Card>
   );
+}
+
+function InboxItem({ item, locale }: { item: AdminInbox["sections"][number]["items"][number]; locale: "ar" | "en" }) {
+  const href = inboxHref(locale, item);
+  const content = (
+    <>
+      <span className="min-w-0">
+        <span className="block truncate font-semibold text-foreground">{item.label}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">{formatAge(item.age_seconds, locale)}</span>
+      </span>
+      {href ? <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden /> : null}
+    </>
+  );
+  if (!href) {
+    return <div className="flex items-center justify-between gap-4 px-6 py-4">{content}</div>;
+  }
+  return (
+    <Link href={href} className="group flex items-center justify-between gap-4 px-6 py-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring">
+      {content}
+    </Link>
+  );
+}
+
+function inboxHref(locale: "ar" | "en", item: AdminInbox["sections"][number]["items"][number]): string | null {
+  if (!item.route) return null;
+  return `/${locale}${item.route.replace(":courseId", encodeURIComponent(item.target_id))}`;
 }
 
 function formatAge(seconds: number, locale: "ar" | "en"): string {

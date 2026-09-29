@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	adminread "github.com/Owlah2025/gradex/backend/internal/admin"
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
@@ -22,11 +24,18 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 	ctx := context.Background()
 	fixture := seedAdminMetricsFixture(t, pool, adminID, instructorID, setupCourseID)
 	logAdminMetricsExplain(t, pool, "signed-in activity", `
-		SELECT count(DISTINCT a.id)
-		FROM identity_security_events ise
-		JOIN accounts a ON a.id = ise.account_id AND a.role = 'STUDENT'
-		WHERE ise.event_type IN ('SESSION_CREATED', 'SESSION_RENEWED')
-		  AND ise.occurred_at >= now() - interval '30 days'`)
+		WITH params AS (SELECT now() AS as_of), sign_in_activity AS (
+			SELECT
+				count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= date_trunc('day', p.as_of, 'Asia/Kuwait')) AS today,
+				count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '7 days') AS days_7,
+				count(DISTINCT a.id) FILTER (WHERE ise.occurred_at >= p.as_of - interval '30 days') AS days_30
+			FROM params p
+			LEFT JOIN identity_security_events ise
+			  ON ise.event_type IN ('SESSION_CREATED', 'SESSION_RENEWED')
+			 AND ise.occurred_at >= p.as_of - interval '30 days'
+			LEFT JOIN accounts a ON a.id = ise.account_id AND a.role = 'STUDENT'
+		)
+		SELECT * FROM sign_in_activity`)
 	logAdminMetricsExplain(t, pool, "course progress", `
 		SELECT e.id, count(DISTINCT cli.id),
 		       count(DISTINCT p.course_lesson_identity_id) FILTER (WHERE p.completed_at IS NOT NULL)
@@ -47,7 +56,7 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT 5`)
 
-	response := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/metrics/overview?window=7d", adminToken, "", adminToken, nil)
+	response := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/metrics/overview", adminToken, "", adminToken, nil)
 	var overview struct {
 		Metrics []struct {
 			Key           string          `json:"key"`
@@ -56,12 +65,19 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 		} `json:"metrics"`
 	}
 	decodeAdminResponse(t, response, http.StatusOK, &overview)
+	removedWindow := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/metrics/overview?window=7d", adminToken, "", adminToken, nil)
+	defer removedWindow.Body.Close()
+	if removedWindow.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("removed overview window status = %d, want 422", removedWindow.StatusCode)
+	}
 	metrics := make(map[string]json.RawMessage, len(overview.Metrics))
+	definitions := make(map[string]string, len(overview.Metrics))
 	for _, metric := range overview.Metrics {
 		if metric.DefinitionKey == "" {
 			t.Fatalf("metric %q has no definition key", metric.Key)
 		}
 		metrics[metric.Key] = metric.Value
+		definitions[metric.Key] = metric.DefinitionKey
 	}
 	assertMetricInt(t, metrics, "students.total", 4)
 	assertMetricInt(t, metrics, "students.active", 2)
@@ -77,7 +93,7 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 	assertMetricInt(t, metrics, "students.started_lessons", 2)
 	assertMetricFloat(t, metrics, "learning.average_course_progress", 75)
 	assertMetricInt(t, metrics, "learning.completions", 1)
-	assertMetricInt(t, metrics, "courses.draft", 0)
+	assertMetricInt(t, metrics, "courses.draft", 1)
 	assertMetricInt(t, metrics, "courses.pending_review", 1)
 	assertMetricInt(t, metrics, "courses.revisions_pending_review", 1)
 	assertMetricInt(t, metrics, "courses.published", 1)
@@ -90,6 +106,11 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 	assertMetricInt(t, metrics, "access_invitations.approved", 1)
 	assertMetricInt(t, metrics, "entitlements.manual_invitation.active", 1)
 	assertMetricInt(t, metrics, "entitlements.purchase_request.revoked", 1)
+	assertMetricInt(t, metrics, "entitlements.bundle_purchase.active", 1)
+	assertMetricInt(t, metrics, "entitlements.bundle_purchase.revoked", 0)
+	if definition := definitions["courses.revisions_pending_review"]; definition != "courses.revisions_pending_review" {
+		t.Fatalf("pending-review revision definition = %q, want courses.revisions_pending_review", definition)
+	}
 	var demand []struct {
 		Students int `json:"students"`
 	}
@@ -98,6 +119,21 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 	}
 	if len(demand) != 1 || demand[0].Students != 2 {
 		t.Fatalf("top subject demand = %+v, want one subject with two students", demand)
+	}
+
+	for _, sortCase := range []string{"title", "instructor", "lifecycle", "enrolled", "started", "learning_active_7d", "average_progress", "completed"} {
+		for _, direction := range []string{"asc", "desc"} {
+			t.Run("course sort "+sortCase+" "+direction, func(t *testing.T) {
+				response := doPricingRequest(t, ts.Client(), http.MethodGet,
+					ts.URL+"/api/v1/admin/metrics/courses?sort="+sortCase+"&direction="+direction+"&page=1&limit=50",
+					adminToken, "", adminToken, nil)
+				var page struct {
+					Items []adminCourseMetric `json:"items"`
+				}
+				decodeAdminResponse(t, response, http.StatusOK, &page)
+				assertCourseMetricOrder(t, page.Items, sortCase, direction)
+			})
+		}
 	}
 
 	courseResponse := doPricingRequest(t, ts.Client(), http.MethodGet,
@@ -132,6 +168,22 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 		t.Fatalf("published course metric = %+v", publishedCourse)
 	}
 
+	draftResponse := doAdminMetricsLanguageRequest(t, ts.Client(),
+		ts.URL+"/api/v1/admin/metrics/courses?sort=title&direction=asc&page=1&limit=50", adminToken, "en")
+	var draftCourses struct {
+		Items []adminCourseMetric `json:"items"`
+	}
+	decodeAdminResponse(t, draftResponse, http.StatusOK, &draftCourses)
+	var draftCourse adminCourseMetric
+	for _, item := range draftCourses.Items {
+		if item.ID == fixture.draftCourseID {
+			draftCourse = item
+		}
+	}
+	if draftCourse.Title != "Draft Analytics Course" {
+		t.Fatalf("draft course title = %q, want latest revision title", draftCourse.Title)
+	}
+
 	instructorResponse := doPricingRequest(t, ts.Client(), http.MethodGet,
 		ts.URL+"/api/v1/admin/metrics/instructors?sort=name&direction=asc&page=1&limit=10",
 		adminToken, "", adminToken, nil)
@@ -156,13 +208,31 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 		t.Fatalf("instructor metric = %+v", instructorMetric)
 	}
 
+	for _, sortCase := range []string{"name", "published_courses", "total_enrollments", "learning_active_students_7d"} {
+		for _, direction := range []string{"asc", "desc"} {
+			t.Run("instructor sort "+sortCase+" "+direction, func(t *testing.T) {
+				response := doPricingRequest(t, ts.Client(), http.MethodGet,
+					ts.URL+"/api/v1/admin/metrics/instructors?sort="+sortCase+"&direction="+direction+"&page=1&limit=50",
+					adminToken, "", adminToken, nil)
+				var page struct {
+					Items []adminInstructorMetric `json:"items"`
+				}
+				decodeAdminResponse(t, response, http.StatusOK, &page)
+				assertInstructorMetricOrder(t, page.Items, sortCase, direction)
+			})
+		}
+	}
+
 	inboxResponse := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/inbox?limit=3", adminToken, "", adminToken, nil)
 	var inbox struct {
 		Sections []struct {
 			Key   string `json:"key"`
 			Count int    `json:"count"`
 			Items []struct {
-				Label string `json:"label"`
+				Kind     string `json:"kind"`
+				Label    string `json:"label"`
+				Route    string `json:"route"`
+				TargetID string `json:"target_id"`
 			} `json:"items"`
 		} `json:"sections"`
 	}
@@ -174,14 +244,42 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 			if strings.Contains(item.Label, fixture.studentID) || strings.Contains(item.Label, fixture.courseID) {
 				t.Fatalf("inbox rendered an identifier: %+v", item)
 			}
+			switch item.Kind {
+			case "course_review":
+				if item.Route != "/admin/courses/:courseId/review" || item.TargetID == "" {
+					t.Fatalf("course review target = %+v, want review route and target id", item)
+				}
+			case "media_processing_failure":
+				if item.Route != "" {
+					t.Fatalf("media failure target = %+v, want no dead-end link", item)
+				}
+			}
 		}
 	}
 	for key, want := range map[string]int{
 		"course_review": 1, "purchase_requests": 1, "access_invitations": 1,
-		"reported_content": 1, "subject_requests": 1, "media_processing_failures": 1,
+		"reported_content": 1, "subject_requests": 1, "media_processing_failures": 2,
 	} {
 		if counts[key] != want {
 			t.Fatalf("inbox %s count = %d, want %d; all counts = %+v", key, counts[key], want, counts)
+		}
+	}
+
+	englishInboxResponse := doAdminMetricsLanguageRequest(t, ts.Client(), ts.URL+"/api/v1/admin/inbox?limit=3", adminToken, "en")
+	var englishInbox struct {
+		Sections []struct {
+			Key   string `json:"key"`
+			Items []struct {
+				Label string `json:"label"`
+			} `json:"items"`
+		} `json:"sections"`
+	}
+	decodeAdminResponse(t, englishInboxResponse, http.StatusOK, &englishInbox)
+	for _, section := range englishInbox.Sections {
+		for _, item := range section.Items {
+			if strings.TrimSpace(item.Label) == "" {
+				t.Fatalf("English inbox item %s has an empty label", section.Key)
+			}
 		}
 	}
 
@@ -213,8 +311,143 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 }
 
 type adminMetricsFixture struct {
-	studentID string
-	courseID  string
+	studentID     string
+	courseID      string
+	draftCourseID string
+}
+
+type adminCourseMetric struct {
+	ID               string  `json:"id"`
+	Title            string  `json:"title"`
+	Instructor       string  `json:"instructor"`
+	Lifecycle        string  `json:"lifecycle"`
+	Enrolled         int     `json:"enrolled"`
+	Started          int     `json:"started"`
+	LearningActive7d int     `json:"learning_active_7d"`
+	AverageProgress  float64 `json:"average_progress"`
+	Completed        int     `json:"completed"`
+}
+
+type adminInstructorMetric struct {
+	ID                       string `json:"id"`
+	Name                     string `json:"name"`
+	PublishedCourses         int    `json:"published_courses"`
+	TotalEnrollments         int    `json:"total_enrollments"`
+	LearningActiveStudents7d int    `json:"learning_active_students_7d"`
+}
+
+func assertCourseMetricOrder(t *testing.T, items []adminCourseMetric, sortKey, direction string) {
+	t.Helper()
+	expected := append([]adminCourseMetric(nil), items...)
+	sort.SliceStable(expected, func(i, j int) bool {
+		comparison := compareCourseMetrics(expected[i], expected[j], sortKey)
+		if comparison == 0 {
+			comparison = strings.Compare(expected[i].ID, expected[j].ID)
+		}
+		if direction == "desc" {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+	for index := range items {
+		if items[index].ID != expected[index].ID {
+			t.Fatalf("%s %s order = %v, want %v", sortKey, direction, courseMetricIDs(items), courseMetricIDs(expected))
+		}
+	}
+}
+
+func compareCourseMetrics(left, right adminCourseMetric, sortKey string) int {
+	switch sortKey {
+	case "title":
+		return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+	case "instructor":
+		return strings.Compare(strings.ToLower(left.Instructor), strings.ToLower(right.Instructor))
+	case "lifecycle":
+		return strings.Compare(left.Lifecycle, right.Lifecycle)
+	case "enrolled":
+		return compareInts(left.Enrolled, right.Enrolled)
+	case "started":
+		return compareInts(left.Started, right.Started)
+	case "learning_active_7d":
+		return compareInts(left.LearningActive7d, right.LearningActive7d)
+	case "average_progress":
+		return compareFloats(left.AverageProgress, right.AverageProgress)
+	case "completed":
+		return compareInts(left.Completed, right.Completed)
+	default:
+		return 0
+	}
+}
+
+func assertInstructorMetricOrder(t *testing.T, items []adminInstructorMetric, sortKey, direction string) {
+	t.Helper()
+	expected := append([]adminInstructorMetric(nil), items...)
+	sort.SliceStable(expected, func(i, j int) bool {
+		comparison := compareInstructorMetrics(expected[i], expected[j], sortKey)
+		if comparison == 0 {
+			comparison = strings.Compare(expected[i].ID, expected[j].ID)
+		}
+		if direction == "desc" {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+	for index := range items {
+		if items[index].ID != expected[index].ID {
+			t.Fatalf("%s %s order = %v, want %v", sortKey, direction, instructorMetricIDs(items), instructorMetricIDs(expected))
+		}
+	}
+}
+
+func compareInstructorMetrics(left, right adminInstructorMetric, sortKey string) int {
+	switch sortKey {
+	case "name":
+		return strings.Compare(strings.ToLower(left.Name), strings.ToLower(right.Name))
+	case "published_courses":
+		return compareInts(left.PublishedCourses, right.PublishedCourses)
+	case "total_enrollments":
+		return compareInts(left.TotalEnrollments, right.TotalEnrollments)
+	case "learning_active_students_7d":
+		return compareInts(left.LearningActiveStudents7d, right.LearningActiveStudents7d)
+	default:
+		return 0
+	}
+}
+
+func compareInts(left, right int) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func compareFloats(left, right float64) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func courseMetricIDs(items []adminCourseMetric) []string {
+	ids := make([]string, len(items))
+	for index, item := range items {
+		ids[index] = item.ID
+	}
+	return ids
+}
+
+func instructorMetricIDs(items []adminInstructorMetric) []string {
+	ids := make([]string, len(items))
+	for index, item := range items {
+		ids[index] = item.ID
+	}
+	return ids
 }
 
 func seedAdminMetricsFixture(t *testing.T, pool *pgxpool.Pool, adminID, instructorID, setupCourseID string) adminMetricsFixture {
@@ -244,6 +477,11 @@ func seedAdminMetricsFixture(t *testing.T, pool *pgxpool.Pool, adminID, instruct
 			VALUES ($1::uuid, $2, $2, 'STUDENT', $3::account_status, $4, 'en', $5, $6)`,
 			studentID, fmt.Sprintf("metrics-student-%d@example.com", index), statuses[index], fmt.Sprintf("Metrics Student %d", index+1), verifiedAt, createdAt[index])
 	}
+	emptyInstructorID := "10000000-0000-0000-0000-000000000938"
+	mustExecAdminMetrics(t, pool, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, locale, email_verified_at, created_at)
+		VALUES ($1::uuid, 'metrics-empty-instructor@example.com', 'metrics-empty-instructor@example.com', 'INSTRUCTOR', 'PENDING_VERIFICATION', 'Metrics Empty Instructor', 'en', NULL, $2)`,
+		emptyInstructorID, now.Add(-48*time.Hour))
 
 	securityEvents := []struct {
 		accountID string
@@ -290,6 +528,19 @@ func seedAdminMetricsFixture(t *testing.T, pool *pgxpool.Pool, adminID, instruct
 	assetID := "10000000-0000-0000-0000-000000000923"
 	mustExecAdminMetrics(t, pool, `INSERT INTO media_assets (id, kind, owner_account_id, course_id) VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid)`, assetID, instructorID, courseID)
 	mustExecAdminMetrics(t, pool, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'PROCESS_FAILED', 'metrics/failed.mp4', 'metrics-v1', 'video/mp4', 1)`, failedVersionID, assetID)
+
+	draftCourseID := "10000000-0000-0000-0000-000000000930"
+	draftRevisionID := "10000000-0000-0000-0000-000000000931"
+	draftFailedVersionID := "10000000-0000-0000-0000-000000000932"
+	draftAssetID := "10000000-0000-0000-0000-000000000933"
+	retiredFailedVersionID := "10000000-0000-0000-0000-000000000934"
+	retiredAssetID := "10000000-0000-0000-0000-000000000935"
+	mustExecAdminMetrics(t, pool, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, draftCourseID, instructorID)
+	mustExecAdminMetrics(t, pool, `INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'مقرر تحليلات مسودة', 'Draft Analytics Course')`, draftRevisionID, draftCourseID)
+	mustExecAdminMetrics(t, pool, `INSERT INTO media_assets (id, kind, owner_account_id, course_id) VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid)`, draftAssetID, instructorID, draftCourseID)
+	mustExecAdminMetrics(t, pool, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'PROCESS_FAILED', 'metrics/draft-failed.mp4', 'metrics-draft-v1', 'video/mp4', 1)`, draftFailedVersionID, draftAssetID)
+	mustExecAdminMetrics(t, pool, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, retired_at) VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, $4)`, retiredAssetID, instructorID, courseID, now.Add(-time.Hour))
+	mustExecAdminMetrics(t, pool, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'PROCESS_FAILED', 'metrics/retired-failed.mp4', 'metrics-retired-v1', 'video/mp4', 1)`, retiredFailedVersionID, retiredAssetID)
 	progressRows := []struct {
 		enrollmentID string
 		lessonID     string
@@ -327,10 +578,30 @@ func seedAdminMetricsFixture(t *testing.T, pool *pgxpool.Pool, adminID, instruct
 	mustExecAdminMetrics(t, pool, `INSERT INTO purchase_requests (id, reference_code, course_id, email, normalized_email, requester_account_id, course_title_ar, course_title_en, price_minor_units, currency, state, requested_at) VALUES ($1::uuid, 'METRICS-001', $2::uuid, 'metrics-student-1@example.com', 'metrics-student-1@example.com', $3::uuid, 'مقرر التحليلات', 'Analytics Course', 1000, 'KWD', 'WAITING_PAYMENT', $4)`, purchaseID, courseID, studentIDs[0], now.Add(-12*time.Hour))
 	mustExecAdminMetrics(t, pool, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $4, 'ACTIVE')`, studentIDs[0], courseID, pendingInvitationID, now.Add(30*24*time.Hour))
 	mustExecAdminMetrics(t, pool, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, revoked_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'PURCHASE_REQUEST', $3::uuid, $4, $4, $4, $5, 'REVOKED')`, studentIDs[1], courseID, approvedInvitationID, now.Add(30*24*time.Hour), now.Add(-time.Hour))
+	bundleID := "10000000-0000-0000-0000-000000000936"
+	bundlePurchaseID := "10000000-0000-0000-0000-000000000937"
+	mustExecAdminMetrics(t, pool, `
+		INSERT INTO bundles (id, lifecycle, title_ar, title_en, created_by_account_id, updated_by_account_id)
+		VALUES ($1::uuid, 'PUBLISHED', 'حزمة التحليلات', 'Analytics Bundle', $2::uuid, $2::uuid)`, bundleID, adminID)
+	mustExecAdminMetrics(t, pool, `INSERT INTO bundle_courses (bundle_id, course_id, position) VALUES ($1::uuid, $2::uuid, 0)`, bundleID, courseID)
+	mustExecAdminMetrics(t, pool, `
+		INSERT INTO purchase_requests (
+			id, reference_code, target_kind, bundle_id, bundle_revision, bundle_title_ar, bundle_title_en,
+			email, normalized_email, requester_account_id, price_minor_units, currency, state,
+			payment_confirmed_by_account_id, payment_confirmed_at, access_granted_at, requested_at
+		) VALUES ($1::uuid, 'METRICS-BUNDLE-001', 'BUNDLE', $2::uuid, 1, 'حزمة التحليلات', 'Analytics Bundle',
+			'metrics-student-2@example.com', 'metrics-student-2@example.com', $3::uuid, 2000, 'KWD', 'ACCESS_GRANTED',
+			$4::uuid, $5, $5, $5)`, bundlePurchaseID, bundleID, studentIDs[1], adminID, now.Add(-2*time.Hour))
+	mustExecAdminMetrics(t, pool, `
+		INSERT INTO entitlements (
+			student_account_id, scope_kind, scope_id, course_id, grant_source, source_purchase_request_id,
+			original_access_ends_at, access_ends_at, retirement_eligibility_at, state
+		) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'BUNDLE_PURCHASE', $3::uuid, $4, $4, $4, 'ACTIVE')`,
+		studentIDs[1], courseID, bundlePurchaseID, now.Add(-time.Hour))
 	mustExecAdminMetrics(t, pool, `INSERT INTO content_reports (reporter_account_id, target_kind, target_id, target_revision_ref, reason, created_at) VALUES ($1::uuid, 'COURSE', $2::uuid, $3::uuid, 'broken_unavailable', $4)`, studentIDs[0], courseID, revisionID, now.Add(-18*time.Hour))
 	mustExecAdminMetrics(t, pool, `INSERT INTO subject_requests (requester_account_id, institution_id, proposed_title_ar, proposed_title_en, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, 'إحصاء', 'Statistics', 'PENDING', $3, $3)`, instructorID, institutionID, now.Add(-20*time.Hour))
 
-	return adminMetricsFixture{studentID: studentIDs[0], courseID: courseID}
+	return adminMetricsFixture{studentID: studentIDs[0], courseID: courseID, draftCourseID: draftCourseID}
 }
 
 func mustExecAdminMetrics(t *testing.T, pool *pgxpool.Pool, query string, args ...any) {
@@ -338,6 +609,21 @@ func mustExecAdminMetrics(t *testing.T, pool *pgxpool.Pool, query string, args .
 	if _, err := pool.Exec(context.Background(), query, args...); err != nil {
 		t.Fatalf("admin metrics fixture query failed: %v", err)
 	}
+}
+
+func doAdminMetricsLanguageRequest(t *testing.T, client *http.Client, url, token, language string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	request.Header.Set("Accept-Language", language)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token, Secure: true})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("client.Do: %v", err)
+	}
+	return response
 }
 
 func logAdminMetricsExplain(t *testing.T, pool *pgxpool.Pool, name, query string) {

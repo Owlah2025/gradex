@@ -77,12 +77,14 @@ func (r *Repository) queryCourseReviewInbox(ctx context.Context, request InboxRe
 		JOIN courses c ON c.id = r.course_id
 		WHERE r.state = 'PENDING_REVIEW'
 		ORDER BY COALESCE(r.submitted_at, r.created_at) ASC, r.id ASC
-		LIMIT $1`, request.Limit, "course_review", "/admin/catalog", request.Locale)
+		LIMIT $1`, request.Limit, "course_review", "/admin/courses/:courseId/review", request.Locale)
 }
 
 func (r *Repository) queryPurchaseInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {
 	return r.queryInboxRows(ctx, `
-		SELECT count(*) OVER (), p.id::text, COALESCE(a.display_name, p.email), '', p.requested_at,
+		SELECT count(*) OVER (), p.id::text,
+		       COALESCE(NULLIF(a.display_name, ''), NULLIF(p.email, ''), 'Purchase request'),
+		       COALESCE(NULLIF(a.display_name, ''), NULLIF(p.email, ''), 'Purchase request'), p.requested_at,
 		       GREATEST(0, EXTRACT(EPOCH FROM (now() - p.requested_at)))::bigint
 		FROM purchase_requests p
 		LEFT JOIN accounts a ON a.id = p.requester_account_id
@@ -93,7 +95,9 @@ func (r *Repository) queryPurchaseInbox(ctx context.Context, request InboxReques
 
 func (r *Repository) queryInvitationInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {
 	return r.queryInboxRows(ctx, `
-		SELECT count(*) OVER (), i.id::text, COALESCE(a.display_name, i.email), '', i.created_at,
+		SELECT count(*) OVER (), i.id::text,
+		       COALESCE(NULLIF(a.display_name, ''), NULLIF(i.email, ''), 'Access invitation'),
+		       COALESCE(NULLIF(a.display_name, ''), NULLIF(i.email, ''), 'Access invitation'), i.created_at,
 		       GREATEST(0, EXTRACT(EPOCH FROM (now() - i.created_at)))::bigint
 		FROM course_access_invitations i
 		LEFT JOIN accounts a ON a.id = i.accepted_by_account_id
@@ -104,7 +108,9 @@ func (r *Repository) queryInvitationInbox(ctx context.Context, request InboxRequ
 
 func (r *Repository) querySubjectRequestInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {
 	return r.queryInboxRows(ctx, `
-		SELECT count(*) OVER (), sr.id::text, requester.display_name, '', sr.created_at,
+		SELECT count(*) OVER (), sr.id::text,
+		       COALESCE(NULLIF(sr.proposed_title_ar, ''), NULLIF(sr.proposed_title_en, ''), NULLIF(requester.display_name, ''), 'Subject request'),
+		       COALESCE(NULLIF(sr.proposed_title_en, ''), NULLIF(sr.proposed_title_ar, ''), NULLIF(requester.display_name, ''), 'Subject request'), sr.created_at,
 		       GREATEST(0, EXTRACT(EPOCH FROM (now() - sr.created_at)))::bigint
 		FROM subject_requests sr
 		JOIN accounts requester ON requester.id = sr.requester_account_id
@@ -115,15 +121,24 @@ func (r *Repository) querySubjectRequestInbox(ctx context.Context, request Inbox
 
 func (r *Repository) queryMediaFailureInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {
 	return r.queryInboxRows(ctx, `
-		SELECT count(*) OVER (), mav.id::text, cr.title_ar, cr.title_en, mav.created_at,
+		SELECT count(*) OVER (), mav.id::text,
+		       COALESCE(live.title_ar, latest.title_ar, 'فشل معالجة الوسائط'),
+		       COALESCE(live.title_en, latest.title_en, 'Media processing failure'), mav.created_at,
 		       GREATEST(0, EXTRACT(EPOCH FROM (now() - mav.created_at)))::bigint
 		FROM media_asset_versions mav
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
 		JOIN courses c ON c.id = ma.course_id
-		LEFT JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id
-		WHERE mav.state = 'PROCESS_FAILED'
+		LEFT JOIN course_revisions live ON live.id = c.live_revision_id AND live.course_id = c.id
+		LEFT JOIN LATERAL (
+			SELECT cr.title_ar, cr.title_en
+			FROM course_revisions cr
+			WHERE cr.course_id = c.id
+			ORDER BY cr.revision_number DESC
+			LIMIT 1
+		) latest ON TRUE
+		WHERE mav.state = 'PROCESS_FAILED' AND ma.retired_at IS NULL
 		ORDER BY mav.created_at ASC, mav.id ASC
-		LIMIT $1`, request.Limit, "media_processing_failure", "/admin/course-lifecycle", request.Locale)
+		LIMIT $1`, request.Limit, "media_processing_failure", "", request.Locale)
 }
 
 func (r *Repository) queryReportInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {

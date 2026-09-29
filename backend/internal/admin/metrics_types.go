@@ -11,7 +11,6 @@ import (
 type MetricsOverviewRequest struct {
 	Principal identity.Principal
 	Locale    identity.Locale
-	Window    string
 }
 
 type Metric struct {

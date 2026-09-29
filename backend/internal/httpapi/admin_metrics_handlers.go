@@ -25,9 +25,12 @@ func (h *adminMetricsHandlers) getOverview(c *gin.Context) {
 		writeProblem(c, problem.ValidationFailed())
 		return
 	}
-	window := strings.TrimSpace(c.Query("window"))
+	if _, exists := c.GetQuery("window"); exists {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
 	result, err := h.service.GetMetricsOverview(c.Request.Context(), adminread.MetricsOverviewRequest{
-		Principal: principal, Locale: locale, Window: window,
+		Principal: principal, Locale: locale,
 	})
 	if err != nil {
 		writeAdminReadError(c, err)

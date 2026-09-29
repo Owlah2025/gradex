@@ -74,6 +74,14 @@ export type AdminMetricsPageFilters = {
   limit?: number;
 };
 
+export function defaultAdminCourseMetricsFilters(): AdminMetricsPageFilters {
+  return { sort: "title", direction: "asc", limit: 10, page: 1 };
+}
+
+export function defaultAdminInstructorMetricsFilters(): AdminMetricsPageFilters {
+  return { sort: "name", direction: "asc", limit: 10, page: 1 };
+}
+
 export function buildAdminMetricsPageQuery(filters: AdminMetricsPageFilters = {}): string {
   const query = new URLSearchParams();
   if (filters.sort) query.set("sort", filters.sort);
@@ -99,10 +107,8 @@ export function metricSubjectDemand(metrics: AdminMetric[], key = "subject_deman
 
 export async function getAdminMetricsOverview(
   locale: AdminMetricsLocale,
-  window?: "7d" | "30d",
 ): Promise<AdminMetricsOverview> {
-  const query = window ? `?window=${encodeURIComponent(window)}` : "";
-  const response = await authenticatedRequest<AdminMetricsOverview>(`/admin/metrics/overview${query}`, "GET", locale);
+  const response = await authenticatedRequest<AdminMetricsOverview>("/admin/metrics/overview", "GET", locale);
   if (response === null) {
     throw new Error(locale === "ar" ? "لم يتم استلام ملخص التحليلات" : "No analytics overview returned");
   }

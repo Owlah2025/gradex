@@ -8,6 +8,8 @@ import {
   listAdminMetricInstructors,
   metricByKey,
   metricSubjectDemand,
+  defaultAdminCourseMetricsFilters,
+  defaultAdminInstructorMetricsFilters,
   type AdminMetric,
   type AdminMetricsOverview,
   type AdminMetricsPageFilters,
@@ -94,6 +96,8 @@ const groupDefinitions = [
       "entitlements.manual_invitation.revoked",
       "entitlements.purchase_request.active",
       "entitlements.purchase_request.revoked",
+      "entitlements.bundle_purchase.active",
+      "entitlements.bundle_purchase.revoked",
     ],
   },
 ] as const;
@@ -104,34 +108,54 @@ export function AdminAnalytics() {
   const [overview, setOverview] = useState<AdminMetricsOverview | null>(null);
   const [courses, setCourses] = useState<AdminMetricsPage<AdminCourseMetric> | null>(null);
   const [instructors, setInstructors] = useState<AdminMetricsPage<AdminInstructorMetric> | null>(null);
-  const [courseFilters, setCourseFilters] = useState<AdminMetricsPageFilters>({ sort: "title", direction: "asc", limit: 10, page: 1 });
-  const [instructorFilters, setInstructorFilters] = useState<AdminMetricsPageFilters>({ sort: "name", direction: "asc", limit: 10, page: 1 });
-  const [error, setError] = useState<string | null>(null);
+  const [courseFilters, setCourseFilters] = useState<AdminMetricsPageFilters>(defaultAdminCourseMetricsFilters);
+  const [instructorFilters, setInstructorFilters] = useState<AdminMetricsPageFilters>(defaultAdminInstructorMetricsFilters);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [coursesError, setCoursesError] = useState<string | null>(null);
+  const [instructorsError, setInstructorsError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
-  const load = useCallback(async () => {
+  const loadOverview = useCallback(async () => {
     setOverview(null);
+    setOverviewError(null);
+    try {
+      setOverview(await getAdminMetricsOverview(locale));
+    } catch (reason) {
+      setOverviewError(describeApiError(reason, locale));
+    }
+  }, [locale]);
+
+  const loadCourses = useCallback(async () => {
     setCourses(null);
+    setCoursesError(null);
+    try {
+      setCourses(await listAdminMetricCourses(locale, courseFilters));
+    } catch (reason) {
+      setCoursesError(describeApiError(reason, locale));
+    }
+  }, [courseFilters, locale]);
+
+  const loadInstructors = useCallback(async () => {
     setInstructors(null);
-    setError(null);
-    const [overviewResult, coursesResult, instructorsResult] = await Promise.allSettled([
-      getAdminMetricsOverview(locale),
-      listAdminMetricCourses(locale, courseFilters),
-      listAdminMetricInstructors(locale, instructorFilters),
-    ]);
-    const failures: string[] = [];
-    if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
-    else failures.push(describeApiError(overviewResult.reason, locale));
-    if (coursesResult.status === "fulfilled") setCourses(coursesResult.value);
-    else failures.push(describeApiError(coursesResult.reason, locale));
-    if (instructorsResult.status === "fulfilled") setInstructors(instructorsResult.value);
-    else failures.push(describeApiError(instructorsResult.reason, locale));
-    if (failures.length > 0) setError(failures[0]);
-  }, [courseFilters, instructorFilters, locale]);
+    setInstructorsError(null);
+    try {
+      setInstructors(await listAdminMetricInstructors(locale, instructorFilters));
+    } catch (reason) {
+      setInstructorsError(describeApiError(reason, locale));
+    }
+  }, [instructorFilters, locale]);
 
   useEffect(() => {
-    void load();
-  }, [load, attempt]);
+    void loadOverview();
+  }, [loadOverview, attempt]);
+
+  useEffect(() => {
+    void loadCourses();
+  }, [loadCourses, attempt]);
+
+  useEffect(() => {
+    void loadInstructors();
+  }, [loadInstructors, attempt]);
 
   const demand = useMemo(() => (overview ? metricSubjectDemand(overview.metrics) : []), [overview]);
 
@@ -148,13 +172,11 @@ export function AdminAnalytics() {
         }
       />
 
-      {error && overview === null && courses === null && instructors === null ? (
+      {overviewError ? (
         <div className="mt-8">
-          <ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
+          <ErrorState title={copy.loadFailed} detail={overviewError} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
         </div>
-      ) : null}
-
-      {overview ? (
+      ) : overview ? (
         <>
           <div className="mt-8 grid gap-6">
             {groupDefinitions.map((group) => (
@@ -163,16 +185,14 @@ export function AdminAnalytics() {
           </div>
           <DemandPanel demand={demand} copy={copy} locale={locale} />
         </>
-      ) : error ? (
-        <div className="mt-8">
-          <ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
-        </div>
       ) : (
         <LoadingState label={copy.loading} />
       )}
 
       <WorkspaceSection title={copy.courses.title} description={copy.courses.description} testID="admin-analytics-courses">
-        {courses ? (
+        {coursesError ? (
+          <ErrorState title={copy.loadFailed} detail={coursesError} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
+        ) : courses ? (
           <CourseMetricsTable
             page={courses}
             filters={courseFilters}
@@ -180,15 +200,15 @@ export function AdminAnalytics() {
             copy={copy}
             locale={locale}
           />
-        ) : error ? (
-          <ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
         ) : (
           <LoadingState label={copy.loading} />
         )}
       </WorkspaceSection>
 
       <WorkspaceSection title={copy.instructors.title} description={copy.instructors.description} testID="admin-analytics-instructors">
-        {instructors ? (
+        {instructorsError ? (
+          <ErrorState title={copy.loadFailed} detail={instructorsError} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
+        ) : instructors ? (
           <InstructorMetricsTable
             page={instructors}
             filters={instructorFilters}
@@ -196,8 +216,6 @@ export function AdminAnalytics() {
             copy={copy}
             locale={locale}
           />
-        ) : error ? (
-          <ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => setAttempt((value) => value + 1)} />
         ) : (
           <LoadingState label={copy.loading} />
         )}
