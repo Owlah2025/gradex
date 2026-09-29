@@ -192,6 +192,8 @@ export const en = {
     revokeAllDevices: "Revoke all devices",
     resetCooldown: "Reset cooldown",
     securityEvents: { SESSION_CREATED: "Session created", SESSION_RENEWED: "Session renewed", SESSION_LOGGED_OUT: "Session signed out", ADMIN_SESSIONS_REVOKED: "All sessions revoked", ACCOUNT_SUSPENDED: "Account suspended", ACCOUNT_REINSTATED: "Account restored", DEVICE_TRUSTED: "Device trusted", ADMIN_DEVICE_REVOKED: "Device revoked", ADMIN_DEVICE_COOLDOWN_RESET: "Device cooldown reset" },
+    loadMoreSecurity: "View more security events",
+    securityLoadFailed: "More security events could not be loaded.",
     notesTitle: "Internal notes",
     notesDescription: "Notes are visible only to authorized administrators and cannot be edited after saving.",
     noteBody: "Note",

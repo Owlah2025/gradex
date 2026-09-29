@@ -235,6 +235,8 @@ export const ar: Dictionary = {
     revokeAllDevices: "إلغاء كل الأجهزة",
     resetCooldown: "إعادة ضبط الفترة",
     securityEvents: { SESSION_CREATED: "إنشاء جلسة", SESSION_RENEWED: "تجديد جلسة", SESSION_LOGGED_OUT: "تسجيل خروج من جلسة", ADMIN_SESSIONS_REVOKED: "إلغاء كل الجلسات", ACCOUNT_SUSPENDED: "إيقاف الحساب", ACCOUNT_REINSTATED: "استعادة الحساب", DEVICE_TRUSTED: "توثيق جهاز", ADMIN_DEVICE_REVOKED: "إلغاء جهاز", ADMIN_DEVICE_COOLDOWN_RESET: "إعادة ضبط فترة الجهاز" },
+    loadMoreSecurity: "عرض المزيد من أحداث الأمان",
+    securityLoadFailed: "تعذر تحميل المزيد من أحداث الأمان.",
     notesTitle: "ملاحظات داخلية",
     notesDescription: "تظهر الملاحظات للمشرفين المخولين فقط ولا يمكن تعديلها بعد الحفظ.",
     noteBody: "الملاحظة",

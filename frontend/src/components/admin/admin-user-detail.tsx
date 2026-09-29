@@ -8,6 +8,7 @@ import {
   diagnoseAdminAccess,
   getAdminUser360,
   isRecentAuthRequired,
+  listAdminSecurityEvents,
   listAdminCourseOptions,
   provenanceLabel,
   revokeAccountSessions,
@@ -114,7 +115,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
     {activeTab === "overview" ? <Overview account={account} student={student} instructor={instructor} copy={copy} locale={locale} /> : null}
     {activeTab === "access" && student ? <AccessPanel student={student} copy={copy} locale={locale} options={courseOptions} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} onGrant={() => setPending({ kind: "grant" })} onAction={(next) => { setReason(""); setExpiryDate(""); setPending(next); }} /> : null}
     {activeTab === "progress" && student ? <ProgressPanel student={student} copy={copy} /> : null}
-    {activeTab === "security" && student ? <SecurityPanel student={student} copy={copy} locale={locale} onAction={(next) => { setReason(""); setPending(next); }} /> : null}
+    {activeTab === "security" && student ? <SecurityPanel accountID={accountID} student={student} copy={copy} locale={locale} onAction={(next) => { setReason(""); setPending(next); }} /> : null}
     {activeTab === "notes" ? <NotesPanel accountID={accountID} notes={student?.notes ?? instructor?.notes ?? []} copy={copy} locale={locale} onAdded={() => void load()} /> : null}
     {activeTab === "audit" ? <AuditPanel events={student?.audit_events ?? instructor?.audit_events ?? []} copy={copy} locale={locale} /> : null}
     {activeTab === "diagnostic" && student ? <DiagnosticPanel copy={copy} options={courseOptions} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} diagnostic={diagnostic} state={diagnosticState} onDiagnose={async () => { if (!selectedCourse) return; setDiagnosticState("loading"); try { setDiagnostic(await diagnoseAdminAccess(accountID, selectedCourse, locale)); setDiagnosticState("idle"); } catch { setDiagnosticState("failed"); } }} /> : null}
@@ -136,7 +137,26 @@ function AccessPanel({ student, copy, locale, options, selectedCourse, onCourseC
 
 function ProgressPanel({ student, copy }: { student: NonNullable<AdminUser360["student"]>; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"] }) { return <WorkspaceSection title={copy.progressTitle} description={copy.progressDescription}><CourseTable courses={student.courses} copy={copy} /></WorkspaceSection>; }
 
-function SecurityPanel({ student, copy, locale, onAction }: { student: NonNullable<AdminUser360["student"]>; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en"; onAction: (action: PendingAction) => void }) { return <WorkspaceSection title={copy.securityTitle} description={copy.securityDescription} actions={<div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => onAction({ kind: "devices" })}>{copy.revokeAllDevices}</Button><Button size="sm" variant="outline" onClick={() => onAction({ kind: "cooldown" })}>{copy.resetCooldown}</Button></div>}><div className="space-y-3">{student.devices.devices.map((device) => <div key={device.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4"><div><p className="font-semibold">{device.label}</p><p className="text-sm text-muted-foreground">{device.browser_family} · {device.platform_family}</p></div><Button size="sm" variant="destructive" onClick={() => onAction({ kind: "device", deviceID: device.id })}>{copy.revokeDevice}</Button></div>)}</div><div className="mt-6 space-y-2">{student.security_events.map((event) => <div key={event.id} className="flex flex-wrap justify-between gap-3 border-b border-border py-3 text-sm"><span className="font-semibold">{labelFor(copy.securityEvents, event.event_type)}</span><time className="text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at, locale)}</time></div>)}</div></WorkspaceSection>; }
+function SecurityPanel({ accountID, student, copy, locale, onAction }: { accountID: string; student: NonNullable<AdminUser360["student"]>; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en"; onAction: (action: PendingAction) => void }) {
+  const [events, setEvents] = React.useState(student.security_events);
+  const [page, setPage] = React.useState(1);
+  const [hasMore, setHasMore] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [moreError, setMoreError] = React.useState(false);
+  React.useEffect(() => { setEvents(student.security_events); setPage(1); setHasMore(true); }, [student.security_events]);
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const next = await listAdminSecurityEvents(accountID, locale, page + 1, 20);
+      setEvents((current) => [...current, ...next.events]);
+      setPage(next.page);
+      setHasMore(next.has_more && next.events.length > 0);
+    } catch { setMoreError(true); } finally { setLoadingMore(false); }
+  };
+  return <WorkspaceSection title={copy.securityTitle} description={copy.securityDescription} actions={<div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => onAction({ kind: "devices" })}>{copy.revokeAllDevices}</Button><Button size="sm" variant="outline" onClick={() => onAction({ kind: "cooldown" })}>{copy.resetCooldown}</Button></div>}><div className="space-y-3">{student.devices.devices.map((device) => <div key={device.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4"><div><p className="font-semibold">{device.label}</p><p className="text-sm text-muted-foreground">{device.browser_family} · {device.platform_family}</p></div><Button size="sm" variant="destructive" onClick={() => onAction({ kind: "device", deviceID: device.id })}>{copy.revokeDevice}</Button></div>)}</div><div className="mt-6 space-y-2">{events.map((event) => <div key={event.id} className="flex flex-wrap justify-between gap-3 border-b border-border py-3 text-sm"><span className="font-semibold">{labelFor(copy.securityEvents, event.event_type)}</span><time className="text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at, locale)}</time></div>)}</div>{moreError ? <div className="mt-4"><Alert tone="error" title={copy.securityLoadFailed} /></div> : null}{hasMore ? <div className="mt-4"><Button size="sm" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>{copy.loadMoreSecurity}</Button></div> : null}</WorkspaceSection>;
+}
 
 function NotesPanel({ accountID, notes, copy, locale, onAdded }: { accountID: string; notes: AdminNote[]; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en"; onAdded: () => void }) { const [body, setBody] = React.useState(""); const [busy, setBusy] = React.useState(false); const add = async () => { if (!body.trim() || busy) return; setBusy(true); try { await addAdminNote(accountID, body, locale); setBody(""); onAdded(); } finally { setBusy(false); } }; return <WorkspaceSection title={copy.notesTitle} description={copy.notesDescription}><div className="rounded-lg border border-border bg-card p-4"><Field label={copy.noteBody} htmlFor="admin-note-body"><textarea id="admin-note-body" className="min-h-28 w-full rounded-md border border-input bg-background p-3 text-sm focus-visible:outline focus-visible:ring-2 focus-visible:ring-ring" maxLength={4000} value={body} onChange={(event) => setBody(event.target.value)} /></Field><div className="mt-3 flex justify-end"><Button size="sm" onClick={() => void add()} disabled={busy || !body.trim()}>{copy.addNote}</Button></div></div><div className="mt-4 space-y-3">{notes.map((note) => <article key={note.id} className="rounded-lg border border-border bg-card p-4"><div className="flex flex-wrap justify-between gap-2 text-sm"><span className="font-semibold">{note.author_name}</span><time className="text-muted-foreground" dateTime={note.created_at}>{formatDateTime(note.created_at, locale)}</time></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6"><bdi>{note.body}</bdi></p></article>)}</div></WorkspaceSection>; }
 
