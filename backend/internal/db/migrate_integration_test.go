@@ -133,6 +133,7 @@ var (
 	trustedDeviceTables      = []string{"identity_trusted_devices", "identity_device_replacement_state"}
 	subjectDemandTables      = []string{"subject_demand_signals"}
 	adminUser360Tables       = []string{"admin_notes"}
+	instructorProfileTables  = []string{"instructor_profiles", "instructor_profile_expertise"}
 )
 
 func allTables() []string {
@@ -151,7 +152,8 @@ func allTables() []string {
 	all = append(all, bundleTables...)
 	all = append(all, trustedDeviceTables...)
 	all = append(all, subjectDemandTables...)
-	return append(all, adminUser360Tables...)
+	all = append(all, adminUser360Tables...)
+	return append(all, instructorProfileTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -774,9 +776,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("admin User 360 hardening schema = %d, want one past admin User 360 %d",
 			AdminUser360HardeningSchemaVersion, AdminUser360SchemaVersion)
 	}
-	if MaxSchemaVersion != AdminUser360HardeningSchemaVersion {
+	if InstructorProfilesSchemaVersion != AdminUser360HardeningSchemaVersion+1 {
+		t.Fatalf("instructor profiles schema = %d, want one past admin User 360 hardening %d",
+			InstructorProfilesSchemaVersion, AdminUser360HardeningSchemaVersion)
+	}
+	if MaxSchemaVersion != InstructorProfilesSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, AdminUser360HardeningSchemaVersion)
+			MaxSchemaVersion, InstructorProfilesSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -821,6 +827,81 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	if SubjectCodeIdentitySchemaVersion != CourseAcademicIdentitySchemaVersion+1 {
 		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
 			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
+	}
+}
+
+func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating instructor profile schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+
+	const (
+		instructorID  = "10000000-0000-0000-0000-000000000951"
+		adminID       = "10000000-0000-0000-0000-000000000952"
+		institutionID = "10000000-0000-0000-0000-000000000953"
+		subjectID     = "10000000-0000-0000-0000-000000000954"
+	)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES
+			($1::uuid, 'profile-instructor@example.test', 'profile-instructor@example.test', 'INSTRUCTOR', 'ACTIVE', 'Profile Instructor'),
+			($2::uuid, 'profile-admin@example.test', 'profile-admin@example.test', 'ADMIN', 'ACTIVE', 'Profile Admin')
+	`, instructorID, adminID); err != nil {
+		t.Fatalf("seeding profile accounts: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO institutions (id, country_code, slug, name_ar, name_en)
+		VALUES ($1::uuid, 'KW', 'migration-university', 'جامعة الترحيل', 'Migration University')
+	`, institutionID); err != nil {
+		t.Fatalf("seeding profile institution: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO subjects (id, institution_id, official_code, title_ar, title_en)
+		VALUES ($1::uuid, $2::uuid, 'CS-101', 'برمجة', 'Programming')
+	`, subjectID, institutionID); err != nil {
+		t.Fatalf("seeding profile subject: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (
+			account_id, public_slug, headline_en, publication_state, published_snapshot
+		) VALUES ($1::uuid, 'migration-author', 'Programming instructor', 'PUBLISHED', '{}'::jsonb)
+	`, instructorID); err != nil {
+		t.Fatalf("inserting instructor profile: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profile_expertise (account_id, subject_id)
+		VALUES ($1::uuid, $2::uuid)
+	`, instructorID, subjectID); err != nil {
+		t.Fatalf("inserting instructor expertise: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, public_slug)
+		VALUES ($1::uuid, 'UpperCase')
+	`, adminID); err == nil {
+		t.Fatal("uppercase instructor slug was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, publication_state)
+		VALUES ($1::uuid, 'PUBLISHED')
+	`, adminID); err == nil {
+		t.Fatal("published instructor profile without a snapshot was accepted")
+	}
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back instructor profile schema: %v", err)
+	}
+	if tableExists(t, pool, "instructor_profiles") {
+		t.Fatal("instructor_profiles survived the migration down")
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying instructor profile schema: %v", err)
+	}
+	if !tableExists(t, pool, "instructor_profiles") {
+		t.Fatal("instructor_profiles missing after migration up")
 	}
 }
 

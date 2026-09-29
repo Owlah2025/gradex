@@ -21,6 +21,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/instructorprofile"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
@@ -153,12 +154,29 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 	if err != nil {
 		t.Fatalf("NewPublicCatalogFoundation: %v", err)
 	}
+	profileRepository, err := instructorprofile.NewRepository(p)
+	if err != nil {
+		t.Fatalf("instructorprofile.NewRepository: %v", err)
+	}
+	accountProfileService, err := identity.NewAccountProfileService(p)
+	if err != nil {
+		t.Fatalf("identity.NewAccountProfileService: %v", err)
+	}
+	profileFoundation, err := NewProfileFoundation(ProfileFoundationOptions{
+		Instructor: profileRepository,
+		Account:    accountProfileService,
+		Catalog:    publicRepo,
+	})
+	if err != nil {
+		t.Fatalf("NewProfileFoundation: %v", err)
+	}
 
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, dbPrincipalResolver{pool: p},
 		WithSessionFoundation(sessionFoundation),
 		WithAcademicFoundation(foundation),
 		WithCatalogFoundation(catalogFoundation),
 		WithPublicCatalogFoundation(publicFoundation),
+		WithProfileFoundation(profileFoundation),
 	)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

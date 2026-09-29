@@ -115,6 +115,11 @@ func NewRouter(
 			return nil, fmt.Errorf("mounting public catalogue routes: %w", err)
 		}
 	}
+	if routerConfig.profiles != nil {
+		if err := mountProfileRoutes(v1, routerConfig.profiles, routerConfig.sessions, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting profile routes: %w", err)
+		}
+	}
 
 	if routerConfig.media != nil {
 		mountMediaRoutes(v1, routerConfig.media, authenticator, principals, logger)
@@ -252,6 +257,7 @@ type routerOptions struct {
 	admin                *AdminFoundation
 	catalog              *CatalogFoundation
 	publicCatalog        *PublicCatalogFoundation
+	profiles             *ProfileFoundation
 	media                *MediaFoundation
 	learning             *LearningFoundation
 	access               *AccessFoundation

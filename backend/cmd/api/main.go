@@ -24,6 +24,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/instructorprofile"
 	"github.com/Owlah2025/gradex/backend/internal/learning"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
@@ -885,6 +886,25 @@ func buildPublicCatalogFoundation(pool *pgxpool.Pool) (*httpapi.PublicCatalogFou
 	return httpapi.NewPublicCatalogFoundation(httpapi.PublicCatalogFoundationOptions{Repository: repository})
 }
 
+func buildProfileFoundation(
+	pool *pgxpool.Pool,
+	catalogRepository *catalogpublic.Repository,
+) (*httpapi.ProfileFoundation, error) {
+	instructorRepository, err := instructorprofile.NewRepository(pool)
+	if err != nil {
+		return nil, fmt.Errorf("composing instructor profile repository: %w", err)
+	}
+	accountService, err := identity.NewAccountProfileService(pool)
+	if err != nil {
+		return nil, fmt.Errorf("composing account profile service: %w", err)
+	}
+	return httpapi.NewProfileFoundation(httpapi.ProfileFoundationOptions{
+		Instructor: instructorRepository,
+		Account:    accountService,
+		Catalog:    catalogRepository,
+	})
+}
+
 // composeDevicePolicy builds the playback coordinator and the device authority
 // and closes the loop back into the session and admission services.
 func composeDevicePolicy(
@@ -1147,6 +1167,12 @@ func buildProductionFoundationsWithStaffSource(
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithPublicCatalogFoundation(publicCatalogFoundation))
+	profileFoundation, err := buildProfileFoundation(pool, publicCatalogFoundation.Repository())
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.Options = append(pf.Options, httpapi.WithProfileFoundation(profileFoundation))
 
 	accessFoundation, err := buildAccessFoundation(cfg, pool)
 	if err != nil {

@@ -86,7 +86,8 @@ const (
 	AdminUser360SchemaVersion = AdminOperationsSchemaVersion + 1
 	// T2 hardening makes the append-only note subject foreign key explicit.
 	AdminUser360HardeningSchemaVersion = AdminUser360SchemaVersion + 1
-	MaxSchemaVersion                   = AdminUser360HardeningSchemaVersion
+	InstructorProfilesSchemaVersion    = AdminUser360HardeningSchemaVersion + 1
+	MaxSchemaVersion                   = InstructorProfilesSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

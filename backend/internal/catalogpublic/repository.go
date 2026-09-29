@@ -39,6 +39,7 @@ type Course struct {
 	Slug                  string     `json:"slug"`
 	Title                 string     `json:"title"`
 	InstructorDisplayName string     `json:"instructor_display_name"`
+	InstructorSlug        *string    `json:"instructor_slug,omitempty"`
 	University            *Taxonomy  `json:"university,omitempty"`
 	Major                 *Taxonomy  `json:"major,omitempty"`
 	Subject               *Taxonomy  `json:"subject,omitempty"`
@@ -125,6 +126,23 @@ func (r *Repository) List(ctx context.Context, arabic bool, page, pageSize int) 
 
 func (r *Repository) Search(ctx context.Context, arabic bool, page, pageSize int, searchQuery string) (ListResult, error) {
 	return r.Browse(ctx, arabic, page, pageSize, searchQuery, true, Filters{})
+}
+
+// CoursesByOwner reuses the catalogue projection and its visibility predicate
+// for public instructor pages. The owner condition only narrows the published
+// set; it never creates a second course visibility rule.
+func (r *Repository) CoursesByOwner(ctx context.Context, ownerAccountID string, arabic bool) ([]Course, error) {
+	if _, err := uuid.Parse(ownerAccountID); err != nil {
+		return []Course{}, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		r.projectionQuery(r.visibility("c", "cr"), "AND c.owner_account_id = $2::uuid", "ORDER BY c.id"),
+		arabic, ownerAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("listing public instructor courses: %w", err)
+	}
+	defer rows.Close()
+	return scanCourses(rows, arabic)
 }
 
 // queryArguments numbers placeholders as they are bound.
@@ -245,6 +263,9 @@ func (r *Repository) countQuery(visibility, conditions string) string {
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
+		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
+			AND ip.publication_state = 'PUBLISHED'
+			AND ip.published_snapshot IS NOT NULL
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
@@ -360,6 +381,7 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 	return `SELECT c.id::text, c.slug,
 		CASE WHEN $1 THEN cr.title_ar ELSE cr.title_en END,
 		a.display_name,
+		ip.published_snapshot->>'public_slug',
 		CASE WHEN academic_institution.id IS NULL THEN NULL ELSE CASE WHEN $1 THEN academic_institution.name_ar ELSE academic_institution.name_en END END, NULL::text,
 		CASE WHEN major.id IS NULL THEN NULL ELSE CASE WHEN $1 THEN major.label_ar ELSE major.label_en END END, NULL::text,
 		CASE
@@ -438,6 +460,9 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
+		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
+			AND ip.publication_state = 'PUBLISHED'
+			AND ip.published_snapshot IS NOT NULL
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
@@ -459,11 +484,13 @@ func scanCourses(rows interface {
 	for rows.Next() {
 		var item Course
 		var universityLabel, universityCode, majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
+		var instructorSlug *string
 		var regular, offer *int64
 		var thumbnailID *string
-		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &regular, &offer, &thumbnailID, &item.HasPreview); err != nil {
+		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &instructorSlug, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &regular, &offer, &thumbnailID, &item.HasPreview); err != nil {
 			return nil, fmt.Errorf("scanning public course: %w", err)
 		}
+		item.InstructorSlug = instructorSlug
 		if thumbnailID != nil {
 			prefix := "/api/v1/catalog/courses/" + item.ID + "/thumbnails/" + *thumbnailID
 			item.Thumbnail = &Thumbnail{AssetVersionID: *thumbnailID, CardURL: prefix + "/card", LargeURL: prefix + "/large"}

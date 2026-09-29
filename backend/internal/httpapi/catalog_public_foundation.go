@@ -11,6 +11,13 @@ type PublicCatalogFoundation struct {
 	repository *catalogpublic.Repository
 }
 
+func (f *PublicCatalogFoundation) Repository() *catalogpublic.Repository {
+	if f == nil {
+		return nil
+	}
+	return f.repository
+}
+
 type PublicCatalogFoundationOptions struct {
 	Repository *catalogpublic.Repository
 }
