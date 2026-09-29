@@ -6,6 +6,8 @@ import {
 export type WorkspaceRole = Extract<SessionRole, "ADMIN" | "INSTRUCTOR">;
 
 export type WorkspaceNavigationKey =
+  | "adminHome"
+  | "adminAnalytics"
   | "courseReview"
   | "adminCourses"
   | "academicCatalog"
@@ -65,12 +67,14 @@ export function roleWorkspaceNavigation(
   if (home === null) return [];
   if (role === "ADMIN") {
     return [
+      { key: "adminHome", href: home },
+      { key: "adminAnalytics", href: `/${locale}/admin/analytics` },
       // Courses leads, because it is the surface an Admin can start from without already knowing
       // which Course they are looking for. The review queue remains its own entry: it is the exact
       // set of pending decisions, and narrowing to it is a different job from browsing the
       // catalogue.
       { key: "adminCourses", href: `/${locale}/admin/courses` },
-      { key: "courseReview", href: home },
+      { key: "courseReview", href: `/${locale}/admin/catalog` },
       { key: "academicCatalog", href: `/${locale}/admin/academic-catalog` },
       // Demand sits beside the Academic Catalog rather than beside Courses: it is
       // read against Subjects, and it answers "what should exist" rather than

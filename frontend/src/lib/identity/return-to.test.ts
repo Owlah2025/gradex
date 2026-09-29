@@ -79,8 +79,8 @@ test("maps every role to its existing localized home", () => {
   assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
   assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
   assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
-  assert.equal(roleRoot("ADMIN", "en"), "/en/admin/catalog");
-  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin/catalog");
+  assert.equal(roleRoot("ADMIN", "en"), "/en/admin");
+  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin");
 });
 
 test("carries a validated destination across an admission hop", () => {
@@ -208,7 +208,7 @@ test("a completed change lands each role on its own authorized surface", () => {
   );
   assert.equal(
     postPasswordChangeDestination("ADMIN", null, "en"),
-    "/en/admin/catalog",
+    "/en/admin",
   );
   assert.equal(
     postPasswordChangeDestination("STUDENT", null, "en"),
@@ -224,7 +224,7 @@ test("a completed change still honours the destination the visitor was interrupt
   // But not a hostile one, revalidated here like at every other hop.
   assert.equal(
     postPasswordChangeDestination("ADMIN", "https://evil.example", "en"),
-    "/en/admin/catalog",
+    "/en/admin",
   );
 });
 
@@ -257,8 +257,8 @@ test("every known role still resolves to its own workspace", () => {
   assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
   assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
   assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
-  assert.equal(roleRoot("ADMIN", "en"), "/en/admin/catalog");
-  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin/catalog");
+  assert.equal(roleRoot("ADMIN", "en"), "/en/admin");
+  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin");
 });
 
 test("an unrecognised role resolves to no workspace at all", () => {

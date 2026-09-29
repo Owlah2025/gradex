@@ -106,7 +106,7 @@ export function roleRoot(
     case "INSTRUCTOR":
       return `/${locale}/instructor/courses`;
     case "ADMIN":
-      return `/${locale}/admin/catalog`;
+      return `/${locale}/admin`;
     default:
       return null;
   }

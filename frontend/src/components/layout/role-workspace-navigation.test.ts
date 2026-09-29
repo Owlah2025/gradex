@@ -12,6 +12,8 @@ import {
 // decisions, which is a different job from browsing the catalogue.
 test("Admin workspace navigation exposes the existing launch operations", () => {
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "en"), [
+    { key: "adminHome", href: "/en/admin" },
+    { key: "adminAnalytics", href: "/en/admin/analytics" },
     { key: "adminCourses", href: "/en/admin/courses" },
     { key: "courseReview", href: "/en/admin/catalog" },
     { key: "academicCatalog", href: "/en/admin/academic-catalog" },
@@ -25,6 +27,8 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "staffOperations", href: "/staff" },
   ]);
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "ar"), [
+    { key: "adminHome", href: "/ar/admin" },
+    { key: "adminAnalytics", href: "/ar/admin/analytics" },
     { key: "adminCourses", href: "/ar/admin/courses" },
     { key: "courseReview", href: "/ar/admin/catalog" },
     { key: "academicCatalog", href: "/ar/admin/academic-catalog" },
@@ -67,7 +71,7 @@ test("authenticated header destinations and labels follow the signed-in role", (
   });
   assert.deepEqual(roleHomeNavigation("ADMIN", "en"), {
     key: "adminWorkspace",
-    href: "/en/admin/catalog",
+    href: "/en/admin",
   });
 });
 
