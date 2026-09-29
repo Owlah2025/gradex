@@ -15,6 +15,8 @@ export type WorkspaceNavigationKey =
   | "courseLifecycle"
   | "reportedContent"
   | "staffOperations"
+  | "adminUsers"
+  | "adminAudit"
   | "instructorStudio"
   | "courseBuilder";
 
@@ -78,6 +80,8 @@ export function roleWorkspaceNavigation(
       { key: "courseAccess", href: `/${locale}/admin/course-access` },
       { key: "courseLifecycle", href: `/${locale}/admin/course-lifecycle` },
       { key: "reportedContent", href: `/${locale}/admin/reported-content` },
+      { key: "adminUsers", href: `/${locale}/admin/users` },
+      { key: "adminAudit", href: `/${locale}/admin/audit` },
       { key: "staffOperations", href: "/staff" },
     ];
   }

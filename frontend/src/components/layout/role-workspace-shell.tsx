@@ -29,6 +29,8 @@ export function RoleWorkspaceShell({
     courseLifecycle: t.nav.courseLifecycle,
     reportedContent: t.nav.reportedContent,
     staffOperations: t.nav.staffOperations,
+    adminUsers: t.nav.adminUsers,
+    adminAudit: t.nav.adminAudit,
     instructorStudio: t.nav.instructorStudio,
     courseBuilder: t.nav.courseBuilder,
   };
