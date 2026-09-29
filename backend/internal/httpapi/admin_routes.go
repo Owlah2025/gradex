@@ -45,6 +45,13 @@ func mountAdminRoutes(
 			readGroup.GET("/accounts/:accountId", h.getAccount)
 		}
 		readGroup.GET("/audit-events", h.listAuditEvents)
+		if foundation.metricsService != nil {
+			metrics := &adminMetricsHandlers{service: foundation.metricsService}
+			readGroup.GET("/metrics/overview", metrics.getOverview)
+			readGroup.GET("/metrics/courses", metrics.listCourses)
+			readGroup.GET("/metrics/instructors", metrics.listInstructors)
+			readGroup.GET("/inbox", metrics.getInbox)
+		}
 	}
 	if foundation.userService != nil && sessionFoundation != nil {
 		notesMutation := v1.Group("/admin/accounts/:accountId/notes")

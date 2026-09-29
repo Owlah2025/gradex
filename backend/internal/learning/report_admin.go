@@ -202,6 +202,17 @@ func (r *Repository) ListAdminReports(ctx context.Context, request AdminReportPa
 	return AdminReportPage{Items: items, Page: request.Page, PageSize: request.PageSize, HasNext: hasNext}, nil
 }
 
+func (r *Repository) CountOpenAdminReports(ctx context.Context) (int, error) {
+	if r == nil || r.pool == nil {
+		return 0, errors.New("learning database is required")
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, "SELECT count(*) FROM content_reports WHERE resolved_at IS NULL").Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting admin report queue: %w", err)
+	}
+	return count, nil
+}
+
 func (r *Repository) GetAdminReport(ctx context.Context, reportID string) (AdminReport, error) {
 	if r == nil || r.pool == nil {
 		return AdminReport{}, errors.New("learning database is required")

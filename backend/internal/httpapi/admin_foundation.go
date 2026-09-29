@@ -28,6 +28,7 @@ type AdminUserService interface {
 
 type AdminFoundation struct {
 	service          AdminService
+	metricsService   adminread.AdminMetricsService
 	userService      AdminUserService
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
@@ -60,9 +61,14 @@ func NewAdminFoundation(options AdminFoundationOptions) (*AdminFoundation, error
 		recentAuthWindow = 15 * time.Minute
 	}
 	return &AdminFoundation{
-		service: options.Service, userService: userService(options.Service), limiter: options.Limiter,
+		service: options.Service, metricsService: metricsService(options.Service), userService: userService(options.Service), limiter: options.Limiter,
 		endpointPolicies: policies, recentAuthWindow: recentAuthWindow,
 	}, nil
+}
+
+func metricsService(service AdminService) adminread.AdminMetricsService {
+	value, _ := service.(adminread.AdminMetricsService)
+	return value
 }
 
 func userService(service AdminService) AdminUserService {

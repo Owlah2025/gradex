@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	adminread "github.com/Owlah2025/gradex/backend/internal/admin"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -30,11 +31,31 @@ func (fakeAdminService) ListAuditEvents(context.Context, adminread.AuditEventReq
 	return adminread.AuditEventResult{Events: []adminread.AuditEvent{}, Page: 1, Limit: 25}, nil
 }
 
+func (fakeAdminService) GetMetricsOverview(context.Context, adminread.MetricsOverviewRequest) (adminread.MetricsOverviewResult, error) {
+	return adminread.MetricsOverviewResult{Metrics: []adminread.Metric{}, AsOf: time.Now().UTC()}, nil
+}
+
+func (fakeAdminService) ListMetricsCourses(context.Context, adminread.MetricsCoursesRequest) (adminread.MetricsCoursesResult, error) {
+	return adminread.MetricsCoursesResult{Items: []adminread.CourseMetric{}, Page: 1, Limit: 25}, nil
+}
+
+func (fakeAdminService) ListMetricsInstructors(context.Context, adminread.MetricsInstructorsRequest) (adminread.MetricsInstructorsResult, error) {
+	return adminread.MetricsInstructorsResult{Items: []adminread.InstructorMetric{}, Page: 1, Limit: 25}, nil
+}
+
+func (fakeAdminService) GetInbox(context.Context, adminread.InboxRequest) (adminread.InboxResult, error) {
+	return adminread.InboxResult{Sections: []adminread.InboxSection{}}, nil
+}
+
 func TestAdminOperationsRoutesAuthorization(t *testing.T) {
 	paths := []string{
 		"/api/v1/admin/accounts",
 		"/api/v1/admin/accounts/10000000-0000-0000-0000-000000000001",
 		"/api/v1/admin/audit-events",
+		"/api/v1/admin/metrics/overview",
+		"/api/v1/admin/metrics/courses",
+		"/api/v1/admin/metrics/instructors",
+		"/api/v1/admin/inbox",
 	}
 	t.Run("anonymous is refused", func(t *testing.T) {
 		router, _ := authzRouterWithSessionAndAuthenticator(
