@@ -266,6 +266,7 @@ func (r *Repository) countQuery(visibility, conditions string) string {
 		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
 			AND ip.public_visible
 			AND ip.published_snapshot IS NOT NULL
+			AND a.status = 'ACTIVE'
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
@@ -463,6 +464,7 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
 			AND ip.public_visible
 			AND ip.published_snapshot IS NOT NULL
+			AND a.status = 'ACTIVE'
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id

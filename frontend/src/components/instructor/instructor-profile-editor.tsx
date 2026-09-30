@@ -365,7 +365,7 @@ export function InstructorProfileEditor() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-xs font-semibold text-white/70">{copy.stateLabels[profile.publication_state]}</p>
-                  {profile.public_visible && <p className="rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">{locale === "ar" ? "مرئي للعامة" : "Publicly Visible"}</p>}
+                  {profile.public_visible && <p className="rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">{copy.publicVisible}</p>}
                 </div>
                 <h2 className="mt-1 font-display text-2xl font-bold"><bdi>{profile.display_name}</bdi></h2>
                 <p className="mt-1 text-sm text-white/85"><bdi>{displayHeadline || "—"}</bdi></p>

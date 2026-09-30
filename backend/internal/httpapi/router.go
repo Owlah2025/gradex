@@ -122,7 +122,7 @@ func NewRouter(
 	}
 
 	if routerConfig.media != nil {
-		mountMediaRoutes(v1, routerConfig.media, authenticator, principals, logger)
+		mountMediaRoutes(v1, routerConfig.media, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.learning != nil {
 		if err := mountLearningRoutes(v1, routerConfig.learning, authenticator, principals, logger); err != nil {

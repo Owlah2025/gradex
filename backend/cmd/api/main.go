@@ -304,7 +304,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // catalogue search analytics, and operations tables, so readiness must stay at
 // the schema that introduces the latest of those tables.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.CatalogSearchAnalyticsSchemaVersion
+	return db.APIRequiredSchemaVersion
 }
 
 func buildLearningFoundation(
@@ -1185,12 +1185,14 @@ func buildProductionFoundationsWithStaffSource(
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithPublicCatalogFoundation(publicCatalogFoundation))
-	profileFoundation, err := buildProfileFoundation(pool, publicCatalogFoundation.Repository())
-	if err != nil {
-		pf.Close()
-		return nil, err
+	if cfg.Sessions().Enabled() {
+		profileFoundation, err := buildProfileFoundation(pool, publicCatalogFoundation.Repository())
+		if err != nil {
+			pf.Close()
+			return nil, err
+		}
+		pf.Options = append(pf.Options, httpapi.WithProfileFoundation(profileFoundation))
 	}
-	pf.Options = append(pf.Options, httpapi.WithProfileFoundation(profileFoundation))
 
 	accessFoundation, err := buildAccessFoundation(cfg, pool)
 	if err != nil {

@@ -15,6 +15,7 @@ import {
   type AdminAccountPage,
 } from "@/lib/api/admin-operations";
 import { describeApiError } from "@/lib/api/api-error";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { formatDate, formatDateTime } from "@/lib/i18n/format";
 import { EmptyState } from "@/components/common/empty-state";
@@ -266,7 +267,7 @@ export function AdminUsers() {
         </div>
       ) : null}
 
-      {exportError ? <div className="mt-4"><Alert tone="error" title={copy.exportFailed}>{exportError}{exportNeedsSignIn ? <Link className="ms-2 underline" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/admin/users`)}`}>{copy.signInAgain}</Link> : null}</Alert></div> : null}
+      {exportError && !exportOpen ? <div className="mt-4"><Alert tone="error" title={copy.exportFailed}>{exportError}{exportNeedsSignIn ? <Link className="ms-2 underline" href={withReturnTo("/login", `/${locale}/admin/users`)}>{copy.signInAgain}</Link> : null}</Alert></div> : null}
 
       {loadState === "failed" ? (
         <ErrorState
@@ -332,6 +333,7 @@ export function AdminUsers() {
         cancelLabel={copy.exportCancel}
         busy={exportBusy}
         tone="default"
+        error={exportError ? <>{exportError}{exportNeedsSignIn ? <Link className="ms-2 underline" href={withReturnTo("/login", `/${locale}/admin/users`)}>{copy.signInAgain}</Link> : null}</> : undefined}
         onConfirm={() => void downloadExport()}
         testID="admin-users-export-confirm"
       />

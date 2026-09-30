@@ -175,9 +175,10 @@ type User360 struct {
 }
 
 type NoteListRequest struct {
-	Principal identity.Principal
-	AccountID string
-	Limit     int
+	Principal     identity.Principal
+	CorrelationID string
+	AccountID     string
+	Limit         int
 }
 
 type AddNoteRequest struct {
@@ -242,10 +243,11 @@ type AccessDiagnostic struct {
 }
 
 type SecurityEventsRequest struct {
-	Principal identity.Principal
-	AccountID string
-	Page      int
-	Limit     int
+	Principal     identity.Principal
+	CorrelationID string
+	AccountID     string
+	Page          int
+	Limit         int
 }
 
 type SecurityEventsResult struct {

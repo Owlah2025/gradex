@@ -13,6 +13,7 @@ import {
   type InstructorPublicationState,
 } from "@/lib/api/instructor-profile";
 import { currentCSRFToken } from "@/lib/identity/session";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { EmptyState } from "@/components/common/empty-state";
 import { LoadingState } from "@/components/common/loading-state";
@@ -148,15 +149,15 @@ export function AdminInstructorProfiles() {
   return (
     <WorkspacePage testID="admin-instructor-profiles">
       <WorkspacePageHeader title={copy.title} description={copy.description} />
-      {recentAuthRequired ? (
+      {!action && recentAuthRequired ? (
         <div className="mt-6">
           <Alert tone="error" title={copy.recentAuth}>
-            <Link className="underline" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/admin/instructor-profiles`)}`}>
+            <Link className="underline" href={withReturnTo("/login", `/${locale}/admin/instructor-profiles`)}>
               {copy.signInAgain}
             </Link>
           </Alert>
         </div>
-      ) : error ? <div className="mt-6"><Alert tone="error" title={copy.loadFailed}>{error}</Alert></div> : null}
+      ) : !action && error ? <div className="mt-6"><Alert tone="error" title={copy.loadFailed}>{error}</Alert></div> : null}
 
       <WorkspaceSection title={copy.queueTitle}>
         <Field label={copy.stateFilter} htmlFor="admin-instructor-profile-state">
@@ -186,7 +187,7 @@ export function AdminInstructorProfiles() {
                   <span className="mt-1 block text-sm text-muted-foreground"><bdi>{item.public_slug ? "/" + locale + "/instructors/" + item.public_slug : copy.fields.slug}</bdi></span>
                 </span>
                 <span className="flex items-center gap-2">
-                  {item.public_visible && <StatusBadge tone="info" label={locale === "ar" ? "مرئي للعامة" : "Publicly Visible"} />}
+                  {item.public_visible && <StatusBadge tone="default" label={copy.publicVisible} />}
                   <StatusBadge tone={toneForState(item.publication_state)} label={copy.states[item.publication_state]} />
                 </span>
               </button>
@@ -231,6 +232,7 @@ export function AdminInstructorProfiles() {
         confirmLabel={action === "approve" ? copy.confirmApprove : action === "hide" ? copy.confirmHide : copy.confirmRequestChanges}
         cancelLabel={copy.cancel}
         busy={busy}
+        error={action ? (recentAuthRequired ? <><span>{copy.recentAuth}</span> <Link className="ms-2 underline" href={withReturnTo("/login", `/${locale}/admin/instructor-profiles`)}>{copy.signInAgain}</Link></> : error) : undefined}
         onConfirm={() => void confirm()}
         confirmDisabled={reason.trim() === ""}
       >
@@ -287,7 +289,7 @@ function ExpertiseDiff({
     <div className="border-b border-border pb-3 last:border-b-0">
       <p className="text-xs font-semibold text-muted-foreground">
         {copy.fields.expertise}
-        {changed && <span className="ml-2 font-bold text-gx-orange-600">{copy.changedMarker}</span>}
+        {changed && <span className="ms-2 font-bold text-gx-orange-600">{copy.changedMarker}</span>}
       </p>
       <div className="mt-2 grid gap-3 md:grid-cols-2">
         <ExpertiseList items={draft} changed={changed} copy={copy} />
@@ -341,7 +343,7 @@ function DiffRow({
     <div className="border-b border-border pb-3 last:border-b-0">
       <p className="text-xs font-semibold text-muted-foreground">
         {label}
-        {changed && <span className="ml-2 font-bold text-gx-orange-600">{changedMarker}</span>}
+        {changed && <span className="ms-2 font-bold text-gx-orange-600">{changedMarker}</span>}
       </p>
       <div className="mt-1 grid gap-2 text-sm md:grid-cols-2">
         <p dir={draftDir} className={`${valueClass} ${draftClass}`}><bdi>{draft || emptyValue}</bdi></p>

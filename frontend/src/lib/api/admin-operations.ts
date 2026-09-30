@@ -1,4 +1,4 @@
-import { authenticatedDownload, authenticatedRequest, ensureAnonymousBrowser } from "./http";
+import { authenticatedDownload, authenticatedRequest } from "./http";
 import { currentCSRFToken } from "../identity/session";
 import { ProblemError } from "./problem";
 
@@ -392,11 +392,11 @@ export async function listAdminMediaFailures(
 }
 
 export async function retryAdminMedia(assetVersionID: string, locale: AdminLocale): Promise<void> {
-  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retries`, "POST", locale, await resolveAdminCSRF());
+  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retries`, "POST", locale, await resolveAdminCSRF(locale));
 }
 
 export async function retryAdminMediaEnhancements(assetVersionID: string, locale: AdminLocale): Promise<void> {
-  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retry-enhancements`, "POST", locale, await resolveAdminCSRF());
+  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retry-enhancements`, "POST", locale, await resolveAdminCSRF(locale));
 }
 
 export async function exportAdminAccounts(filters: AdminAccountFilters, locale: AdminLocale): Promise<Blob> {
@@ -428,9 +428,11 @@ export async function getAdminUser360(accountID: string, locale: AdminLocale): P
   return response;
 }
 
-async function resolveAdminCSRF(csrf?: string): Promise<string> {
+async function resolveAdminCSRF(locale: AdminLocale, csrf?: string): Promise<string> {
   if (csrf) return csrf;
-  return currentCSRFToken() ?? ensureAnonymousBrowser();
+  const current = currentCSRFToken();
+  if (current) return current;
+  throw new Error(locale === "ar" ? "انتهت جلستك. سجّل الدخول مرة أخرى للمتابعة." : "Your session ended. Sign in again to continue.");
 }
 
 export async function listAdminNotes(accountID: string, locale: AdminLocale): Promise<{ notes: AdminNote[] }> {
@@ -444,7 +446,7 @@ export async function listAdminNotes(accountID: string, locale: AdminLocale): Pr
 export async function addAdminNote(accountID: string, body: string, locale: AdminLocale, csrf?: string): Promise<AdminNote> {
   const response = await authenticatedRequest<AdminNote>(
     `/admin/accounts/${encodeURIComponent(accountID)}/notes`, "POST", locale,
-    await resolveAdminCSRF(csrf), { body },
+    await resolveAdminCSRF(locale, csrf), { body },
   );
   if (response === null) throw new Error(locale === "ar" ? "لم تتم إضافة الملاحظة" : "No note returned");
   return response;
@@ -453,7 +455,7 @@ export async function addAdminNote(accountID: string, body: string, locale: Admi
 export async function revokeAccountSessions(accountID: string, reason: string, locale: AdminLocale, csrf?: string) {
   return authenticatedRequest<{ epoch: number; revoked_session_count: number }>(
     `/admin/accounts/${encodeURIComponent(accountID)}/session-revocations`, "POST", locale,
-    await resolveAdminCSRF(csrf), { reason },
+    await resolveAdminCSRF(locale, csrf), { reason },
   );
 }
 

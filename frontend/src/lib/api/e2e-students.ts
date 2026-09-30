@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 45;
+export const ROTATING_TEST_SLOTS = 48;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 450;
+export const ROTATING_POOL_SIZE = 480;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -44,6 +44,7 @@ export const ROTATING_EXPIRED_POOL_SIZE = 100;
 //   34     reported-content journey 1
 //   35-41 Subject demand            7 isolated Students
 //   42-44 Landing study-plan        profile, request, and filter journeys
+//   45-47 V2 Admin/Student journeys, kept isolated from every older lane
 //
 // Growing the map never reassigns an existing execution: allocation is
 // slot * repeats + repeat, so slots 0-23 keep indices 0-239 and slots 0-29 keep
@@ -146,6 +147,12 @@ export const SUBJECT_DEMAND_UNTRUSTED_AUTH_RETURN_TEST_SLOT = 41;
 export const LANDING_STUDY_PLAN_PROFILE_TEST_SLOT = 42;
 export const LANDING_STUDY_PLAN_REQUEST_TEST_SLOT = 43;
 export const LANDING_STUDY_PLAN_FILTER_TEST_SLOT = 44;
+/** V2 Admin's dedicated rotating target account. */
+export const V2_ADMIN_TARGET_TEST_SLOT = 45;
+/** V2 Student's dedicated full-journey account. */
+export const V2_STUDENT_TEST_SLOT = 46;
+/** V2 Student responsive/locale matrix account. */
+export const V2_STUDENT_MATRIX_TEST_SLOT = 47;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

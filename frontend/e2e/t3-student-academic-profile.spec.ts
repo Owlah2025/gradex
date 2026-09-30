@@ -219,7 +219,7 @@ test.describe("T3 Student academic profile", () => {
     await expect(page.getByTestId("academic-profile-prompt")).toHaveCount(0);
 
     // Editing remains available whenever they want it.
-    await page.goto("/ar/learn/profile");
+    await page.goto("/ar/learn/academic-profile/edit");
     await expect(page.getByTestId("academic-profile-form")).toBeVisible();
 
     await api.dispose();
@@ -289,7 +289,7 @@ test.describe("T3 Student academic profile", () => {
     await page.getByTestId("profile-save").click();
     await page.waitForURL(/\/en\/learn\/dashboard/);
 
-    await page.goto("/en/learn/profile");
+    await page.goto("/en/learn/academic-profile/edit");
     // The promise the Student is shown must be technically true.
     await expect(page.getByTestId("profile-access-promise")).toContainText(
       "Your courses and purchases are unaffected",

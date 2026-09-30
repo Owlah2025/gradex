@@ -1012,41 +1012,59 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 	`, instructorID, subjectID); err != nil {
 		t.Fatalf("inserting instructor expertise: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, public_slug)
 		VALUES ($1::uuid, 'UpperCase')
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("uppercase instructor slug was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23514", "instructor_profiles_slug_shape")
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, published_slug)
 		VALUES ($1::uuid, 'UpperCase')
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("uppercase instructor published_slug was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23514", "instructor_profiles_published_slug_shape")
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, publication_state)
 		VALUES ($1::uuid, 'PUBLISHED')
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("published instructor profile without a snapshot was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23514", "instructor_profiles_published_has_snapshot")
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, public_visible, published_slug)
 		VALUES ($1::uuid, true, 'missing-snapshot')
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("public_visible=TRUE without snapshot was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23514", "instructor_profiles_public_visible_requires_snapshot")
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, public_visible, published_snapshot)
 		VALUES ($1::uuid, true, '{}'::jsonb)
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("public_visible=TRUE without published_slug was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23514", "instructor_profiles_public_visible_requires_snapshot")
 	}
-	if _, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, published_slug)
 		VALUES ($1::uuid, 'migration-author')
-	`, adminID); err == nil {
+	`, adminID)
+	if err == nil {
 		t.Fatal("duplicate published_slug was accepted")
+	} else {
+		assertPostgresConstraint(t, err, "23505", "instructor_profiles_published_slug_key")
 	}
 
 	// Course completions, announcements, and catalogue search analytics are
@@ -1063,6 +1081,20 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 	}
 	if !tableExists(t, pool, "instructor_profiles") {
 		t.Fatal("instructor_profiles missing after migration up")
+	}
+}
+
+func assertPostgresConstraint(t *testing.T, err error, code, constraint string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected PostgreSQL constraint %s/%s, got nil", code, constraint)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("error = %v, want PostgreSQL constraint %s/%s", err, code, constraint)
+	}
+	if pgErr.Code != code || pgErr.ConstraintName != constraint {
+		t.Fatalf("PostgreSQL error = %s/%s, want %s/%s", pgErr.Code, pgErr.ConstraintName, code, constraint)
 	}
 }
 

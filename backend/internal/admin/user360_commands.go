@@ -32,6 +32,14 @@ func (r *Repository) ListNotes(ctx context.Context, req NoteListRequest) (NoteLi
 	if err := ensureAccountExists(ctx, tx, req.AccountID); err != nil {
 		return NoteListResult{}, err
 	}
+	if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
+		Principal: req.Principal, CorrelationID: req.CorrelationID,
+		Action: ActionUserViewed, Module: catalog.AuditModuleIdentityAndAccess,
+		TargetType: User360TargetType, TargetID: req.AccountID,
+		Reason: AuditReasonUserViewed, Metadata: map[string]any{"sections": []string{"notes"}},
+	}); err != nil {
+		return NoteListResult{}, fmt.Errorf("auditing account notes read: %w", err)
+	}
 	notes, err := queryNotes(ctx, tx, req.AccountID, limit)
 	if err != nil {
 		return NoteListResult{}, err
@@ -184,6 +192,14 @@ func (r *Repository) ListSecurityEvents(ctx context.Context, req SecurityEventsR
 	var total int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM identity_security_events WHERE account_id = $1::uuid`, req.AccountID).Scan(&total); err != nil {
 		return SecurityEventsResult{}, fmt.Errorf("counting account security events: %w", err)
+	}
+	if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
+		Principal: req.Principal, CorrelationID: req.CorrelationID,
+		Action: ActionUserViewed, Module: catalog.AuditModuleIdentityAndAccess,
+		TargetType: User360TargetType, TargetID: req.AccountID,
+		Reason: AuditReasonUserViewed, Metadata: map[string]any{"sections": []string{"security_events"}},
+	}); err != nil {
+		return SecurityEventsResult{}, fmt.Errorf("auditing account security events read: %w", err)
 	}
 	events, err := querySecurityEvents(ctx, tx, req.AccountID, req.Page, req.Limit)
 	if err != nil {

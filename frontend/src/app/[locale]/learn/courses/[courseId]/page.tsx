@@ -52,9 +52,10 @@ export default async function CourseHomePage({
   params: Promise<{ locale: string; courseId: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { locale: requestedLocale, courseId } = await params;
-  const pageParam = (await searchParams).page;
-  const page = typeof pageParam === "string" ? parseInt(pageParam, 10) || 1 : 1;
+	const { locale: requestedLocale, courseId } = await params;
+	const pageParam = (await searchParams).page;
+	const parsedPage = typeof pageParam === "string" ? Number.parseInt(pageParam, 10) : 1;
+	const page = Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
   const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
   const shell = shellLabels(dictionary);
@@ -172,13 +173,20 @@ export default async function CourseHomePage({
                 ))}
               </div>
             )}
-            {announcementsHaveMore && !announcementsFailed ? (
-              <div className="mt-4 text-sm text-muted-foreground">
-                <Link href={`/${locale}/learn/courses/${course.course_id}?page=${page + 1}`} className="underline underline-offset-4 hover:text-foreground">
-                  {dictionary.learning.announcementsMore}
-                </Link>
-              </div>
-            ) : null}
+			{!announcementsFailed && (announcementsHaveMore || page > 1) ? (
+				<div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
+					{page > 1 ? (
+						<Link href={`/${locale}/learn/courses/${course.course_id}?page=${page - 1}`} className="underline underline-offset-4 hover:text-foreground">
+							{dictionary.learning.announcementsPrevious}
+						</Link>
+					) : null}
+					{announcementsHaveMore ? (
+						<Link href={`/${locale}/learn/courses/${course.course_id}?page=${page + 1}`} className="underline underline-offset-4 hover:text-foreground">
+							{dictionary.learning.announcementsMore}
+						</Link>
+					) : null}
+				</div>
+			) : null}
           </section>
 
           {/* One control, above the contents, so a Student returning to a Course does not have to

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 type mediaRouterStore struct {
@@ -194,8 +196,26 @@ func mediaRouterWithDeliveryUnderTest(t *testing.T, principal identity.Principal
 	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
 	reporter := health.New(time.Second)
 	reporter.MarkStarted()
+	limiter, err := ratelimit.New(admissionRateStore{allowed: true}, bytes.Repeat([]byte{0x31}, 32), time.Second)
+	if err != nil {
+		t.Fatalf("creating session limiter: %v", err)
+	}
+	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{
+		PublicOrigin:        "https://gradex.example",
+		CookieSigningKey:    bytes.Repeat([]byte("a"), 32),
+		AnonymousCSRFKey:    bytes.Repeat([]byte("b"), 32),
+		AnonymousSessionTTL: time.Hour,
+		Repository:          &fakeSessionRepository{},
+		Compromised:         testCompromisedSource(t),
+		Limiter:             limiter,
+		EndpointPolicies:    testSessionEndpointPolicies(),
+	})
+	if err != nil {
+		t.Fatalf("creating session foundation: %v", err)
+	}
 	router, err := NewRouter(
 		cfg, logger, reporter, fakeAuth{}, fixedPrincipals{principal: principal},
+		WithSessionFoundation(sessionFoundation),
 		WithMediaFoundation(foundation),
 	)
 	if err != nil {

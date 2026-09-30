@@ -18,9 +18,11 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/instructorprofile"
 	"github.com/Owlah2025/gradex/backend/internal/learning"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
@@ -188,6 +190,26 @@ func authzRouterWithSessionAndAuthenticator(
 	if err != nil {
 		t.Fatalf("constructing catalog foundation: %v", err)
 	}
+	publicCatalogRepository, err := catalogpublic.NewRepository(pool, catalogpublic.PublishedOnly)
+	if err != nil {
+		t.Fatalf("constructing public catalog repository: %v", err)
+	}
+	profileRepository, err := instructorprofile.NewRepository(pool)
+	if err != nil {
+		t.Fatalf("constructing instructor profile repository: %v", err)
+	}
+	accountProfileService, err := identity.NewAccountProfileService(pool)
+	if err != nil {
+		t.Fatalf("constructing account profile service: %v", err)
+	}
+	profileFoundation, err := NewProfileFoundation(ProfileFoundationOptions{
+		Instructor: profileRepository,
+		Account:    accountProfileService,
+		Catalog:    publicCatalogRepository,
+	})
+	if err != nil {
+		t.Fatalf("constructing profile foundation: %v", err)
+	}
 	learningRepository, err := learning.NewRepository(pool)
 	if err != nil {
 		t.Fatalf("constructing learning repository: %v", err)
@@ -241,6 +263,7 @@ func authzRouterWithSessionAndAuthenticator(
 		WithLearningFoundation(learningFoundation),
 		WithModerationFoundation(moderationFoundation),
 		WithAccessFoundation(accessFoundation),
+		WithProfileFoundation(profileFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
@@ -403,6 +426,12 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/admin/reports":                                                         {Method: http.MethodGet, Path: "/api/v1/admin/reports", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/accounts":                                                        {Method: http.MethodGet, Path: "/api/v1/admin/accounts", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/accounts/:accountId":                                             {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts/:accountId/notes":                                       {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId/notes", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts/:accountId/security-events":                             {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId/security-events", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts/:accountId/course-options":                              {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId/course-options", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/accounts/:accountId/access-diagnostics":                          {Method: http.MethodGet, Path: "/api/v1/admin/accounts/:accountId/access-diagnostics", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/accounts/:accountId/notes":                                      {Method: http.MethodPost, Path: "/api/v1/admin/accounts/:accountId/notes", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/accounts/:accountId/session-revocations":                        {Method: http.MethodPost, Path: "/api/v1/admin/accounts/:accountId/session-revocations", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/audit-events":                                                    {Method: http.MethodGet, Path: "/api/v1/admin/audit-events", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/metrics/overview":                                                {Method: http.MethodGet, Path: "/api/v1/admin/metrics/overview", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/metrics/courses":                                                 {Method: http.MethodGet, Path: "/api/v1/admin/metrics/courses", Class: ClassCapabilityProtected},
@@ -420,6 +449,17 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/courses/:id/announcements":                                             {Method: http.MethodGet, Path: "/api/v1/courses/:id/announcements", Class: ClassOwnershipProtected},
 	"POST /api/v1/courses/:id/announcements":                                            {Method: http.MethodPost, Path: "/api/v1/courses/:id/announcements", Class: ClassOwnershipProtected},
 	"GET /api/v1/instructor/dashboard":                                                  {Method: http.MethodGet, Path: "/api/v1/instructor/dashboard", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/instructor-profile":                                                 {Method: http.MethodGet, Path: "/api/v1/me/instructor-profile", Class: ClassCapabilityProtected},
+	"PUT /api/v1/me/instructor-profile":                                                 {Method: http.MethodPut, Path: "/api/v1/me/instructor-profile", Class: ClassCapabilityProtected},
+	"POST /api/v1/me/instructor-profile/submission":                                     {Method: http.MethodPost, Path: "/api/v1/me/instructor-profile/submission", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/profile":                                                            {Method: http.MethodGet, Path: "/api/v1/me/profile", Class: ClassCapabilityProtected},
+	"PUT /api/v1/me/profile":                                                            {Method: http.MethodPut, Path: "/api/v1/me/profile", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/instructor-profiles":                                             {Method: http.MethodGet, Path: "/api/v1/admin/instructor-profiles", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/instructor-profiles/:accountId":                                  {Method: http.MethodGet, Path: "/api/v1/admin/instructor-profiles/:accountId", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/instructor-profiles/:accountId/approve":                         {Method: http.MethodPost, Path: "/api/v1/admin/instructor-profiles/:accountId/approve", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/instructor-profiles/:accountId/request-changes":                 {Method: http.MethodPost, Path: "/api/v1/admin/instructor-profiles/:accountId/request-changes", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/instructor-profiles/:accountId/hide":                            {Method: http.MethodPost, Path: "/api/v1/admin/instructor-profiles/:accountId/hide", Class: ClassCapabilityProtected},
+	"GET /api/v1/catalog/instructors/:slug":                                             {Method: http.MethodGet, Path: "/api/v1/catalog/instructors/:slug", Class: ClassAnonymous},
 	"PUT /api/v1/courses/:id/candidate":                                                 {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/subject":                                                   {Method: http.MethodPut, Path: "/api/v1/courses/:id/subject", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId":                                   {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},

@@ -94,7 +94,10 @@ const (
 	// T7 catalogue search analytics. The table contains only normalized query
 	// text, result count, locale, and time; it has no account or request identity.
 	CatalogSearchAnalyticsSchemaVersion = CourseAnnouncementsSchemaVersion + 1
-	MaxSchemaVersion                    = CatalogSearchAnalyticsSchemaVersion
+	// APIRequiredSchemaVersion is the readiness floor for the complete API
+	// application tier. Migration tooling and API readiness share this authority.
+	APIRequiredSchemaVersion = CatalogSearchAnalyticsSchemaVersion
+	MaxSchemaVersion         = CatalogSearchAnalyticsSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

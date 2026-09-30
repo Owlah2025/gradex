@@ -96,7 +96,7 @@ export function LearningShell({
             <nav
               aria-label={labels.learningNavigation}
               data-testid="learning-navigation"
-              className="hidden items-center gap-2 md:flex"
+              className="hidden items-center gap-2 lg:flex"
             >
               {learningNavigation.map((item) => (
                 <Link
@@ -113,22 +113,22 @@ export function LearningShell({
             {/* Sign out, and nothing else. The site header also offers notifications and a route
                 to "your dashboard"; on this frame the first is a control the product does not yet
                 implement and the second is the logo and the link beside it. */}
-            <div className="hidden md:block">
+            <div className="hidden lg:block">
               <SignOutButton />
             </div>
 
-            {/* Below `md` the account controls move into a sheet rather than shrinking: three
+            {/* Below `lg` the account controls move into a sheet rather than shrinking: three
                 buttons and an avatar do not fit beside a logo at 390px without one of them
                 becoming an unlabelled icon. */}
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="md:hidden" aria-label={labels.openMenu}>
+                <Button variant="outline" size="icon" className="lg:hidden" aria-label={labels.openMenu}>
                   <Menu className="size-5" aria-hidden />
                 </Button>
               </SheetTrigger>
               <SheetContent side="right" closeLabel={labels.closeMenu}>
                 <SheetTitle className="sr-only">{labels.learningNavigation}</SheetTitle>
-                {/* Parity with the wide header. Below `md` this sheet is the only
+                {/* Parity with the wide header. Below `lg` this sheet is the only
                     navigation there is, so anything offered above and not here is
                     unreachable on a phone. */}
                 <nav

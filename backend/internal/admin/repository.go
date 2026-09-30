@@ -456,7 +456,7 @@ func queryAuditEvents(
 		ae.target_type, ae.target_id, COALESCE(target.display_name, ''), ae.reason, ae.metadata
 		FROM audit_events ae
 		LEFT JOIN accounts actor ON actor.id = ae.actor_account_id
-		LEFT JOIN accounts target ON CASE WHEN ae.target_type = 'ACCOUNT' THEN ae.target_id::uuid END = target.id
+		LEFT JOIN accounts target ON ae.target_type = 'ACCOUNT' AND target.id::text = ae.target_id
 		WHERE `+where+`
 		ORDER BY ae.occurred_at DESC, ae.id DESC
 		LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2), queryArgs...)

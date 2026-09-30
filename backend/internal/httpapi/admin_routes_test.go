@@ -63,6 +63,34 @@ func (fakeAdminService) GetSearchMetrics(context.Context, adminread.SearchMetric
 	return adminread.SearchMetricsResult{TopQueries: []adminread.SearchQueryMetric{}, ZeroResultQueries: []adminread.SearchQueryMetric{}}, nil
 }
 
+func (fakeAdminService) GetUser360(context.Context, adminread.User360Request) (adminread.User360, error) {
+	return adminread.User360{}, nil
+}
+
+func (fakeAdminService) ListNotes(context.Context, adminread.NoteListRequest) (adminread.NoteListResult, error) {
+	return adminread.NoteListResult{Notes: []adminread.AdminNote{}}, nil
+}
+
+func (fakeAdminService) AddNote(context.Context, adminread.AddNoteRequest) (adminread.AdminNote, error) {
+	return adminread.AdminNote{}, nil
+}
+
+func (fakeAdminService) RevokeAccountSessions(context.Context, adminread.SessionRevocationRequest) (adminread.SessionRevocationResult, error) {
+	return adminread.SessionRevocationResult{}, nil
+}
+
+func (fakeAdminService) ListCourseOptions(context.Context, adminread.CourseOptionsRequest) ([]adminread.CourseOption, error) {
+	return []adminread.CourseOption{}, nil
+}
+
+func (fakeAdminService) DiagnoseAccess(context.Context, adminread.AccessDiagnosticRequest) (adminread.AccessDiagnostic, error) {
+	return adminread.AccessDiagnostic{}, nil
+}
+
+func (fakeAdminService) ListSecurityEvents(context.Context, adminread.SecurityEventsRequest) (adminread.SecurityEventsResult, error) {
+	return adminread.SecurityEventsResult{Events: []adminread.SecurityEvent{}}, nil
+}
+
 func TestAdminOperationsRoutesAuthorization(t *testing.T) {
 	paths := []string{
 		"/api/v1/admin/accounts",

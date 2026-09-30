@@ -88,6 +88,7 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
   const [showRoster, setShowRoster] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initialCourseNotFound, setInitialCourseNotFound] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [orderState, setOrderState] = useState<"IDLE" | "SAVING" | "SAVED" | "FAILED">("IDLE");
@@ -166,13 +167,19 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
     async (preferCourseID?: string) => {
       const owned = await getOwnedCourses(locale);
       setCourses(owned as CourseWire[]);
+      if (preferCourseID && !owned.some((course) => course.id === preferCourseID)) {
+        if (preferCourseID === initialCourseID) setInitialCourseNotFound(true);
+        setSelectedCourseID(null);
+        return;
+      }
+      setInitialCourseNotFound(false);
       setSelectedCourseID((current) => {
         const target = preferCourseID ?? current;
         if (target && owned.some((course) => course.id === target)) return target;
         return owned[0]?.id ?? null;
       });
     },
-    [locale],
+    [initialCourseID, locale],
   );
 
   useEffect(() => {
@@ -675,6 +682,15 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
 
   /** Whether the authoring workflow owns this course's panels on this render. */
   const editableWorkflow = Boolean(revisionID && standing.editable && plan);
+
+  if (initialCourseNotFound) {
+    return (
+      <WorkspacePage className="space-y-8">
+        <WorkspacePageHeader title={studio.title} description={studio.intro} />
+        <EmptyState title={instructor.courses.notFoundTitle} description={instructor.courses.notFoundBody} />
+      </WorkspacePage>
+    );
+  }
 
   return (
     <WorkspacePage className="space-y-8">

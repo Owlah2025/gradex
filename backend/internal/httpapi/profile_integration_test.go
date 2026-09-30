@@ -289,6 +289,32 @@ func TestT4InstructorProfilesAndStudentProfile(t *testing.T) {
 		if courses[0].(map[string]any)["instructor_slug"] != "prof-instructor" {
 			t.Fatalf("course instructor slug = %v", courses[0].(map[string]any)["instructor_slug"])
 		}
+		if _, err := env.pool.Exec(ctx, `UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, instructorID); err != nil {
+			t.Fatalf("suspending instructor for public visibility check: %v", err)
+		}
+		status, _ = env.call(t, http.MethodGet, "/api/v1/catalog/instructors/prof-instructor", "", nil)
+		if status != http.StatusNotFound {
+			t.Fatalf("suspended instructor public profile status = %d, want 404", status)
+		}
+		status, raw = env.call(t, http.MethodGet, "/api/v1/catalog/courses?q=Public%20instructor%20course", "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("catalogue search for suspended instructor status = %d; body %s", status, raw)
+		}
+		var suspendedCatalogue struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(raw, &suspendedCatalogue); err != nil {
+			t.Fatalf("decoding catalogue search after suspension: %v", err)
+		}
+		if len(suspendedCatalogue.Items) != 1 {
+			t.Fatalf("suspended instructor catalogue items = %d, want 1", len(suspendedCatalogue.Items))
+		}
+		if _, present := suspendedCatalogue.Items[0]["instructor_slug"]; present {
+			t.Fatalf("suspended instructor slug remained public: %v", suspendedCatalogue.Items[0]["instructor_slug"])
+		}
+		if _, err := env.pool.Exec(ctx, `UPDATE accounts SET status = 'ACTIVE' WHERE id = $1::uuid`, instructorID); err != nil {
+			t.Fatalf("restoring instructor after public visibility check: %v", err)
+		}
 
 		status, raw = env.call(t, http.MethodPut, "/api/v1/me/instructor-profile", env.instructorToken, map[string]any{
 			"revision": 5, "public_slug": "draft-only-slug",

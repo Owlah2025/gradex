@@ -395,7 +395,7 @@ test.describe("UX-H where a session lands", () => {
 
   for (const [role, principal, destination] of [
     ["Instructor", INSTRUCTOR, /\/en\/instructor(\/)?$/],
-    ["Admin", ADMIN, /\/en\/admin\/catalog/],
+    ["Admin", ADMIN, /\/en\/admin(\/)?$/],
   ] as const) {
     test(`an ${role}'s header offers their own workspace and no other`, async ({ browser }) => {
       const context = await browser.newContext({ locale: "en-US" });
@@ -452,7 +452,7 @@ test.describe("UX-H where a session lands", () => {
     // No Student workspace, no Instructor workspace, no Admin workspace — and
     // no anchor carrying no href at all, which is what the guessed destination
     // used to degrade into.
-    for (const invented of ["/en/learn/dashboard", "/en/instructor/courses", "/en/admin/catalog"]) {
+    for (const invented of ["/en/learn/dashboard", "/en/instructor", "/en/admin"]) {
       expect(hrefs, `an unknown role was offered ${invented}`).not.toContain(invented);
     }
     expect(hrefs).not.toContain("");
@@ -609,7 +609,7 @@ test.describe("UX-H academic context across the join", () => {
     const page = await context.newPage();
     await signInStudent(page, studentForJourney(testInfo, 2).email);
 
-    await page.goto("/en/learn/profile");
+    await page.goto("/en/learn/academic-profile/edit");
     await expect(page.getByTestId("academic-profile-form")).toBeVisible();
 
     // The Student frame, so this screen is not a dead end.
@@ -705,7 +705,7 @@ test("the academic profile is accessible in both languages", async ({
       studentForJourney(testInfo, index === 0 ? 2 : 3).email,
       locale,
     );
-    await page.goto(`/${locale}/learn/profile`);
+    await page.goto(`/${locale}/learn/academic-profile/edit`);
     await expect(page.getByTestId("academic-profile-form")).toBeVisible();
     await page.waitForTimeout(800);
     await axeClean(page, `academic profile in ${locale}`);

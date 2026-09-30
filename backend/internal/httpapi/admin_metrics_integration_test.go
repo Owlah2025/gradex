@@ -250,8 +250,8 @@ func TestAdminMetricsReadModelsUseStudentWindowsAndGateInbox(t *testing.T) {
 					t.Fatalf("course review target = %+v, want review route and target id", item)
 				}
 			case "media_processing_failure":
-				if item.Route != "" {
-					t.Fatalf("media failure target = %+v, want no dead-end link", item)
+				if item.Route != "/admin/media/failures" || item.TargetID == "" {
+					t.Fatalf("media failure target = %+v, want failures route and target id", item)
 				}
 			}
 		}

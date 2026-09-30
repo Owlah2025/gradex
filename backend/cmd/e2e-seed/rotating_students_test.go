@@ -72,6 +72,7 @@ import (
 // Landing study-plan discovery adds three isolated slots (42-44), occupying
 // indices 420-449. Slot 42 carries a seeded academic profile; the request and
 // filter journeys keep their own Students so demand state never crosses tests.
+// V2 adds slots 45-47 for dedicated Admin-target and Student journeys.
 //
 // Per-Student consumption stays far inside the production limits rather than near them: at most
 // two playback issuances of the thirty allowed per ten minutes, and at most four Progress writes
@@ -79,9 +80,9 @@ import (
 const (
 	// rotatingStudentPoolSize is the provisioned active pool. It must be at least
 	// rotatingTestSlots * rotatingMaxRepeats.
-	rotatingStudentPoolSize = 450
+	rotatingStudentPoolSize = 480
 	// rotatingTestSlots is the number of registered active-Student test identities.
-	rotatingTestSlots = 45
+	rotatingTestSlots = 48
 	// rotatingMaxRepeats is the greatest `--repeat-each` the pool supports.
 	rotatingMaxRepeats = 10
 

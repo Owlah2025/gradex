@@ -64,7 +64,7 @@ func (h *adminHandlers) listNotes(c *gin.Context) {
 		return
 	}
 	result, err := h.userService.ListNotes(c.Request.Context(), adminread.NoteListRequest{
-		Principal: principal, AccountID: c.Param("accountId"), Limit: limit,
+		Principal: principal, CorrelationID: requestid.FromContext(c.Request.Context()), AccountID: c.Param("accountId"), Limit: limit,
 	})
 	if err != nil {
 		writeAdminUserError(c, err)
@@ -134,7 +134,7 @@ func (h *adminHandlers) listSecurityEvents(c *gin.Context) {
 		return
 	}
 	result, err := h.userService.ListSecurityEvents(c.Request.Context(), adminread.SecurityEventsRequest{
-		Principal: principal, AccountID: c.Param("accountId"), Page: page, Limit: limit,
+		Principal: principal, CorrelationID: requestid.FromContext(c.Request.Context()), AccountID: c.Param("accountId"), Page: page, Limit: limit,
 	})
 	if err != nil {
 		writeAdminUserError(c, err)

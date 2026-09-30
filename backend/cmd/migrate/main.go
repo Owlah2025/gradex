@@ -246,7 +246,7 @@ func schemaRange() error {
 	// The API is the highest required producer in a complete application tier.
 	// This is compiled from the same constants readiness uses; manifests may bind
 	// its output, but must not invent a floor in mutable host configuration.
-	fmt.Printf("%d %d\n", db.DirectPurchaseAccessGrantSchemaVersion, db.MaxSchemaVersion)
+	fmt.Printf("%d %d\n", db.APIRequiredSchemaVersion, db.MaxSchemaVersion)
 	return nil
 }
 

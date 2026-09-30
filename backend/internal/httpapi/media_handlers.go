@@ -46,13 +46,15 @@ type mediaOutOfBandScanBody struct {
 	Reference            string `json:"reference" binding:"required"`
 }
 
-func mountMediaRoutes(v1 *gin.RouterGroup, foundation *MediaFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+func mountMediaRoutes(v1 *gin.RouterGroup, foundation *MediaFoundation, sessionFoundation *SessionFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
 	h := &mediaHandlers{service: foundation.service}
 	content := v1.Group("/media")
 	mountMediaUploadRoutes(content, h, authenticator, principals, logger)
 	mountMediaStatusRoute(content, h, authenticator, principals, logger)
-	mountMediaRetryRoute(content, h, authenticator, principals, logger)
-	mountMediaEnhancementRetryRoute(content, h, authenticator, principals, logger)
+	if sessionFoundation != nil {
+		mountMediaRetryRoute(content, h, sessionFoundation, authenticator, principals, logger)
+		mountMediaEnhancementRetryRoute(content, h, sessionFoundation, authenticator, principals, logger)
+	}
 	mountMediaCatalogueRoutes(content, h, authenticator, principals, logger)
 	if foundation.delivery != nil {
 		mountMediaDeliveryRoutes(content, foundation, authenticator, principals, logger)
@@ -97,9 +99,10 @@ func mountMediaStatusRoute(content *gin.RouterGroup, h *mediaHandlers, authentic
 	status.GET("", h.status)
 }
 
-func mountMediaRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+func mountMediaRetryRoute(content *gin.RouterGroup, h *mediaHandlers, sessionFoundation *SessionFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
 	retry := content.Group("/assets/:id/retries")
 	retry.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapAdminOperations),
 		requireRole(identity.RoleAdmin),
@@ -107,9 +110,10 @@ func mountMediaRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authentica
 	retry.POST("", h.retry)
 }
 
-func mountMediaEnhancementRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+func mountMediaEnhancementRetryRoute(content *gin.RouterGroup, h *mediaHandlers, sessionFoundation *SessionFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
 	retry := content.Group("/assets/:id/retry-enhancements")
 	retry.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapAdminOperations),
 		requireRole(identity.RoleAdmin),

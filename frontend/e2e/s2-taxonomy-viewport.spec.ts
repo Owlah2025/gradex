@@ -15,12 +15,12 @@ const viewports = [
  * saved preference everywhere, so a page addressed `/en/…` renders English and
  * an Arabic assertion has to ask for `/ar/…`.
  *
- * `/instructor` carries no locale segment at all, so it keeps reading
- * the stored preference.
+ * The Instructor builder is addressed at `/{locale}/instructor/courses`, and
+ * the Admin root is the Operator home at `/{locale}/admin`.
  */
 const surfaces = [
-  ["instructor", (_locale: "ar" | "en") => "/instructor"],
-  ["admin", (locale: "ar" | "en") => `/${locale}/admin/catalog`],
+  ["instructor", (locale: "ar" | "en") => `/${locale}/instructor/courses`],
+  ["admin", (locale: "ar" | "en") => `/${locale}/admin`],
 ] as const;
 
 async function mockCatalogAPI(page: Page) {
@@ -50,6 +50,8 @@ async function mockCatalogAPI(page: Page) {
   );
   await page.route("**/api/v1/taxonomy/terms", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/admin/review/queue", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/admin/metrics/overview", (route) => route.fulfill({ json: { metrics: [], as_of: new Date().toISOString() } }));
+  await page.route("**/api/v1/admin/inbox", (route) => route.fulfill({ json: { sections: [] } }));
 }
 
 // The instructor anchor moved from the standalone price panel, which was removed, to the
@@ -61,8 +63,8 @@ function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | 
       : ["Course Authoring Studio", "Your courses", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["مراجعة المقررات وإدارتها", "مفردات الكتالوج", "التخصصات والمواد"]
-    : ["Course review & administration", "Catalogue vocabulary", "Majors and subjects"];
+    ? ["الصفحة التشغيلية", "يحتاج إلى انتباه", "نظرة سريعة"]
+    : ["Operator home", "Needs attention", "At a glance"];
 }
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {

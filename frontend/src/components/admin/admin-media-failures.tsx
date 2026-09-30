@@ -84,7 +84,7 @@ export function AdminMediaFailures() {
       <ul className="mt-6 space-y-3 md:hidden" aria-label={copy.title}>{visible.map((item) => <li key={item.asset_version_id}><FailureCard item={item} copy={copy} locale={locale} onRetry={setPending} /></li>)}</ul>
     </> : null}
     {state === "ready" && result ? <nav className="mt-6 flex items-center justify-between gap-3" aria-label={copy.pagination}><Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{copy.previous}</Button><span className="text-sm font-semibold text-muted-foreground">{copy.page} {page}</span><Button type="button" variant="outline" size="sm" disabled={!result.has_more} onClick={() => setPage((value) => value + 1)}>{copy.next}</Button></nav> : null}
-    <ConfirmDialog open={pending !== null} onOpenChange={(open) => { if (!busy && !open) setPending(null); }} title={copy.confirmTitle} body={pending?.retry_action === "retry-enhancements" ? copy.confirmEnhancements : copy.confirmRetry} confirmLabel={copy.confirm} cancelLabel={copy.cancel} busy={busy} onConfirm={() => void runRetry()} testID="admin-media-failure-confirm" />
+    <ConfirmDialog open={pending !== null} onOpenChange={(open) => { if (!busy && !open) { setPending(null); setNotice(null); } }} title={copy.confirmTitle} body={pending?.retry_action === "retry-enhancements" ? copy.confirmEnhancements : copy.confirmRetry} confirmLabel={copy.confirm} cancelLabel={copy.cancel} busy={busy} error={notice?.tone === "error" ? notice.message : undefined} onConfirm={() => void runRetry()} testID="admin-media-failure-confirm" />
   </WorkspacePage>;
 }
 

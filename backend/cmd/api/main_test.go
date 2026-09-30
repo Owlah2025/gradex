@@ -568,6 +568,28 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/revocations"},
 		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/cooldown-resets"},
 	}
+	requiredOperationsRoutes := []struct {
+		method string
+		path   string
+	}{
+		{method: "GET", path: "/api/v1/admin/accounts/:accountId/notes"},
+		{method: "GET", path: "/api/v1/admin/accounts/:accountId/security-events"},
+		{method: "GET", path: "/api/v1/admin/accounts/:accountId/course-options"},
+		{method: "GET", path: "/api/v1/admin/accounts/:accountId/access-diagnostics"},
+		{method: "POST", path: "/api/v1/admin/accounts/:accountId/notes"},
+		{method: "POST", path: "/api/v1/admin/accounts/:accountId/session-revocations"},
+		{method: "GET", path: "/api/v1/me/instructor-profile"},
+		{method: "PUT", path: "/api/v1/me/instructor-profile"},
+		{method: "POST", path: "/api/v1/me/instructor-profile/submission"},
+		{method: "GET", path: "/api/v1/me/profile"},
+		{method: "PUT", path: "/api/v1/me/profile"},
+		{method: "GET", path: "/api/v1/admin/instructor-profiles"},
+		{method: "GET", path: "/api/v1/admin/instructor-profiles/:accountId"},
+		{method: "POST", path: "/api/v1/admin/instructor-profiles/:accountId/approve"},
+		{method: "POST", path: "/api/v1/admin/instructor-profiles/:accountId/request-changes"},
+		{method: "POST", path: "/api/v1/admin/instructor-profiles/:accountId/hide"},
+		{method: "POST", path: "/api/v1/media/assets/:id/retry-enhancements"},
+	}
 
 	// D-109 retired the interactive device-admission surface. A successful
 	// password login from a new browser trusts its credential in the same
@@ -675,6 +697,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 			t.Fatalf("production router is missing device mutation route %s %s", route.method, route.path)
 		}
 	}
+	for _, route := range requiredOperationsRoutes {
+		if !mounted[route.method+" "+route.path] {
+			t.Fatalf("production router is missing operations route %s %s", route.method, route.path)
+		}
+	}
 	for _, route := range retiredDeviceAdmissionRoutes {
 		if mounted[route.method+" "+route.path] {
 			t.Fatalf("D-109 retired device admission route %s %s is mounted again", route.method, route.path)
@@ -728,6 +755,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		method string
 		path   string
 	}{}, requiredD5Routes...), requiredDeviceMutationRoutes...)
+	for _, route := range requiredOperationsRoutes {
+		if route.method != http.MethodGet {
+			mutationSecurityRoutes = append(mutationSecurityRoutes, route)
+		}
+	}
 	for _, route := range mutationSecurityRoutes {
 		if route.method == http.MethodGet {
 			continue
@@ -774,8 +806,8 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 // The earlier floor of 38 (subject_demand_signals, D-106) and 43 (AUTO_REPLACED
 // device rotation) are both still covered, because the floor only rises.
 func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
-	if got := requiredSchemaVersion(nil); got != db.CatalogSearchAnalyticsSchemaVersion {
-		t.Fatalf("required schema = %d, want %d", got, db.CatalogSearchAnalyticsSchemaVersion)
+	if got := requiredSchemaVersion(nil); got != db.APIRequiredSchemaVersion {
+		t.Fatalf("required schema = %d, want %d", got, db.APIRequiredSchemaVersion)
 	}
 	// The floor must never exceed what this build can serve, or readiness would
 	// be unsatisfiable at every version.
@@ -830,7 +862,7 @@ func TestSchemaFloorRefusesSchema52AndAcceptsSchema53(t *testing.T) {
 		t.Fatalf("schema 52 readiness = %v, want ErrSchemaIncompatible; T7 routes require the schema-53 analytics table", err)
 	}
 
-	if err := m.Migrate(uint(db.CatalogSearchAnalyticsSchemaVersion)); err != nil {
+	if err := m.Migrate(uint(db.APIRequiredSchemaVersion)); err != nil {
 		t.Fatalf("staging schema 53: %v", err)
 	}
 	if err := db.CheckSchemaAtLeast(poolCtx, pool, floor); err != nil {

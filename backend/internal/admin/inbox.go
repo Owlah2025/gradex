@@ -136,9 +136,10 @@ func (r *Repository) queryMediaFailureInbox(ctx context.Context, request InboxRe
 			ORDER BY cr.revision_number DESC
 			LIMIT 1
 		) latest ON TRUE
-		WHERE mav.state = 'PROCESS_FAILED' AND ma.retired_at IS NULL
+		LEFT JOIN media_auto_enhancement_recovery recovery ON recovery.asset_version_id = mav.id
+		WHERE ma.retired_at IS NULL AND (`+mediaFailureWhere("")+`)
 		ORDER BY mav.created_at ASC, mav.id ASC
-		LIMIT $1`, request.Limit, "media_processing_failure", "", request.Locale)
+		LIMIT $1`, request.Limit, "media_processing_failure", "/admin/media/failures", request.Locale)
 }
 
 func (r *Repository) queryReportInbox(ctx context.Context, request InboxRequest) (InboxSection, error) {

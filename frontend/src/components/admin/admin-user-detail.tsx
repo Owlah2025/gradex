@@ -33,6 +33,7 @@ import { describeApiError } from "@/lib/api/api-error";
 import { ProblemError } from "@/lib/api/problem";
 import { formatDate, formatDateTime } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { ErrorState } from "@/components/common/error-state";
 import { EmptyState } from "@/components/common/empty-state";
 import { LoadingState } from "@/components/common/loading-state";
@@ -67,6 +68,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   const [expiryDate, setExpiryDate] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<React.ReactNode>(null);
   const [courseOptions, setCourseOptions] = React.useState<AdminCourseOption[]>([]);
   const [selectedCourse, setSelectedCourse] = React.useState("");
   const [diagnostic, setDiagnostic] = React.useState<AccessDiagnostic | null>(null);
@@ -118,9 +120,14 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   const runAction = async () => {
     if (!pending || !model || busy) return;
     const action = pending;
-    const csrf = currentCSRFToken() ?? undefined;
+    const csrf = currentCSRFToken();
+    if (!csrf) {
+      setActionError(<><span>{copy.sessionEnded}</span> <Link className="underline" href={withReturnTo("/login", `/${locale}/admin/users/${accountID}`)}>{copy.signInAgain}</Link></>);
+      return;
+    }
     setBusy(true);
     setNotice(null);
+    setActionError(null);
     try {
       switch (action.kind) {
         case "suspend":
@@ -159,15 +166,15 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
           }
           break;
         case "device":
-          if (action.deviceID) await revokeAdminDevice(accountID, action.deviceID, locale, csrf ?? "");
+          if (action.deviceID) await revokeAdminDevice(accountID, action.deviceID, locale, csrf);
           await refreshDevices();
           break;
         case "devices":
-          await revokeAllAdminDevices(accountID, locale, csrf ?? "");
+          await revokeAllAdminDevices(accountID, locale, csrf);
           await refreshDevices();
           break;
         case "cooldown":
-          await resetAdminDeviceCooldown(accountID, locale, csrf ?? "");
+          await resetAdminDeviceCooldown(accountID, locale, csrf);
           await refreshDevices();
           break;
       }
@@ -176,7 +183,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
       setReason("");
       setExpiryDate("");
     } catch (cause) {
-      setNotice(isRecentAuthRequired(cause) ? copy.recentAuth : describeApiError(cause, locale));
+      setActionError(isRecentAuthRequired(cause) ? <><span>{copy.recentAuth}</span> <Link className="underline" href={withReturnTo("/login", `/${locale}/admin/users/${accountID}`)}>{copy.signInAgain}</Link></> : describeApiError(cause, locale));
     } finally {
       setBusy(false);
     }
@@ -205,7 +212,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   const visibleTabs: Tab[] = account.role === "STUDENT" ? tabs : account.role === "INSTRUCTOR" ? ["overview", "notes", "audit"] : ["overview"];
   return <WorkspacePage testID="admin-user-detail-page">
     <WorkspacePageHeader title={account.display_name} description={copy.description} breadcrumb={<Button asChild variant="ghost" size="sm"><Link href={`/${locale}/admin/users`}>{copy.backToUsers}</Link></Button>} status={<><StatusBadge tone={account.status === "ACTIVE" ? "success" : account.status === "SUSPENDED" ? "accent" : "neutral"} label={copy.status[account.status]} detail={copy.roles[account.role]} /><span className="text-sm text-muted-foreground"><bdi>{account.email}</bdi></span></>} actions={<ActionBar account={account} copy={copy} onAction={(kind) => { setReason(""); if (kind === "grant") setActiveTab("access"); setPending({ kind }); }} />} />
-    {notice ? <div className="mt-4"><Alert tone="info" title={notice}>{notice === copy.recentAuth ? <Link className="underline" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/admin/users/${accountID}`)}`}>{copy.signInAgain}</Link> : undefined}</Alert></div> : null}
+    {notice ? <div className="mt-4"><Alert tone="info" title={notice} /></div> : null}
     <nav className="mt-6" aria-label={copy.sectionsLabel}>
       <label className="sr-only" htmlFor="admin-user-tab-select">{copy.sectionsLabel}</label>
       <Select id="admin-user-tab-select" className="md:hidden" value={activeTab} onChange={(event) => setActiveTab(event.target.value as Tab)}>{visibleTabs.map((tab) => <option key={tab} value={tab}>{copy.tabs[tab]}</option>)}</Select>
@@ -220,7 +227,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
         {student ? <TabsContent value="diagnostic"><DiagnosticPanel copy={copy} locale={locale} options={courseOptions} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} diagnostic={diagnostic} state={diagnosticState} onDiagnose={async () => { if (!selectedCourse) return; setDiagnosticState("loading"); try { setDiagnostic(await diagnoseAdminAccess(accountID, selectedCourse, locale)); setDiagnosticState("idle"); } catch { setDiagnosticState("failed"); } }} /></TabsContent> : null}
       </Tabs>
     </nav>
-    {pending ? <ActionDialog pending={pending} copy={copy} courseOptions={courseOptions} reason={reason} expiryDate={expiryDate} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} onReason={setReason} onExpiryDate={setExpiryDate} onClose={() => { if (!busy) setPending(null); }} busy={busy} onConfirm={() => void runAction()} /> : null}
+    {pending ? <ActionDialog pending={pending} copy={copy} courseOptions={courseOptions} reason={reason} expiryDate={expiryDate} selectedCourse={selectedCourse} actionError={actionError} onCourseChange={setSelectedCourse} onReason={setReason} onExpiryDate={setExpiryDate} onClose={() => { if (!busy) { setPending(null); setActionError(null); } }} busy={busy} onConfirm={() => void runAction()} /> : null}
   </WorkspacePage>;
 }
 
@@ -386,9 +393,9 @@ function requiresReason(kind: Action): boolean {
   return kind !== "device" && kind !== "devices" && kind !== "cooldown";
 }
 
-function ActionDialog({ pending, copy, courseOptions, reason, expiryDate, selectedCourse, onCourseChange, onReason, onExpiryDate, onClose, busy, onConfirm }: { pending: PendingAction; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; courseOptions: AdminCourseOption[]; reason: string; expiryDate: string; selectedCourse: string; onCourseChange: (value: string) => void; onReason: (value: string) => void; onExpiryDate: (value: string) => void; onClose: () => void; busy: boolean; onConfirm: () => void }) {
+function ActionDialog({ pending, copy, courseOptions, reason, expiryDate, selectedCourse, actionError, onCourseChange, onReason, onExpiryDate, onClose, busy, onConfirm }: { pending: PendingAction; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; courseOptions: AdminCourseOption[]; reason: string; expiryDate: string; selectedCourse: string; actionError: React.ReactNode; onCourseChange: (value: string) => void; onReason: (value: string) => void; onExpiryDate: (value: string) => void; onClose: () => void; busy: boolean; onConfirm: () => void }) {
   const needsReason = requiresReason(pending.kind);
-  return <ConfirmDialog open onOpenChange={(open) => { if (!open) onClose(); }} title={copy.actionTitles[pending.kind]} body={copy.actionBodies[pending.kind]} confirmLabel={copy.confirm} cancelLabel={copy.cancel} busy={busy} confirmDisabled={(needsReason && !reason.trim()) || (pending.kind === "grant" && !selectedCourse) || (pending.kind === "expiry" && !expiryDate)} onConfirm={onConfirm} testID="admin-user-action-dialog"><div className="space-y-3">{pending.kind === "grant" ? <Field label={copy.courseIdLabel} htmlFor="admin-user-action-course"><Select id="admin-user-action-course" value={selectedCourse} onChange={(event) => onCourseChange(event.target.value)}><option value="">{copy.courseIdPlaceholder}</option>{courseOptions.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</Select></Field> : null}{needsReason ? <Field label={copy.reasonLabel} htmlFor="admin-user-action-reason"><Input id="admin-user-action-reason" value={reason} onChange={(event) => onReason(event.target.value)} autoComplete="off" /></Field> : <p className="text-sm text-muted-foreground">{copy.reasonNotRecorded}</p>}{pending.kind === "expiry" ? <Field label={copy.newExpiry} htmlFor="admin-user-action-expiry"><Input id="admin-user-action-expiry" type="date" value={expiryDate} onChange={(event) => onExpiryDate(event.target.value)} /></Field> : null}</div></ConfirmDialog>;
+  return <ConfirmDialog open onOpenChange={(open) => { if (!open) onClose(); }} title={copy.actionTitles[pending.kind]} body={copy.actionBodies[pending.kind]} confirmLabel={copy.confirm} cancelLabel={copy.cancel} busy={busy} error={actionError} confirmDisabled={(needsReason && !reason.trim()) || (pending.kind === "grant" && !selectedCourse) || (pending.kind === "expiry" && !expiryDate)} onConfirm={onConfirm} testID="admin-user-action-dialog"><div className="space-y-3">{pending.kind === "grant" ? <Field label={copy.courseIdLabel} htmlFor="admin-user-action-course"><Select id="admin-user-action-course" value={selectedCourse} onChange={(event) => onCourseChange(event.target.value)}><option value="">{copy.courseIdPlaceholder}</option>{courseOptions.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</Select></Field> : null}{needsReason ? <Field label={copy.reasonLabel} htmlFor="admin-user-action-reason"><Input id="admin-user-action-reason" value={reason} onChange={(event) => onReason(event.target.value)} autoComplete="off" /></Field> : <p className="text-sm text-muted-foreground">{copy.reasonNotRecorded}</p>}{pending.kind === "expiry" ? <Field label={copy.newExpiry} htmlFor="admin-user-action-expiry"><Input id="admin-user-action-expiry" type="date" value={expiryDate} onChange={(event) => onExpiryDate(event.target.value)} /></Field> : null}</div></ConfirmDialog>;
 }
 
 function IdentityFact({ label, value, direction }: { label: string; value: string; direction?: "ltr" }) { return <div><dt className="text-sm font-semibold text-muted-foreground">{label}</dt><dd className="mt-1 font-medium text-foreground" dir={direction}><bdi>{value}</bdi></dd></div>; }

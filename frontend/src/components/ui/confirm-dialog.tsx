@@ -32,6 +32,7 @@ export function ConfirmDialog({
   onConfirm,
   testID,
   children,
+  error,
   confirmDisabled = false,
 }: {
   open: boolean;
@@ -45,6 +46,8 @@ export function ConfirmDialog({
   tone?: "destructive" | "default";
   onConfirm: () => void;
   testID?: string;
+  /** A failed action's recovery message, kept inside the modal that owns the action. */
+  error?: React.ReactNode;
   /**
    * Something the confirmation itself needs to collect — a required reason, a typed acknowledgement.
    *
@@ -107,6 +110,7 @@ export function ConfirmDialog({
           >
             {body}
           </DialogPrimitive.Description>
+          {error ? <div role="alert" className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</div> : null}
           {children ? <div className="mt-4">{children}</div> : null}
           <div className="mt-6 flex flex-wrap justify-end gap-2">
             {/* Cancel is first in the DOM so it takes initial focus. */}

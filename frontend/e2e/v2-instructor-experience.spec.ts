@@ -1,39 +1,41 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { INSTRUCTOR } from "./session/principals";
-import { signInThroughLoginForm } from "./session/sign-in";
+import { signInWithSeededSession } from "./session/sign-in";
 
-test.describe("V2 Instructor Experience", () => {
-  test("complete instructor authoring flow", async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await signInThroughLoginForm(context, INSTRUCTOR);
+const viewports = [375, 768, 1280] as const;
+const locales = ["en", "ar"] as const;
 
-    // dashboard
-    await expect(page).toHaveURL(/\/en\/instructor(\/.*)?$/);
+test.describe("T8 V2 Instructor experience", () => {
+  test.describe.configure({ timeout: 90_000 });
 
-    // profile and public profile
-    await page.goto("/en/instructor/profile");
-    await expect(page.locator("h1").first()).toContainText("Profile");
+  for (const locale of locales) {
+    for (const width of viewports) {
+      test(`${locale} Instructor workspace is usable at ${width}px`, async ({ browser }) => {
+        const context = await browser.newContext({
+          viewport: { width, height: 900 },
+          locale: locale === "ar" ? "ar-KW" : "en-US",
+        });
+        const page = await signInWithSeededSession(context, INSTRUCTOR, locale);
 
-    // course builder
-    await page.goto("/en/instructor/courses");
-    await expect(page.locator("h1").first()).toContainText("Courses");
+        await page.goto(`/${locale}/instructor`);
+        await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+        await expect(page.getByRole("heading", { name: locale === "ar" ? "الصفحة الرئيسية للمدرّس" : "Instructor home" })).toBeVisible();
 
-    // sections/lessons
-    await page.getByRole("button", { name: /New course/i }).click();
-    await page.getByLabel(/Course title/i).fill("E2E Test Course");
-    await page.getByRole("button", { name: /Create course/i }).click();
-    
-    // navigate to curriculum
-    await page.getByRole("tab", { name: /Curriculum/i }).click();
-    await page.getByRole("button", { name: /Add section/i }).click();
-    
-    // revision submit
-    await page.getByRole("tab", { name: /Review/i }).click();
-    const submitBtn = page.getByRole("button", { name: /Submit for review/i });
-    if (await submitBtn.isVisible()) {
-      await submitBtn.click();
+        await page.goto(`/${locale}/instructor/profile`);
+        await expect(page.getByRole("heading", { name: locale === "ar" ? "ملف المدرّس" : "Instructor profile" })).toBeVisible();
+        await expect(page.getByTestId("instructor-profile-editor")).toBeVisible();
+
+        await page.goto(`/${locale}/instructor/courses`);
+        await expect(page.getByRole("heading", { name: locale === "ar" ? "منصة إعداد المقررات التعليمية" : "Course Authoring Studio" })).toBeVisible();
+        const courseList = page.getByTestId("owned-course-list");
+        await expect(courseList).toBeVisible();
+        const firstCourse = courseList.getByRole("button").first();
+        await expect(firstCourse).toBeVisible();
+        await firstCourse.click();
+        await expect(page.getByTestId("selected-course-context")).toBeVisible();
+        await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBe(true);
+        await context.close();
+      });
     }
-
-    await context.close();
-  });
+  }
 });

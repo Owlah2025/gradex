@@ -266,6 +266,7 @@ func (r *Repository) Published(ctx context.Context, slug string) (*PublicSnapsho
 		  AND p.published_slug = $1
 		  AND p.public_visible
 		  AND a.role = 'INSTRUCTOR'
+		  AND a.status = 'ACTIVE'
 		  AND p.published_snapshot IS NOT NULL
 	`, slug).Scan(&raw, &accountID)
 	if errors.Is(err, pgx.ErrNoRows) {
