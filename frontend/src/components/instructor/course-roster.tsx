@@ -38,6 +38,12 @@ type CourseRosterLabels = {
   joined: string;
   accessStarted: string;
   accessUntil: string;
+  progress: string;
+  completed: string;
+  completedOn: string;
+  lastActivity: string;
+  yes: string;
+  no: string;
   unavailableDate: string;
   previous: string;
   next: string;
@@ -45,12 +51,23 @@ type CourseRosterLabels = {
   statuses: Record<CourseRosterAccessStatus, string>;
 };
 
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 8;
 
 function RosterDate({ value, locale, fallback }: { value?: string; locale: "ar" | "en"; fallback: string }) {
   if (!value) return <span>{fallback}</span>;
   const formatted = formatLearningExpiry(value, locale);
   return formatted ? <time dateTime={formatted.dateTime}>{formatted.text}</time> : <span>{fallback}</span>;
+}
+
+function RosterProgress({ value }: { value: number }) {
+  return (
+    <span className="inline-flex min-w-16 items-center gap-2" aria-label={`${value}%`}>
+      <span className="h-1.5 w-12 overflow-hidden rounded-pill bg-muted" aria-hidden>
+        <span className="block h-full rounded-pill bg-primary" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </span>
+      <span className="tabular-nums">{value}%</span>
+    </span>
+  );
 }
 
 function RosterTableHead({ labels }: { labels: CourseRosterLabels }) {
@@ -62,6 +79,9 @@ function RosterTableHead({ labels }: { labels: CourseRosterLabels }) {
         <TableHeaderCell scope="col">{labels.joined}</TableHeaderCell>
         <TableHeaderCell scope="col">{labels.accessStarted}</TableHeaderCell>
         <TableHeaderCell scope="col">{labels.accessUntil}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.progress}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.completed}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.lastActivity}</TableHeaderCell>
       </TableRow>
     </TableHead>
   );
@@ -92,6 +112,14 @@ function CourseRosterTable({ roster, locale, labels }: { roster: CourseRosterPag
               </TableCell>
               <TableCell className="whitespace-nowrap text-muted-foreground">
                 <RosterDate value={student.access_ends_at} locale={locale} fallback={labels.unavailableDate} />
+              </TableCell>
+              <TableCell className="whitespace-nowrap"><RosterProgress value={student.progress_percent} /></TableCell>
+              <TableCell className="whitespace-nowrap">
+                <span>{student.completed ? labels.yes : labels.no}</span>
+                {student.completed_at ? <span className="ms-2 text-xs text-muted-foreground"><RosterDate value={student.completed_at} locale={locale} fallback={labels.unavailableDate} /></span> : null}
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                <RosterDate value={student.last_learning_activity} locale={locale} fallback={labels.unavailableDate} />
               </TableCell>
             </TableRow>
           ))}

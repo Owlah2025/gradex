@@ -186,6 +186,10 @@ export type CourseRosterEntry = {
   enrolled_at: string;
   access_started_at?: string;
   access_ends_at?: string;
+  progress_percent: number;
+  completed: boolean;
+  completed_at?: string;
+  last_learning_activity?: string;
 };
 
 export type CourseRosterPage = {

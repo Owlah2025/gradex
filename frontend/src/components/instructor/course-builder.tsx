@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
 import type { AcademicSubjectSelection } from "./academic-subject-picker";
@@ -78,7 +79,7 @@ const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
 
 import { CourseThumbnailUpload } from "./course-thumbnail-upload";
 
-export function CourseBuilder() {
+export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } = {}) {
   const { locale, t } = useLocale();
 
   const [courses, setCourses] = useState<CourseWire[]>([]);
@@ -176,7 +177,7 @@ export function CourseBuilder() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    loadCourses()
+    loadCourses(initialCourseID)
       .catch((cause: unknown) => {
         if (!cancelled) setError(describeApiError(cause, locale));
       })
@@ -186,7 +187,7 @@ export function CourseBuilder() {
     return () => {
       cancelled = true;
     };
-  }, [loadCourses, locale]);
+  }, [loadCourses, locale, initialCourseID]);
 
   // The revision editor mirrors the selected server revision. It is reset from
   // the server on every selection change so an abandoned edit cannot leak into
@@ -790,6 +791,16 @@ export function CourseBuilder() {
                 <bdi>{courseTitle(selectedCourse)}</bdi>
               </h2>
               <div className="flex flex-wrap items-center gap-2">
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/${locale}/instructor/courses/${encodeURIComponent(selectedCourse.id)}/analytics`}>
+                    {instructor.dashboard.analytics}
+                  </Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/${locale}/instructor/courses/${encodeURIComponent(selectedCourse.id)}/announcements`}>
+                    {instructor.dashboard.announcements}
+                  </Link>
+                </Button>
                 <Button
                   type="button"
                   variant="outline"

@@ -89,6 +89,14 @@ export type CourseHomeSection = {
   lessons: CourseHomeLesson[];
 };
 
+export type CourseAnnouncement = {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  published_at: string;
+};
+
 /**
  * An opaque, server-encrypted report context (D-065).
  *

@@ -14,7 +14,8 @@ import {
   courseIsStarted,
   resumeLessonID,
 } from "@/components/learning/curriculum-model";
-import { requestCourseHomeServer } from "@/lib/api/learning-server";
+import { requestCourseAnnouncementsServer, requestCourseHomeServer } from "@/lib/api/learning-server";
+import type { CourseAnnouncement } from "@/lib/api/learning";
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { LearningShell } from "@/components/learning/learning-shell";
@@ -52,6 +53,13 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
   const Backward = locale === "ar" ? ArrowRight : ArrowLeft;
   try {
     const course = await requestCourseHomeServer(courseId, locale);
+    let announcements: CourseAnnouncement[] = [];
+    let announcementsFailed = false;
+    try {
+      announcements = await requestCourseAnnouncementsServer(courseId, locale);
+    } catch {
+      announcementsFailed = true;
+    }
     const sections = courseCurriculum(course.sections);
     // The one way into the learning experience from here. There is no second player on this page:
     // the Lesson route is the canonical addressable surface and this control simply chooses which
@@ -131,6 +139,33 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
               ) : null}
             </div>
           </header>
+
+          <section aria-labelledby="course-announcements-title" className="mt-6 rounded-lg border border-border bg-muted/25 p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 id="course-announcements-title" className="font-display text-lg font-bold text-foreground">
+                {dictionary.learning.announcementsTitle}
+              </h2>
+            </div>
+            {announcementsFailed ? (
+              <p role="alert" className="mt-3 text-sm leading-6 text-destructive">{dictionary.learning.announcementsLoadFailed}</p>
+            ) : announcements.length === 0 ? (
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">{dictionary.learning.announcementsEmpty}</p>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {announcements.map((announcement) => (
+                  <article key={announcement.id} className="border-t border-border/70 pt-4 first:border-t-0 first:pt-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h3 className="font-display font-bold text-foreground">{announcement.title}</h3>
+                      <time className="text-xs text-muted-foreground" dateTime={announcement.published_at}>
+                        {new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en", { dateStyle: "medium" }).format(new Date(announcement.published_at))}
+                      </time>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-foreground">{announcement.body}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
           {/* One control, above the contents, so a Student returning to a Course does not have to
               find their place in a forty-Lesson list to carry on. It is a link to the canonical
