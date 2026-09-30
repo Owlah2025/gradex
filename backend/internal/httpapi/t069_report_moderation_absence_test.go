@@ -33,6 +33,7 @@ var acceptedS5Routes = map[string]string{
 	"GET /api/v1/learn/dashboard":                           "Dashboard read (T023)",
 	"GET /api/v1/learn/history":                             "Durable learning history read (T5)",
 	"GET /api/v1/learn/courses/:courseId":                   "Course Home read (T024)",
+	"GET /api/v1/learn/courses/:courseId/announcements":     "Entitled Course announcements read (T6)",
 	"GET /api/v1/learn/courses/:courseId/lessons/:lessonId": "Lesson read (T025)",
 	"POST /api/v1/learn/lessons/:lessonId/playback":         "playback issuance (T026)",
 	"PUT /api/v1/learn/lessons/:lessonId/progress":          "Progress write (T031)",

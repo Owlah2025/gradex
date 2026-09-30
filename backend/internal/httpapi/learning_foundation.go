@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/entitlement"
 	"github.com/Owlah2025/gradex/backend/internal/learning"
 	"github.com/Owlah2025/gradex/backend/internal/media"
@@ -60,6 +61,10 @@ type learningMedia interface {
 	MaterialKinds(context.Context, []string) (map[string][]media.Material, error)
 }
 
+type learningAnnouncementReader interface {
+	ListPublishedCourseAnnouncements(context.Context, string) ([]catalog.Announcement, error)
+}
+
 // reportContextIssuer mints and verifies the encrypted report context that binds a report to the
 // exact content instance a response rendered (D-065). It is mandatory for protected learning: a
 // read that cannot produce a context would render content the Student is unable to report
@@ -81,15 +86,16 @@ type LearningReportContextIssuer = reportContextIssuer
 type LearningMedia = learningMedia
 
 type LearningFoundation struct {
-	repository     learningRepository
-	readRepository learningReadRepository
-	evaluator      learningEvaluator
-	readEvaluator  learningReadEvaluator
-	media          learningMedia
-	reportContexts reportContextIssuer
-	limiter        *ratelimit.Limiter
-	policies       map[string]ratelimit.Policy
-	now            func() time.Time
+	repository         learningRepository
+	readRepository     learningReadRepository
+	evaluator          learningEvaluator
+	readEvaluator      learningReadEvaluator
+	media              learningMedia
+	announcementReader learningAnnouncementReader
+	reportContexts     reportContextIssuer
+	limiter            *ratelimit.Limiter
+	policies           map[string]ratelimit.Policy
+	now                func() time.Time
 
 	// beforeProgressMutation is an unexported deterministic integration-test
 	// seam. Production composition leaves it nil; it makes the authorization to
@@ -103,6 +109,7 @@ type LearningFoundationOptions struct {
 	Media      learningMedia
 	// ReportContexts mints exact-visible report contexts. Required; see reportContextIssuer.
 	ReportContexts reportContextIssuer
+	Announcements  learningAnnouncementReader
 	Limiter        *ratelimit.Limiter
 	Policies       map[string]ratelimit.Policy
 	// Now supplies the server-authoritative clock used for each request-time
@@ -117,15 +124,16 @@ func NewLearningFoundation(options LearningFoundationOptions) (*LearningFoundati
 		now = time.Now
 	}
 	foundation := &LearningFoundation{
-		repository:     options.Repository,
-		readRepository: readRepository(options.Repository),
-		evaluator:      options.Evaluator,
-		readEvaluator:  readEvaluator(options.Evaluator),
-		media:          options.Media,
-		reportContexts: options.ReportContexts,
-		limiter:        options.Limiter,
-		policies:       cloneLearningPolicies(options.Policies),
-		now:            now,
+		repository:         options.Repository,
+		readRepository:     readRepository(options.Repository),
+		evaluator:          options.Evaluator,
+		readEvaluator:      readEvaluator(options.Evaluator),
+		media:              options.Media,
+		announcementReader: options.Announcements,
+		reportContexts:     options.ReportContexts,
+		limiter:            options.Limiter,
+		policies:           cloneLearningPolicies(options.Policies),
+		now:                now,
 	}
 	if err := foundation.validate(); err != nil {
 		return nil, err

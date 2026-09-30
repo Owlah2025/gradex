@@ -135,6 +135,7 @@ var (
 	adminUser360Tables       = []string{"admin_notes"}
 	instructorProfileTables  = []string{"instructor_profiles", "instructor_profile_expertise"}
 	courseCompletionTables   = []string{"course_completions"}
+	courseAnnouncementTables = []string{"course_announcements"}
 )
 
 func allTables() []string {
@@ -155,7 +156,8 @@ func allTables() []string {
 	all = append(all, subjectDemandTables...)
 	all = append(all, adminUser360Tables...)
 	all = append(all, instructorProfileTables...)
-	return append(all, courseCompletionTables...)
+	all = append(all, courseCompletionTables...)
+	return append(all, courseAnnouncementTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -786,9 +788,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("course completions schema = %d, want one past instructor profiles %d",
 			CourseCompletionsSchemaVersion, InstructorProfilesSchemaVersion)
 	}
-	if MaxSchemaVersion != CourseCompletionsSchemaVersion {
+	if CourseAnnouncementsSchemaVersion != CourseCompletionsSchemaVersion+1 {
+		t.Fatalf("course announcements schema = %d, want one past course completions %d",
+			CourseAnnouncementsSchemaVersion, CourseCompletionsSchemaVersion)
+	}
+	if MaxSchemaVersion != CourseAnnouncementsSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, CourseCompletionsSchemaVersion)
+			MaxSchemaVersion, CourseAnnouncementsSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -834,6 +840,66 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
 			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
 	}
+}
+
+func TestCourseAnnouncementsMigrationEnforcesShapeAndImmutability(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating course announcements schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+
+	const (
+		instructorID = "10000000-0000-0000-0000-000000000961"
+		adminID      = "10000000-0000-0000-0000-000000000962"
+		courseID     = "10000000-0000-0000-0000-000000000963"
+		revisionID   = "10000000-0000-0000-0000-000000000964"
+	)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES
+			($1::uuid, 'announcement-instructor@example.test', 'announcement-instructor@example.test', 'INSTRUCTOR', 'ACTIVE', 'Announcement Instructor'),
+			($2::uuid, 'announcement-admin@example.test', 'announcement-admin@example.test', 'ADMIN', 'ACTIVE', 'Announcement Admin')
+	`, instructorID, adminID); err != nil {
+		t.Fatalf("seeding announcement accounts: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle, live_revision_id)
+		VALUES ($1::uuid, $2::uuid, 'DRAFT', NULL)
+	`, courseID, instructorID); err != nil {
+		t.Fatalf("seeding announcement course: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+		VALUES ($1::uuid, $2::uuid, 'APPROVED', 1, 'إعلان', 'Announcement')
+	`, revisionID, courseID); err != nil {
+		t.Fatalf("seeding announcement revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $2::uuid WHERE id = $1::uuid
+	`, courseID, revisionID); err != nil {
+		t.Fatalf("publishing announcement course: %v", err)
+	}
+	var announcementID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_announcements (course_id, author_account_id, title, body)
+		VALUES ($1::uuid, $2::uuid, 'First announcement', 'Course materials are ready.')
+		RETURNING id::text
+	`, courseID, instructorID).Scan(&announcementID); err != nil {
+		t.Fatalf("inserting announcement: %v", err)
+	}
+	assertConstraintViolation(t, pool, ctx, "course_announcements_title_non_empty", `
+		INSERT INTO course_announcements (course_id, author_account_id, title, body)
+		VALUES ($1::uuid, $2::uuid, repeat('x', 141), 'body')
+	`, courseID, instructorID)
+	assertStatementFails(t, pool, ctx, `
+		UPDATE course_announcements SET body = 'edited' WHERE id = $1::uuid
+	`, announcementID)
+	assertStatementFails(t, pool, ctx, `
+		DELETE FROM course_announcements WHERE id = $1::uuid
+	`, announcementID)
 }
 
 func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
@@ -897,15 +963,16 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 		t.Fatal("published instructor profile without a snapshot was accepted")
 	}
 
-	// Course completions is the newer migration, so step back twice to test the
-	// instructor-profile boundary itself rather than only the newest down file.
-	if err := m.Steps(-2); err != nil {
+	// Course completions and announcements are newer migrations, so step back
+	// three times to test the instructor-profile boundary itself rather than only
+	// the newest down file.
+	if err := m.Steps(-3); err != nil {
 		t.Fatalf("rolling back instructor profile schema: %v", err)
 	}
 	if tableExists(t, pool, "instructor_profiles") {
 		t.Fatal("instructor_profiles survived the migration down")
 	}
-	if err := m.Steps(2); err != nil {
+	if err := m.Steps(3); err != nil {
 		t.Fatalf("reapplying instructor profile schema: %v", err)
 	}
 	if !tableExists(t, pool, "instructor_profiles") {

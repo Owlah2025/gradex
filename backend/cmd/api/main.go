@@ -98,7 +98,7 @@ func main() {
 		log.Fatalf("building media foundation: %v", err)
 	}
 	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
-	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation, redisConnection)
+	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation, redisConnection, pf.CatalogRepository)
 	if err != nil {
 		log.Fatalf("building learning foundation: %v", err)
 	}
@@ -318,6 +318,7 @@ func buildLearningFoundation(
 	pool *pgxpool.Pool,
 	mediaFoundation *httpapi.MediaFoundation,
 	redisConnection *queue.Connection,
+	announcementReaders ...catalog.AnnouncementReader,
 ) (*httpapi.LearningFoundation, *redis.Client, error) {
 	if mediaFoundation == nil {
 		return nil, nil, errors.New("learning media foundation is required")
@@ -366,9 +367,13 @@ func buildLearningFoundation(
 		return nil, nil, fmt.Errorf("building report context issuer: %w", err)
 	}
 
+	var announcementReader catalog.AnnouncementReader
+	if len(announcementReaders) > 0 {
+		announcementReader = announcementReaders[0]
+	}
 	foundation, err := httpapi.NewLearningFoundation(httpapi.LearningFoundationOptions{
 		Repository: repository, Evaluator: evaluator, Media: mediaFoundation.LearningMedia(),
-		ReportContexts: reportContexts, Limiter: limiter,
+		ReportContexts: reportContexts, Limiter: limiter, Announcements: announcementReader,
 		Policies: map[string]ratelimit.Policy{
 			"learning-playback-source": ratelimit.ProtectedLearningPlaybackSourcePolicy(),
 			"learning-playback":        ratelimit.ProtectedLearningPlaybackPolicy(),
@@ -826,6 +831,7 @@ func buildCompromisedPasswordSource(cfg *config.Config) (identity.CompromisedRan
 func buildCatalogFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
+	limiters ...*ratelimit.Limiter,
 ) (*httpapi.CatalogFoundation, error) {
 	admission := cfg.Admission()
 	writer, err := outbox.NewWriter(
@@ -843,9 +849,15 @@ func buildCatalogFoundation(
 
 	assetValidator := catalog.NewDBAssetVersionValidator(pool)
 
+	var limiter *ratelimit.Limiter
+	if len(limiters) > 0 {
+		limiter = limiters[0]
+	}
 	return httpapi.NewCatalogFoundation(httpapi.CatalogFoundationOptions{
-		Repository:     repository,
-		AssetValidator: assetValidator,
+		Repository:         repository,
+		AssetValidator:     assetValidator,
+		Limiter:            limiter,
+		AnnouncementPolicy: ratelimit.CourseAnnouncementPolicy(),
 	})
 }
 
@@ -1009,9 +1021,10 @@ type ProductionFoundations struct {
 	// coordinator the device service uses; two coordinators over two Redis
 	// clients would still be correct, but sharing makes it obvious that they
 	// are one authority.
-	Playback      *playback.Coordinator
-	PlaybackRedis *redis.Client
-	Devices       *identity.DeviceService
+	Playback          *playback.Coordinator
+	PlaybackRedis     *redis.Client
+	Devices           *identity.DeviceService
+	CatalogRepository *catalog.Repository
 }
 
 func (f *ProductionFoundations) Close() {
@@ -1140,12 +1153,13 @@ func buildProductionFoundationsWithStaffSource(
 		pf.Options = append(pf.Options, httpapi.WithAdminFoundation(adminFoundation))
 	}
 
-	catalogFoundation, err := buildCatalogFoundation(cfg, pool)
+	catalogFoundation, err := buildCatalogFoundation(cfg, pool, admissionFoundation.RateLimiter())
 	if err != nil {
 		pf.Close()
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithCatalogFoundation(catalogFoundation))
+	pf.CatalogRepository = catalogFoundation.Repository()
 	reportRepository, err := learning.NewRepository(pool)
 	if err != nil {
 		pf.Close()

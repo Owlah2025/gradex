@@ -35,6 +35,10 @@ type instructorRosterHTTPResponse struct {
 		EnrolledAt      string  `json:"enrolled_at"`
 		AccessStartedAt *string `json:"access_started_at"`
 		AccessEndsAt    *string `json:"access_ends_at"`
+		ProgressPercent int     `json:"progress_percent"`
+		Completed       bool    `json:"completed"`
+		CompletedAt     *string `json:"completed_at"`
+		LastActivity    *string `json:"last_learning_activity"`
 	} `json:"items"`
 	Page     int  `json:"page"`
 	PageSize int  `json:"page_size"`
@@ -77,6 +81,9 @@ func TestInstructorCourseRosterHTTPAPIRealPostgreSQL(t *testing.T) {
 		}
 		if page.Items[0].AccessEndsAt == nil || page.Items[0].AccessStartedAt == nil || page.Items[0].EnrolledAt == "" {
 			t.Fatal("active row is missing authoritative access or enrollment dates")
+		}
+		if page.Items[0].ProgressPercent != 0 || !page.Items[0].Completed || page.Items[0].CompletedAt == nil || page.Items[0].LastActivity == nil {
+			t.Fatalf("active row progress = %+v, want zero current progress, durable completion, and activity", page.Items[0])
 		}
 
 		second := rosterRequest(t, ownerServer.URL+"/api/v1/courses/"+rosterCourseID+"/students?page=2&page_size=2")
@@ -188,8 +195,28 @@ func seedInstructorRoster(t *testing.T, pool *pgxpool.Pool, ctx context.Context)
 	`, rosterOwnerID, rosterOtherOwnerID, rosterAdminID, rosterActiveID, rosterExpiredID, rosterRevokedID, rosterSuspendedID, now)
 	exec(`
 		INSERT INTO courses (id, owner_account_id, lifecycle)
-		VALUES ($1, $2, 'ARCHIVED'), ($3, $4, 'DRAFT')
+		VALUES ($1, $2, 'DRAFT'), ($3, $4, 'DRAFT')
 	`, rosterCourseID, rosterOwnerID, rosterOtherCourseID, rosterOtherOwnerID)
+	revisionID := "89999999-9999-9999-9999-999999999999"
+	sectionIdentityID := "8a111111-1111-1111-1111-111111111111"
+	lessonIdentityID := "8a222222-2222-2222-2222-222222222222"
+	sectionRowID := "8a333333-3333-3333-3333-333333333333"
+	lessonRowID := "8a444444-4444-4444-4444-444444444444"
+	exec(`
+		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+		VALUES ($1, $2, 'APPROVED', 1, 'مقرر قائمة الطلبة', 'Roster Course')
+	`, revisionID, rosterCourseID)
+	exec(`INSERT INTO course_section_identities (id, course_id) VALUES ($1, $2)`, sectionIdentityID, rosterCourseID)
+	exec(`INSERT INTO course_lesson_identities (id, course_id, section_identity_id) VALUES ($1, $2, $3)`, lessonIdentityID, rosterCourseID, sectionIdentityID)
+	exec(`
+		INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+		VALUES ($1, $2, $3, $4, 'الوحدة الأولى', 'Unit One', 0)
+	`, sectionRowID, revisionID, rosterCourseID, sectionIdentityID)
+	exec(`
+		INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+		VALUES ($1, $2, $3, $4, $5, 'الدرس الأول', 'Lesson One', 0)
+	`, lessonRowID, sectionRowID, rosterCourseID, sectionIdentityID, lessonIdentityID)
+	exec(`UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $2 WHERE id = $1`, rosterCourseID, revisionID)
 
 	insertInvitation := func(id, email, studentID string, createdAt time.Time) {
 		exec(`
@@ -245,6 +272,21 @@ func seedInstructorRoster(t *testing.T, pool *pgxpool.Pool, ctx context.Context)
 		  ($3, $4, $7)
 	`, rosterActiveID, rosterExpiredID, rosterRevokedID, rosterCourseID,
 		now.Add(-3*24*time.Hour), now.Add(-2*24*time.Hour), now.Add(-24*time.Hour))
+	exec(`
+		INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, last_watched_at)
+		SELECT id, $2, 42, 21, $3
+		FROM enrollments
+		WHERE student_account_id = $1 AND course_id = $4
+	`, rosterActiveID, lessonIdentityID, now.Add(-2*time.Hour), rosterCourseID)
+	exec(`
+		INSERT INTO course_completions (
+			enrollment_id, student_account_id, course_id, completed_at, course_revision_id,
+			course_revision_number, required_lesson_count, completed_lesson_count, source
+		)
+		SELECT id, student_account_id, course_id, $2, $3, 1, 1, 1, 'BACKFILL'
+		FROM enrollments
+		WHERE student_account_id = $1 AND course_id = $4
+	`, rosterActiveID, now.Add(-time.Hour), revisionID, rosterCourseID)
 }
 
 func rosterRequest(t *testing.T, url string) *http.Response {

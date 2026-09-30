@@ -31,9 +31,11 @@ func mountCatalogRoutes(
 	}
 
 	h := &authoringHandlers{
-		repo:           foundation.repository,
-		assetValidator: foundation.assetValidator,
-		logger:         logger,
+		repo:               foundation.repository,
+		assetValidator:     foundation.assetValidator,
+		logger:             logger,
+		limiter:            foundation.limiter,
+		announcementPolicy: foundation.announcementPolicy,
 	}
 	if mediaFoundation != nil {
 		h.mediaService = mediaFoundation.service
@@ -87,6 +89,8 @@ func mountCatalogRoutes(
 	)
 	{
 		ownedGetGroup.GET("", h.getOwnedCourse)
+		ownedGetGroup.GET("/analytics", h.getCourseAnalytics)
+		ownedGetGroup.GET("/announcements", h.listOwnedAnnouncements)
 		if mediaFoundation != nil {
 			ownedGetGroup.GET("/revisions/:revisionId/thumbnails/:assetId/:variant", func(c *gin.Context) { serveThumbnail(c, mediaFoundation.service, false) })
 		}
@@ -102,6 +106,12 @@ func mountCatalogRoutes(
 		ownershipMw,
 	)
 	{
+		ownedMutationGroup.POST(
+			"/announcements",
+			strictJSONMiddleware(func() any { return &courseAnnouncementBody{} }, announcementBodyLimit),
+			h.requireAnnouncementRateDecision,
+			h.createAnnouncement,
+		)
 		ownedMutationGroup.PUT("/candidate", h.createCandidate)
 		// D-093 5. Pre-publication Subject correction. The route exists for every
 		// Course; the domain refuses it for a legacy Course, for one under
@@ -141,6 +151,15 @@ func mountCatalogRoutes(
 		ownedMutationGroup.DELETE("/revisions/:revisionId/preview", h.clearPreviewAsset)
 		ownedMutationGroup.POST("/revisions/:revisionId/submit", h.submitCourse)
 		ownedMutationGroup.POST("/revisions/:revisionId/publish", h.publishCourseRevision)
+	}
+
+	instructorGetGroup := v1.Group("/instructor")
+	instructorGetGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapContentManagement),
+	)
+	{
+		instructorGetGroup.GET("/dashboard", h.instructorDashboard)
 	}
 
 	// Admin review GET routes under /admin/review

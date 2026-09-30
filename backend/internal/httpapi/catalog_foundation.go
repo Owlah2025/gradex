@@ -5,12 +5,15 @@ import (
 	"fmt"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 type CatalogFoundation struct {
-	repository     *catalog.Repository
-	ownership      CourseOwnershipChecker
-	assetValidator catalog.AssetVersionValidator
+	repository         *catalog.Repository
+	ownership          CourseOwnershipChecker
+	assetValidator     catalog.AssetVersionValidator
+	limiter            *ratelimit.Limiter
+	announcementPolicy ratelimit.Policy
 }
 
 func (f *CatalogFoundation) Repository() *catalog.Repository {
@@ -21,9 +24,11 @@ func (f *CatalogFoundation) Repository() *catalog.Repository {
 }
 
 type CatalogFoundationOptions struct {
-	Repository     *catalog.Repository
-	Ownership      CourseOwnershipChecker
-	AssetValidator catalog.AssetVersionValidator
+	Repository         *catalog.Repository
+	Ownership          CourseOwnershipChecker
+	AssetValidator     catalog.AssetVersionValidator
+	Limiter            *ratelimit.Limiter
+	AnnouncementPolicy ratelimit.Policy
 }
 
 // NewCatalogFoundation constructs CatalogFoundation.
@@ -39,10 +44,21 @@ func NewCatalogFoundation(options CatalogFoundationOptions) (*CatalogFoundation,
 	if options.AssetValidator == nil {
 		return nil, errors.New("asset version validator is required")
 	}
+	announcementPolicy := options.AnnouncementPolicy
+	if announcementPolicy.Endpoint == "" {
+		announcementPolicy = ratelimit.CourseAnnouncementPolicy()
+	}
+	if options.Limiter != nil {
+		if err := announcementPolicy.Validate(); err != nil {
+			return nil, fmt.Errorf("course announcement rate-limit policy: %w", err)
+		}
+	}
 	return &CatalogFoundation{
-		repository:     options.Repository,
-		ownership:      ownership,
-		assetValidator: options.AssetValidator,
+		repository:         options.Repository,
+		ownership:          ownership,
+		assetValidator:     options.AssetValidator,
+		limiter:            options.Limiter,
+		announcementPolicy: announcementPolicy,
 	}, nil
 }
 

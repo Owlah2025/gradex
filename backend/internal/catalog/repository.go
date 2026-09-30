@@ -13,10 +13,12 @@ import (
 )
 
 var (
-	ErrRepositoryNil     = errors.New("database pool is required")
-	ErrCourseNotFound    = errors.New("course not found")
-	ErrLifecycleConflict = errors.New("course lifecycle conflict")
-	ErrInvalidOrder      = errors.New("ordered identity set must exactly match the authoritative set")
+	ErrRepositoryNil       = errors.New("database pool is required")
+	ErrCourseNotFound      = errors.New("course not found")
+	ErrLifecycleConflict   = errors.New("course lifecycle conflict")
+	ErrInvalidOrder        = errors.New("ordered identity set must exactly match the authoritative set")
+	ErrCourseNotPublished  = errors.New("course must be published")
+	ErrAnnouncementInvalid = errors.New("course announcement is invalid")
 )
 
 type LifecycleConflictError struct {

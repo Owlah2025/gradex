@@ -22,6 +22,39 @@ const courseRosterQuery = `
 		       ) AS entitlement_rank
 		FROM entitlements e
 		WHERE e.course_id = $1::uuid AND e.scope_kind = 'COURSE'
+	),
+	current_course_lessons AS (
+		SELECT cli.id AS lesson_identity_id
+		FROM courses c
+		JOIN course_revisions live
+		  ON live.id = c.live_revision_id
+		 AND live.course_id = c.id
+		 AND live.state = 'APPROVED'
+		JOIN course_sections cs ON cs.revision_id = live.id AND cs.course_id = c.id
+		JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+		JOIN course_lesson_identities cli
+		  ON cli.id = cl.lesson_identity_id
+		 AND cli.course_id = c.id
+		 AND cli.section_identity_id = cl.section_identity_id
+		WHERE c.id = $1::uuid AND c.owner_account_id = $2::uuid
+	),
+	current_progress AS (
+		SELECT enrollment.id AS enrollment_id,
+		       count(DISTINCT lesson.lesson_identity_id) AS total_lessons,
+		       count(DISTINCT progress.course_lesson_identity_id)
+		           FILTER (WHERE progress.completed_at IS NOT NULL) AS completed_lessons
+		FROM enrollments enrollment
+		LEFT JOIN current_course_lessons lesson ON TRUE
+		LEFT JOIN progress
+		  ON progress.enrollment_id = enrollment.id
+		 AND progress.course_lesson_identity_id = lesson.lesson_identity_id
+		WHERE enrollment.course_id = $1::uuid
+		GROUP BY enrollment.id
+	),
+	learning_activity AS (
+		SELECT enrollment_id, max(last_watched_at) AS last_learning_activity
+		FROM progress
+		GROUP BY enrollment_id
 	)
 	SELECT a.display_name,
 	       enrollment.created_at,
@@ -35,7 +68,14 @@ const courseRosterQuery = `
 	                AND entitlement.retirement_eligibility_at >= c.retired_at THEN 'DENIED'
 	           WHEN a.status::text <> 'ACTIVE' OR c.access_suspended_at IS NOT NULL THEN 'SUSPENDED'
 	           ELSE 'ACTIVE'
-	       END AS access_status
+	       END AS access_status,
+	       CASE
+	           WHEN COALESCE(current_progress.total_lessons, 0) = 0 THEN 0
+	           ELSE ROUND(current_progress.completed_lessons::numeric * 100 / current_progress.total_lessons)::integer
+	       END AS progress_percent,
+	       COALESCE(completion.id IS NOT NULL, false) AS completed,
+	       completion.completed_at,
+	       learning_activity.last_learning_activity
 	FROM enrollments enrollment
 	JOIN courses c
 	  ON c.id = enrollment.course_id
@@ -46,6 +86,12 @@ const courseRosterQuery = `
 	  ON entitlement.student_account_id = enrollment.student_account_id
 	 AND entitlement.course_id = enrollment.course_id
 	 AND entitlement.entitlement_rank = 1
+	LEFT JOIN current_progress
+	  ON current_progress.enrollment_id = enrollment.id
+	LEFT JOIN course_completions completion
+	  ON completion.enrollment_id = enrollment.id
+	LEFT JOIN learning_activity
+	  ON learning_activity.enrollment_id = enrollment.id
 	ORDER BY enrollment.created_at ASC, enrollment.student_account_id ASC
 	LIMIT $4 OFFSET $5
 `
@@ -61,11 +107,15 @@ const (
 )
 
 type CourseRosterEntry struct {
-	DisplayName     string                   `json:"display_name"`
-	AccessStatus    CourseRosterAccessStatus `json:"access_status"`
-	EnrolledAt      time.Time                `json:"enrolled_at"`
-	AccessStartedAt *time.Time               `json:"access_started_at,omitempty"`
-	AccessEndsAt    *time.Time               `json:"access_ends_at,omitempty"`
+	DisplayName          string                   `json:"display_name"`
+	AccessStatus         CourseRosterAccessStatus `json:"access_status"`
+	EnrolledAt           time.Time                `json:"enrolled_at"`
+	AccessStartedAt      *time.Time               `json:"access_started_at,omitempty"`
+	AccessEndsAt         *time.Time               `json:"access_ends_at,omitempty"`
+	ProgressPercent      int                      `json:"progress_percent"`
+	Completed            bool                     `json:"completed"`
+	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
+	LastLearningActivity *time.Time               `json:"last_learning_activity,omitempty"`
 }
 
 type CourseRosterPage struct {
@@ -134,19 +184,25 @@ func scanCourseRosterEntries(rows pgx.Rows, pageSize int) ([]CourseRosterEntry, 
 
 func scanCourseRosterEntry(row pgx.Rows) (CourseRosterEntry, error) {
 	var entry CourseRosterEntry
-	var accessStartedAt, accessEndsAt *time.Time
+	var accessStartedAt, accessEndsAt, completedAt, lastLearningActivity *time.Time
 	if err := row.Scan(
 		&entry.DisplayName,
 		&entry.EnrolledAt,
 		&accessStartedAt,
 		&accessEndsAt,
 		&entry.AccessStatus,
+		&entry.ProgressPercent,
+		&entry.Completed,
+		&completedAt,
+		&lastLearningActivity,
 	); err != nil {
 		return CourseRosterEntry{}, fmt.Errorf("scanning course roster: %w", err)
 	}
 	entry.EnrolledAt = entry.EnrolledAt.UTC()
 	entry.AccessStartedAt = utcTime(accessStartedAt)
 	entry.AccessEndsAt = utcTime(accessEndsAt)
+	entry.CompletedAt = utcTime(completedAt)
+	entry.LastLearningActivity = utcTime(lastLearningActivity)
 	return entry, nil
 }
 

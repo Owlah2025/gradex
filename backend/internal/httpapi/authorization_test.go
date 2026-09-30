@@ -183,6 +183,7 @@ func authzRouterWithSessionAndAuthenticator(
 		Repository:     catalogRepository,
 		Ownership:      fakeOwnershipChecker{},
 		AssetValidator: fakeAssetValidator{},
+		Limiter:        limiter,
 	})
 	if err != nil {
 		t.Fatalf("constructing catalog foundation: %v", err)
@@ -196,6 +197,7 @@ func authzRouterWithSessionAndAuthenticator(
 		Repository:     learningRepository,
 		Evaluator:      learningFoundationEvaluator{},
 		Media:          learningFoundationMedia{},
+		Announcements:  catalogRepository,
 		Limiter:        testLearningLimiter(t),
 		Policies:       testLearningPolicies(),
 	})
@@ -393,6 +395,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/learn/dashboard":                                                       {Method: http.MethodGet, Path: "/api/v1/learn/dashboard", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/history":                                                         {Method: http.MethodGet, Path: "/api/v1/learn/history", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/courses/:courseId":                                               {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId", Class: ClassCapabilityProtected},
+	"GET /api/v1/learn/courses/:courseId/announcements":                                 {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId/announcements", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/courses/:courseId/lessons/:lessonId":                             {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId/lessons/:lessonId", Class: ClassCapabilityProtected},
 	"POST /api/v1/learn/lessons/:lessonId/playback":                                     {Method: http.MethodPost, Path: "/api/v1/learn/lessons/:lessonId/playback", Class: ClassCapabilityProtected},
 	"PUT /api/v1/learn/lessons/:lessonId/progress":                                      {Method: http.MethodPut, Path: "/api/v1/learn/lessons/:lessonId/progress", Class: ClassCapabilityProtected},
@@ -409,6 +412,10 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/reports/:id/resolve":                                            {Method: http.MethodPost, Path: "/api/v1/admin/reports/:id/resolve", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses/:id":                                                           {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
 	"GET /api/v1/courses/:id/students":                                                  {Method: http.MethodGet, Path: "/api/v1/courses/:id/students", Class: ClassOwnershipProtected},
+	"GET /api/v1/courses/:id/analytics":                                                 {Method: http.MethodGet, Path: "/api/v1/courses/:id/analytics", Class: ClassOwnershipProtected},
+	"GET /api/v1/courses/:id/announcements":                                             {Method: http.MethodGet, Path: "/api/v1/courses/:id/announcements", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/announcements":                                            {Method: http.MethodPost, Path: "/api/v1/courses/:id/announcements", Class: ClassOwnershipProtected},
+	"GET /api/v1/instructor/dashboard":                                                  {Method: http.MethodGet, Path: "/api/v1/instructor/dashboard", Class: ClassCapabilityProtected},
 	"PUT /api/v1/courses/:id/candidate":                                                 {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/subject":                                                   {Method: http.MethodPut, Path: "/api/v1/courses/:id/subject", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId":                                   {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},

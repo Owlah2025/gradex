@@ -193,6 +193,9 @@ func mountLearningRoutes(v1 *gin.RouterGroup, foundation *LearningFoundation, au
 	learn.GET("/dashboard", h.dashboard)
 	learn.GET("/history", h.history)
 	learn.GET("/courses/:courseId", h.courseHome)
+	if foundation.announcementReader != nil {
+		learn.GET("/courses/:courseId/announcements", h.courseAnnouncements)
+	}
 	learn.GET("/courses/:courseId/lessons/:lessonId", h.lesson)
 	learn.POST("/lessons/:lessonId/playback", h.issuePlayback)
 	learn.PUT("/lessons/:lessonId/progress", h.saveProgress)

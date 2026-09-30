@@ -192,6 +192,9 @@ type learningFixtureOptions struct {
 	// of creating a new one.
 	studentID string
 	pool      *pgxpool.Pool
+	// announcements adds the optional T6 read seam without changing the
+	// protected-learning fixture used by the earlier S5 tests.
+	announcements learningAnnouncementReader
 }
 
 func newLearningIntegrationFixture(t *testing.T) learningIntegrationFixture {
@@ -250,7 +253,8 @@ func newLearningIntegrationFixtureWith(t *testing.T, options learningFixtureOpti
 	foundation, err := NewLearningFoundation(LearningFoundationOptions{
 		ReportContexts: testReportContextIssuer(t),
 		Repository:     repository, Evaluator: recordingEvaluator, Media: delivery, Limiter: limiter,
-		Now: f.clock.Now,
+		Announcements: options.announcements,
+		Now:           f.clock.Now,
 		Policies: map[string]ratelimit.Policy{
 			"learning-progress-source": ratelimit.ProtectedLearningProgressSourcePolicy(),
 			"learning-progress":        ratelimit.ProtectedLearningProgressPolicy(),

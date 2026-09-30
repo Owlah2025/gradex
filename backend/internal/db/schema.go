@@ -89,7 +89,9 @@ const (
 	InstructorProfilesSchemaVersion    = AdminUser360HardeningSchemaVersion + 1
 	// T5 durable Course completion facts and historical learning reads.
 	CourseCompletionsSchemaVersion = InstructorProfilesSchemaVersion + 1
-	MaxSchemaVersion               = CourseCompletionsSchemaVersion
+	// T6 immutable, immediately-published Course announcements.
+	CourseAnnouncementsSchemaVersion = CourseCompletionsSchemaVersion + 1
+	MaxSchemaVersion                 = CourseAnnouncementsSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

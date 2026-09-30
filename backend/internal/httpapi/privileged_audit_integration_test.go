@@ -235,6 +235,9 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		http.MethodPut + " /api/v1/courses/:id/subject": {prepare: prepareAuditAcademicCourse, body: func(*privilegedAuditFixture) string {
 			return fmt.Sprintf(`{"subject_id":%q}`, auditSubjectAltID)
 		}, status: http.StatusOK, action: "COURSE_SUBJECT_ASSIGNED", targetType: "COURSE"},
+		http.MethodPost + " /api/v1/courses/:id/announcements": {prepare: preparePublishedCourse, body: func(*privilegedAuditFixture) string {
+			return `{"title":"Audit announcement","body":"The course update is ready."}`
+		}, status: http.StatusCreated, action: "COURSE_ANNOUNCEMENT_PUBLISHED", targetType: "COURSE_ANNOUNCEMENT"},
 		http.MethodPut + " /api/v1/courses/:id/candidate": {prepare: preparePublishedCourse, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_CANDIDATE_CREATED", targetType: "COURSE_REVISION"},
 		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId": {body: func(*privilegedAuditFixture) string {
 			return `{"title_ar":"عنوان","title_en":"Title","description_ar":"وصف","description_en":"Description"}`

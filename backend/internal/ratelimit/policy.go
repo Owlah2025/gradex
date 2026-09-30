@@ -152,6 +152,26 @@ func StudentPurchaseRequestsPolicy() Policy {
 	}
 }
 
+// CourseAnnouncementPolicy limits authenticated Instructor broadcasts without
+// making a burst of legitimate course updates indistinguishable from abuse.
+// The identifier is the Instructor Account and the source-address rule keeps a
+// shared campus network from becoming an unbounded write source.
+func CourseAnnouncementPolicy() Policy {
+	return Policy{
+		ID:       "course-announcements-v1",
+		Category: "CONTENT_MANAGEMENT",
+		Endpoint: "course-announcements",
+		Window:   time.Hour,
+		Rules: []Rule{
+			{Dimension: DimensionIdentifier, Limit: 30, LocalLimit: 30},
+			{Dimension: DimensionSourceAddr, Limit: 120, LocalLimit: 120},
+			{Dimension: DimensionGlobal, Limit: 5000, LocalLimit: 5000},
+		},
+		LocalMaxKeys: 8192,
+		FailClosed:   true,
+	}
+}
+
 func DevelopmentPolicySetReadPolicy() Policy {
 	return Policy{
 		ID:       "registration-policy-set-v1",

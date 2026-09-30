@@ -178,6 +178,7 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 	catalogFoundation, err := NewCatalogFoundation(CatalogFoundationOptions{
 		Repository:     catalogRepo,
 		AssetValidator: catalog.NewDBAssetVersionValidator(pool),
+		Limiter:        limiter,
 	})
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)

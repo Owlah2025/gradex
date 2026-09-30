@@ -11,13 +11,16 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 type authoringHandlers struct {
-	repo           *catalog.Repository
-	assetValidator catalog.AssetVersionValidator
-	mediaService   *media.Service
-	logger         *logging.Logger
+	repo               *catalog.Repository
+	assetValidator     catalog.AssetVersionValidator
+	mediaService       *media.Service
+	logger             *logging.Logger
+	limiter            *ratelimit.Limiter
+	announcementPolicy ratelimit.Policy
 }
 
 // createCourseBody carries the academic context an ordinary Instructor Course
@@ -103,6 +106,17 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, catalog.ErrAccountSuspended) || errors.Is(err, catalog.ErrOwnerIneligible) {
 		writeProblem(c, problem.NotAuthorized())
+		return
+	}
+	if errors.Is(err, catalog.ErrCourseNotPublished) {
+		writeProblem(c, problem.StateConflict().WithViolations(problem.Violation{
+			Code: "COURSE_NOT_PUBLISHED", Location: problem.LocationPath,
+			Detail: "publish the course before posting an announcement",
+		}))
+		return
+	}
+	if errors.Is(err, catalog.ErrAnnouncementInvalid) {
+		writeProblem(c, problem.ValidationFailed())
 		return
 	}
 	var conflict *catalog.LifecycleConflictError
