@@ -1001,8 +1001,8 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (
-			account_id, public_slug, headline_en, publication_state, published_snapshot
-		) VALUES ($1::uuid, 'migration-author', 'Programming instructor', 'PUBLISHED', '{}'::jsonb)
+			account_id, public_slug, published_slug, public_visible, headline_en, publication_state, published_snapshot
+		) VALUES ($1::uuid, 'migration-author', 'migration-author', true, 'Programming instructor', 'PUBLISHED', '{}'::jsonb)
 	`, instructorID); err != nil {
 		t.Fatalf("inserting instructor profile: %v", err)
 	}
@@ -1019,10 +1019,34 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 		t.Fatal("uppercase instructor slug was accepted")
 	}
 	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, published_slug)
+		VALUES ($1::uuid, 'UpperCase')
+	`, adminID); err == nil {
+		t.Fatal("uppercase instructor published_slug was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO instructor_profiles (account_id, publication_state)
 		VALUES ($1::uuid, 'PUBLISHED')
 	`, adminID); err == nil {
 		t.Fatal("published instructor profile without a snapshot was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, public_visible, published_slug)
+		VALUES ($1::uuid, true, 'missing-snapshot')
+	`, adminID); err == nil {
+		t.Fatal("public_visible=TRUE without snapshot was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, public_visible, published_snapshot)
+		VALUES ($1::uuid, true, '{}'::jsonb)
+	`, adminID); err == nil {
+		t.Fatal("public_visible=TRUE without published_slug was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO instructor_profiles (account_id, published_slug)
+		VALUES ($1::uuid, 'migration-author')
+	`, adminID); err == nil {
+		t.Fatal("duplicate published_slug was accepted")
 	}
 
 	// Course completions, announcements, and catalogue search analytics are

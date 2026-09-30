@@ -22,7 +22,7 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 const profileColumns = `p.account_id::text, a.display_name, p.public_slug,
 	p.headline_ar, p.headline_en, p.bio_ar, p.bio_en,
 	p.avatar_asset_version_id::text, p.publication_state::text,
-	p.published_snapshot, p.submitted_at, p.decided_at,
+	p.public_visible, p.published_snapshot, p.submitted_at, p.decided_at,
 	p.decided_by::text, p.decision_note, p.revision,
 	p.created_at, p.updated_at`
 
@@ -88,7 +88,7 @@ func (r *Repository) SaveDraft(ctx context.Context, request SaveDraftRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	current, err := loadProfile(ctx, tx, request.AccountID)
+	current, err := loadProfileForUpdate(ctx, tx, request.AccountID)
 	isNew := errors.Is(err, ErrProfileNotFound)
 	if isNew {
 		if request.ExpectedRevision != 0 {
@@ -204,7 +204,7 @@ func (r *Repository) List(ctx context.Context, request ListRequest) (ListResult,
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.account_id::text, a.display_name, p.public_slug,
-			p.publication_state::text, p.submitted_at, p.updated_at, p.revision
+			p.publication_state::text, p.public_visible, p.submitted_at, p.updated_at, p.revision
 		FROM instructor_profiles p
 		JOIN accounts a ON a.id = p.account_id
 		WHERE a.role = 'INSTRUCTOR'
@@ -223,7 +223,7 @@ func (r *Repository) List(ctx context.Context, request ListRequest) (ListResult,
 		var stateText string
 		if err := rows.Scan(
 			&item.AccountID, &item.DisplayName, &item.PublicSlug,
-			&stateText, &item.SubmittedAt, &item.UpdatedAt, &item.Revision,
+			&stateText, &item.PublicVisible, &item.SubmittedAt, &item.UpdatedAt, &item.Revision,
 		); err != nil {
 			return ListResult{}, fmt.Errorf("scanning instructor profile queue: %w", err)
 		}
@@ -588,7 +588,7 @@ func loadProfileForUpdate(ctx context.Context, tx pgx.Tx, accountID string) (*Pr
 		FROM instructor_profiles p
 		JOIN accounts a ON a.id = p.account_id
 		WHERE p.account_id = $1::uuid AND a.role = 'INSTRUCTOR'
-		FOR UPDATE OF p
+		FOR NO KEY UPDATE OF p
 	`, accountID)
 	profile, err := scanProfile(row)
 	if err != nil {
@@ -612,7 +612,7 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	if err := row.Scan(
 		&profile.AccountID, &profile.DisplayName, &profile.PublicSlug,
 		&profile.HeadlineAr, &profile.HeadlineEn, &profile.BioAr, &profile.BioEn,
-		&avatarAsset, &state, &rawSnapshot, &profile.SubmittedAt, &profile.DecidedAt,
+		&avatarAsset, &state, &profile.PublicVisible, &rawSnapshot, &profile.SubmittedAt, &profile.DecidedAt,
 		&profile.DecidedBy, &profile.DecisionNote, &profile.Revision,
 		&profile.CreatedAt, &profile.UpdatedAt,
 	); err != nil {

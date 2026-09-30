@@ -179,7 +179,7 @@ test.describe("UX-J role and session acceptance", () => {
   test("each principal class reaches its own workspace and is offered no other", async ({ browser }) => {
     const expected: ReadonlyArray<{ home: string; own: string; role: Role }> = [
       { home: "/en/learn/dashboard", own: "/en/learn/dashboard", role: "student" },
-      { home: "/en/instructor/courses", own: "/en/instructor/courses", role: "instructor" },
+      { home: "/en/instructor", own: "/en/instructor/courses", role: "instructor" },
       { home: "/en/admin/courses", own: "/en/admin/courses", role: "admin" },
     ];
 

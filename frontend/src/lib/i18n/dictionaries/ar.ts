@@ -312,6 +312,7 @@ export const ar: Dictionary = {
     draftColumn: "المسودة",
     publishedColumn: "النسخة المنشورة",
     emptyValue: "—",
+    changedMarker: "(معدل)",
     approve: "اعتماد",
     requestChanges: "طلب تعديلات",
     hide: "إخفاء الملف",

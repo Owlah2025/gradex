@@ -200,10 +200,10 @@ test.describe("S13 mandatory password change", () => {
     await page.getByTestId("password-change-confirm").fill("an instructor launch passphrase 4");
     await page.getByTestId("password-change-submit").click();
 
-    await expect(page).toHaveURL(/\/en\/instructor\/courses/);
+    await expect(page).toHaveURL(/\/en\/instructor(\/)?$/);
     expect(credentialState(RESTRICTED_INSTRUCTOR.email)).toBe("ACTIVE");
 
-    await expect(page.locator("h1")).toContainText("Course Authoring Studio");
+    await expect(page.locator("h1")).toContainText("Instructor home");
     expect(await privilegedRequestStatus(page, "/api/v1/courses")).toBe(200);
 
     await context.close();

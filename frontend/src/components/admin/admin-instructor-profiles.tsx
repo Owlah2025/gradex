@@ -185,7 +185,10 @@ export function AdminInstructorProfiles() {
                   <span className="block font-display font-bold text-foreground"><bdi>{item.display_name}</bdi></span>
                   <span className="mt-1 block text-sm text-muted-foreground"><bdi>{item.public_slug ? "/" + locale + "/instructors/" + item.public_slug : copy.fields.slug}</bdi></span>
                 </span>
-                <StatusBadge tone={toneForState(item.publication_state)} label={copy.states[item.publication_state]} />
+                <span className="flex items-center gap-2">
+                  {item.public_visible && <StatusBadge tone="info" label={locale === "ar" ? "مرئي للعامة" : "Publicly Visible"} />}
+                  <StatusBadge tone={toneForState(item.publication_state)} label={copy.states[item.publication_state]} />
+                </span>
               </button>
             ))}
           </div>
@@ -258,11 +261,11 @@ function ProfileComparisonCard({
           <span>{copy.draftColumn}</span>
           <span>{copy.publishedColumn}</span>
         </div>
-        <DiffRow label={copy.fields.slug} draft={profile.public_slug ?? ""} published={snapshot?.public_slug} draftDir="ltr" publishedDir="ltr" emptyValue={copy.emptyValue} />
-        <DiffRow label={copy.fields.headlineAr} draft={profile.headline_ar} published={snapshot?.headline_ar} draftDir="rtl" publishedDir="rtl" emptyValue={copy.emptyValue} />
-        <DiffRow label={copy.fields.headlineEn} draft={profile.headline_en} published={snapshot?.headline_en} draftDir="ltr" publishedDir="ltr" emptyValue={copy.emptyValue} />
-        <DiffRow label={copy.fields.bioAr} draft={profile.bio_ar} published={snapshot?.bio_ar} draftDir="rtl" publishedDir="rtl" multiline emptyValue={copy.emptyValue} />
-        <DiffRow label={copy.fields.bioEn} draft={profile.bio_en} published={snapshot?.bio_en} draftDir="ltr" publishedDir="ltr" multiline emptyValue={copy.emptyValue} />
+        <DiffRow label={copy.fields.slug} draft={profile.public_slug ?? ""} published={snapshot?.public_slug} draftDir="ltr" publishedDir="ltr" emptyValue={copy.emptyValue} changedMarker={copy.changedMarker} />
+        <DiffRow label={copy.fields.headlineAr} draft={profile.headline_ar} published={snapshot?.headline_ar} draftDir="rtl" publishedDir="rtl" emptyValue={copy.emptyValue} changedMarker={copy.changedMarker} />
+        <DiffRow label={copy.fields.headlineEn} draft={profile.headline_en} published={snapshot?.headline_en} draftDir="ltr" publishedDir="ltr" emptyValue={copy.emptyValue} changedMarker={copy.changedMarker} />
+        <DiffRow label={copy.fields.bioAr} draft={profile.bio_ar} published={snapshot?.bio_ar} draftDir="rtl" publishedDir="rtl" multiline emptyValue={copy.emptyValue} changedMarker={copy.changedMarker} />
+        <DiffRow label={copy.fields.bioEn} draft={profile.bio_en} published={snapshot?.bio_en} draftDir="ltr" publishedDir="ltr" multiline emptyValue={copy.emptyValue} changedMarker={copy.changedMarker} />
         <ExpertiseDiff draft={profile.expertise} published={snapshot?.expertise} copy={copy} />
         {!snapshot ? <p className="text-sm text-muted-foreground">{copy.noPublished}</p> : null}
       </CardContent>
@@ -282,7 +285,10 @@ function ExpertiseDiff({
   const changed = published !== undefined && draft.map((item) => item.id).join(",") !== published.map((item) => item.id).join(",");
   return (
     <div className="border-b border-border pb-3 last:border-b-0">
-      <p className="text-xs font-semibold text-muted-foreground">{copy.fields.expertise}</p>
+      <p className="text-xs font-semibold text-muted-foreground">
+        {copy.fields.expertise}
+        {changed && <span className="ml-2 font-bold text-gx-orange-600">{copy.changedMarker}</span>}
+      </p>
       <div className="mt-2 grid gap-3 md:grid-cols-2">
         <ExpertiseList items={draft} changed={changed} copy={copy} />
         {published !== undefined ? <ExpertiseList items={published} changed={changed} copy={copy} /> : <p className="text-sm text-muted-foreground">{copy.emptyValue}</p>}
@@ -316,6 +322,7 @@ function DiffRow({
   publishedDir,
   multiline = false,
   emptyValue,
+  changedMarker,
 }: {
   label: string;
   draft: string;
@@ -324,6 +331,7 @@ function DiffRow({
   publishedDir: "rtl" | "ltr";
   multiline?: boolean;
   emptyValue: string;
+  changedMarker: string;
 }) {
   const changed = published !== undefined && draft !== published;
   const valueClass = multiline ? "whitespace-pre-wrap" : "break-all";
@@ -331,7 +339,10 @@ function DiffRow({
   const publishedClass = changed ? "rounded-md bg-gx-orange-50 p-2 text-foreground" : "text-muted-foreground";
   return (
     <div className="border-b border-border pb-3 last:border-b-0">
-      <p className="text-xs font-semibold text-muted-foreground">{label}</p>
+      <p className="text-xs font-semibold text-muted-foreground">
+        {label}
+        {changed && <span className="ml-2 font-bold text-gx-orange-600">{changedMarker}</span>}
+      </p>
       <div className="mt-1 grid gap-2 text-sm md:grid-cols-2">
         <p dir={draftDir} className={`${valueClass} ${draftClass}`}><bdi>{draft || emptyValue}</bdi></p>
         {published !== undefined ? <p dir={publishedDir} className={`${valueClass} ${publishedClass}`}><bdi>{published || emptyValue}</bdi></p> : <p className="text-muted-foreground">{emptyValue}</p>}

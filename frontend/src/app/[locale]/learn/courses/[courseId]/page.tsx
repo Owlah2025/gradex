@@ -45,8 +45,16 @@ export const revalidate = 0;
  * one progress figure the server computes — then gets out of the way, because a Student arriving
  * here is choosing a Lesson, not reading a summary.
  */
-export default async function CourseHomePage({ params }: { params: Promise<{ locale: string; courseId: string }> }) {
+export default async function CourseHomePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string; courseId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const { locale: requestedLocale, courseId } = await params;
+  const pageParam = (await searchParams).page;
+  const page = typeof pageParam === "string" ? parseInt(pageParam, 10) || 1 : 1;
   const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
   const shell = shellLabels(dictionary);
@@ -54,8 +62,8 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
   try {
     const [course, announcementResult] = await Promise.all([
       requestCourseHomeServer(courseId, locale),
-      requestCourseAnnouncementsServer(courseId, locale)
-        .then((page) => ({ announcements: page.items as CourseAnnouncement[], failed: false, hasMore: page.has_more }))
+      requestCourseAnnouncementsServer(courseId, locale, page)
+        .then((p) => ({ announcements: p.items as CourseAnnouncement[], failed: false, hasMore: p.has_more }))
         .catch(() => ({ announcements: [] as CourseAnnouncement[], failed: true, hasMore: false })),
     ]);
     const { announcements, failed: announcementsFailed, hasMore: announcementsHaveMore } = announcementResult;
@@ -165,7 +173,11 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
               </div>
             )}
             {announcementsHaveMore && !announcementsFailed ? (
-              <p className="mt-4 text-sm text-muted-foreground">{dictionary.learning.announcementsMore}</p>
+              <div className="mt-4 text-sm text-muted-foreground">
+                <Link href={`/${locale}/learn/courses/${course.course_id}?page=${page + 1}`} className="underline underline-offset-4 hover:text-foreground">
+                  {dictionary.learning.announcementsMore}
+                </Link>
+              </div>
             ) : null}
           </section>
 

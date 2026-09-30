@@ -52,9 +52,10 @@ export function requestCourseHomeServer(courseID: string, locale: "ar" | "en"): 
 export function requestCourseAnnouncementsServer(
   courseID: string,
   locale: "ar" | "en",
+  page: number = 1,
 ): Promise<CourseAnnouncementPage> {
 	return requestProtectedRead<CourseAnnouncementPage>(
-		`/learn/courses/${encodeURIComponent(courseID)}/announcements?page=1`,
+		`/learn/courses/${encodeURIComponent(courseID)}/announcements?page=${page}`,
     locale,
   );
 }

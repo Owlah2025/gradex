@@ -15,11 +15,11 @@ const viewports = [
  * saved preference everywhere, so a page addressed `/en/…` renders English and
  * an Arabic assertion has to ask for `/ar/…`.
  *
- * `/instructor/courses` carries no locale segment at all, so it keeps reading
+ * `/instructor` carries no locale segment at all, so it keeps reading
  * the stored preference.
  */
 const surfaces = [
-  ["instructor", (_locale: "ar" | "en") => "/instructor/courses"],
+  ["instructor", (_locale: "ar" | "en") => "/instructor"],
   ["admin", (locale: "ar" | "en") => `/${locale}/admin/catalog`],
 ] as const;
 

@@ -148,7 +148,7 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
     () => courses.find((course) => course.id === selectedCourseID) ?? null,
     [courses, selectedCourseID],
   );
-  const revision = selectedCourse?.editable_revision ?? null;
+  const revision = selectedCourse?.editable_revision ?? selectedCourse?.live_revision ?? null;
   const sections = revision?.sections ?? [];
   const workflow = revisionWorkflow(selectedCourse);
   // D-097: which act the primary control performs. Read from the same durable

@@ -394,7 +394,7 @@ test.describe("UX-H where a session lands", () => {
   }
 
   for (const [role, principal, destination] of [
-    ["Instructor", INSTRUCTOR, /\/en\/instructor\/courses/],
+    ["Instructor", INSTRUCTOR, /\/en\/instructor(\/)?$/],
     ["Admin", ADMIN, /\/en\/admin\/catalog/],
   ] as const) {
     test(`an ${role}'s header offers their own workspace and no other`, async ({ browser }) => {

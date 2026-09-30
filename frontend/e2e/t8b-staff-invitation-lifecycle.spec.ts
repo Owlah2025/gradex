@@ -142,7 +142,7 @@ async function signInThroughLoginForm(context: BrowserContext, email: string): P
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(RECIPIENT_PASSWORD);
   await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL(/\/instructor\//, { timeout: 20_000 });
+  await page.waitForURL(/\/instructor(\/.*)?$/, { timeout: 20_000 });
   return page;
 }
 
@@ -185,7 +185,7 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
 
     // Completion issues no session: the new staff member signs in the ordinary way.
     const instructorPage = await signInThroughLoginForm(recipientContext, recipient);
-    await expect(instructorPage).toHaveURL(/\/en\/instructor\//);
+    await expect(instructorPage).toHaveURL(/\/en\/instructor(\/.*)?$/);
 
     // Server-authoritative capability, not a role field echoed back by the completion response.
     const instructorCookies = await recipientContext.cookies();
@@ -299,7 +299,7 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
     });
     await completeInvitationFromEmail(recipientContext, recipient, "Noura Instructor");
     const instructorPage = await signInThroughLoginForm(recipientContext, recipient);
-    await expect(instructorPage).toHaveURL(/\/en\/instructor\//);
+    await expect(instructorPage).toHaveURL(/\/en\/instructor(\/.*)?$/);
 
     // Suspension is performed from the Admin screen, by address and with a stated reason.
     await adminPage.reload();
@@ -372,7 +372,7 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
       window.localStorage.setItem("gradex.locale", "en");
     });
     const restoredPage = await signInThroughLoginForm(restoredContext, recipient);
-    await expect(restoredPage).toHaveURL(/\/en\/instructor\//);
+    await expect(restoredPage).toHaveURL(/\/en\/instructor(\/.*)?$/);
     await restoredContext.close();
 
     await recipientContext.close();

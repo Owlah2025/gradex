@@ -269,6 +269,7 @@ export const en = {
     draftColumn: "Draft",
     publishedColumn: "Published snapshot",
     emptyValue: "—",
+    changedMarker: "(Changed)",
     approve: "Approve",
     requestChanges: "Request changes",
     hide: "Hide profile",

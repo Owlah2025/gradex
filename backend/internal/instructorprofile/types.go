@@ -57,6 +57,7 @@ type Profile struct {
 	BioEn             string           `json:"bio_en"`
 	AvatarURL         *string          `json:"avatar_url,omitempty"`
 	PublicationState  PublicationState `json:"publication_state"`
+	PublicVisible     bool             `json:"public_visible"`
 	PublishedSnapshot *PublicSnapshot  `json:"published_snapshot,omitempty"`
 	Expertise         []ExpertiseItem  `json:"expertise"`
 	SubmittedAt       *time.Time       `json:"submitted_at,omitempty"`
@@ -73,6 +74,7 @@ type AdminListItem struct {
 	DisplayName      string           `json:"display_name"`
 	PublicSlug       *string          `json:"public_slug,omitempty"`
 	PublicationState PublicationState `json:"publication_state"`
+	PublicVisible    bool             `json:"public_visible"`
 	SubmittedAt      *time.Time       `json:"submitted_at,omitempty"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 	Revision         int              `json:"revision"`

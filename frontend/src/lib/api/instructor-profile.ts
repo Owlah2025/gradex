@@ -23,6 +23,7 @@ export type InstructorProfile = {
   headline_en: string;
   bio_ar: string;
   bio_en: string;
+  public_visible: boolean;
   publication_state: InstructorPublicationState;
   published_snapshot?: {
     public_slug: string;
@@ -46,6 +47,7 @@ export type InstructorProfileQueueItem = {
   account_id: string;
   display_name: string;
   public_slug?: string | null;
+  public_visible: boolean;
   publication_state: InstructorPublicationState;
   submitted_at?: string | null;
   updated_at: string;
