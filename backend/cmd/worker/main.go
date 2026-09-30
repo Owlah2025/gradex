@@ -98,6 +98,22 @@ func main() {
 			return
 		}
 	}
+	catalogSearchCleanupAvailable := false
+	{
+		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.CatalogSearchAnalyticsSchemaVersion)
+		cancel()
+		switch {
+		case err == nil:
+			catalogSearchCleanupAvailable = true
+		case errors.Is(err, db.ErrSchemaIncompatible), errors.Is(err, db.ErrSchemaMissing):
+			// Older workers remain compatible; the cleanup table is not mounted yet.
+		default:
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "catalog_search_cleanup_schema_check", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
+		}
+	}
 
 	storageClient, err := storage.New(ctx, storage.Options{
 		Endpoint:        cfg.S3Endpoint(),
@@ -258,6 +274,13 @@ func main() {
 			runEmailDispatcher(ctx, emailDispatcher, logger)
 		}
 	}()
+	catalogSearchCleanupDone := make(chan struct{})
+	go func() {
+		defer close(catalogSearchCleanupDone)
+		if catalogSearchCleanupAvailable {
+			runCatalogSearchCleanup(ctx, pool, logger)
+		}
+	}()
 
 	<-ctx.Done()
 	logger.WorkerLifecycle(logging.WorkerDraining)
@@ -266,6 +289,7 @@ func main() {
 	<-mediaRecoveryDone
 	<-autoRecoveryDone
 	<-emailDispatcherDone
+	<-catalogSearchCleanupDone
 	<-thumbnailCleanupDone
 	logger.WorkerLifecycle(logging.WorkerStopped)
 }
@@ -322,6 +346,25 @@ func runEmailDispatcher(ctx context.Context, dispatcher *transactionalemail.Disp
 		if _, err := dispatcher.DispatchPending(ctx, 25); err != nil && !errors.Is(err, context.Canceled) {
 			logger.WorkerFailed(logging.WorkerFailureEvent{
 				Operation: "transactional_email_dispatch", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runCatalogSearchCleanup(ctx context.Context, pool *pgxpool.Pool, logger *logging.Logger) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if _, err := pool.Exec(ctx, `
+			DELETE FROM catalog_search_events
+			 WHERE occurred_at < now() - interval '180 days'`); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "catalog_search_cleanup", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
 			})
 		}
 		select {

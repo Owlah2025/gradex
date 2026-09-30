@@ -6,6 +6,7 @@ import { listInstitutions, type Institution } from "@/lib/api/academic";
 import {
   listAdminAccounts,
   exportAdminAccounts,
+  isExportTooLarge,
   isRecentAuthRequired,
   type AccountRole,
   type AccountStatus,
@@ -157,7 +158,9 @@ export function AdminUsers() {
     } catch (cause) {
       const needsSignIn = isRecentAuthRequired(cause);
       setExportNeedsSignIn(needsSignIn);
-      setExportError(needsSignIn ? copy.recentAuth : describeApiError(cause, locale));
+      setExportError(
+        needsSignIn ? copy.recentAuth : isExportTooLarge(cause) ? copy.exportTooLarge : describeApiError(cause, locale),
+      );
     } finally {
       setExportBusy(false);
     }

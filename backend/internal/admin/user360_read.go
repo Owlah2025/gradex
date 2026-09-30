@@ -46,14 +46,14 @@ func (r *Repository) GetUser360(ctx context.Context, req User360Request) (User36
 	result := User360{Identity: identityView, Emails: []EmailDelivery{}}
 	if r.emailPayloadReader != nil {
 		emails, err := r.queryEmailDeliveries(ctx, tx, EmailDeliveriesRequest{
-			Locale: identityView.Locale, RecipientEmail: identityView.Email,
-			OccurredFrom: &identityView.CreatedAt, Page: 1, Limit: 50,
+			Locale: identityView.Locale, AccountID: identityView.ID, Page: 1, Limit: 50,
 			RevealRecipient: true,
 		})
 		if err != nil {
 			return User360{}, err
 		}
 		result.Emails = emails.Items
+		result.EmailsTruncated = emails.HasMore
 	}
 	switch identityView.Role {
 	case identity.RoleStudent:

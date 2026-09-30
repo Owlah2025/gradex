@@ -311,6 +311,8 @@ func writeAdminReadError(c *gin.Context, err error) {
 		writeProblem(c, problem.NotFound())
 	case errors.Is(err, adminread.ErrUnauthorized):
 		writeProblem(c, problem.NotAuthorized())
+	case errors.Is(err, adminread.ErrExportTooLarge):
+		writeProblem(c, problem.ExportTooLarge())
 	default:
 		writeProblem(c, problem.Internal(requestid.FromContext(c.Request.Context())))
 	}

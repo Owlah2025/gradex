@@ -35,8 +35,8 @@ func (r *Repository) ExportAccounts(
 	if err != nil {
 		return AccountExportResult{}, err
 	}
-	if len(accounts) > maxAccountExportRows {
-		return AccountExportResult{}, ErrInvalidInput
+	if len(accounts) > request.Limit {
+		return AccountExportResult{}, ErrExportTooLarge
 	}
 	if err := WritePrivilegedReadAudit(ctx, tx, PrivilegedReadAudit{
 		Principal:     request.Principal,

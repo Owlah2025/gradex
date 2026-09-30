@@ -3,7 +3,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 func TestT7AccountExportIsBoundedEscapedAuditedAndRecentAuthProtected(t *testing.T) {
@@ -104,10 +107,99 @@ func TestT7EmailVisibilityMasksGlobalRecipientsAndShowsFullUserContext(t *testin
 		t.Fatalf("User 360 email context = %+v", user.Emails)
 	}
 
+	var auditMetadata string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT metadata::text FROM audit_events
+		 WHERE action = 'ADMIN_EMAIL_DELIVERIES_VIEWED'
+		 ORDER BY occurred_at DESC LIMIT 1`).Scan(&auditMetadata); err != nil {
+		t.Fatalf("reading email visibility audit: %v", err)
+	}
+	if strings.Contains(auditMetadata, "alice@example.com") || !strings.Contains(auditMetadata, "filter_keys_present") {
+		t.Fatalf("email visibility audit metadata contains PII or lacks filter metadata: %s", auditMetadata)
+	}
+
 	denied := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/email-deliveries", instructorToken, "", instructorToken, nil)
 	denied.Body.Close()
 	if denied.StatusCode != http.StatusForbidden {
 		t.Fatalf("instructor email visibility status = %d, want 403", denied.StatusCode)
+	}
+}
+
+func TestT7EmailVisibilityReportsPaginationAndKeepsTheProbeRow(t *testing.T) {
+	ts, pool, _, _, _, _, adminToken, _ := setupAdminPricingAPIServer(t)
+	accountIDs := []string{
+		"10000000-0000-0000-0000-000000000003",
+		"10000000-0000-0000-0000-000000000004",
+		"10000000-0000-0000-0000-000000000005",
+	}
+	seedAdminDirectoryAccounts(t, pool, "10000000-0000-0000-0000-000000000100", accountIDs)
+	for _, destination := range []string{"alice@example.com", "bob@example.com", "charlie@example.com"} {
+		seedTransactionalEmailDelivery(t, pool, accountIDs[0], destination)
+	}
+
+	response := doPricingRequest(t, ts.Client(), http.MethodGet,
+		ts.URL+"/api/v1/admin/email-deliveries?limit=2", adminToken, "", adminToken, nil)
+	var page struct {
+		Items   []struct{} `json:"items"`
+		HasMore bool       `json:"has_more"`
+	}
+	decodeAdminResponse(t, response, http.StatusOK, &page)
+	if len(page.Items) != 2 || !page.HasMore {
+		t.Fatalf("email delivery pagination = items:%d has_more:%t, want 2/true", len(page.Items), page.HasMore)
+	}
+}
+
+func TestT7EmailVisibilityKeepsUndecryptableRowsReadable(t *testing.T) {
+	ts, pool, _, _, _, _, adminToken, _ := setupAdminPricingAPIServer(t)
+	accountID := "10000000-0000-0000-0000-000000000003"
+	seedAdminDirectoryAccounts(t, pool, "10000000-0000-0000-0000-000000000100", []string{accountID, "10000000-0000-0000-0000-000000000004", "10000000-0000-0000-0000-000000000005"})
+	seedTransactionalEmailDeliveryWithKey(t, pool, accountID, "alice@example.com", 0x43)
+
+	global := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/email-deliveries", adminToken, "", adminToken, nil)
+	var page struct {
+		Items []struct {
+			Recipient string `json:"recipient"`
+		} `json:"items"`
+	}
+	decodeAdminResponse(t, global, http.StatusOK, &page)
+	if len(page.Items) != 1 || page.Items[0].Recipient != "unavailable" {
+		t.Fatalf("undecryptable global email row = %+v", page.Items)
+	}
+
+	detail := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/accounts/"+accountID, adminToken, "", adminToken, nil)
+	var user struct {
+		Emails []struct {
+			Recipient string `json:"recipient"`
+		} `json:"emails"`
+	}
+	decodeAdminResponse(t, detail, http.StatusOK, &user)
+	if len(user.Emails) != 1 || user.Emails[0].Recipient != "unavailable" {
+		t.Fatalf("undecryptable User 360 email row = %+v", user.Emails)
+	}
+}
+
+func TestT7User360IncludesEmailHistoryOlderThanAccountCreation(t *testing.T) {
+	ts, pool, _, _, _, _, adminToken, _ := setupAdminPricingAPIServer(t)
+	accountIDs := []string{
+		"10000000-0000-0000-0000-000000000003",
+		"10000000-0000-0000-0000-000000000004",
+		"10000000-0000-0000-0000-000000000005",
+	}
+	seedAdminDirectoryAccounts(t, pool, "10000000-0000-0000-0000-000000000100", accountIDs)
+	seedTransactionalEmailDelivery(t, pool, accountIDs[0], "alice@example.com")
+	for index := 0; index < 500; index++ {
+		seedTransactionalEmailDelivery(t, pool, accountIDs[1+index%2], fmt.Sprintf("other-%d@example.com", index))
+	}
+
+	detail := doPricingRequest(t, ts.Client(), http.MethodGet, ts.URL+"/api/v1/admin/accounts/"+accountIDs[0], adminToken, "", adminToken, nil)
+	var user struct {
+		Emails []struct {
+			Recipient string `json:"recipient"`
+		} `json:"emails"`
+	}
+	decodeAdminResponse(t, detail, http.StatusOK, &user)
+	if len(user.Emails) != 1 || user.Emails[0].Recipient != "alice@example.com" {
+		t.Fatalf("old User 360 email history = %+v", user.Emails)
 	}
 }
 
@@ -125,6 +217,38 @@ func TestT7MediaFailuresRouteUsesAdminOperationsCapability(t *testing.T) {
 	}
 }
 
+func TestT7MediaFailuresExposeScannerFailuresAndStaleScanning(t *testing.T) {
+	ts, pool, _, ownerID, courseID, _, adminToken, _ := setupAdminPricingAPIServer(t)
+	scanErrorID := seedAdminMediaFailure(t, pool, ownerID, courseID, "SCAN_ERROR", "SCAN_UNAVAILABLE")
+	staleScanningID := seedAdminMediaFailure(t, pool, ownerID, courseID, "SCANNING", "")
+
+	response := doPricingRequest(t, ts.Client(), http.MethodGet,
+		ts.URL+"/api/v1/admin/media/failures", adminToken, "", adminToken, nil)
+	var result struct {
+		Items []struct {
+			AssetVersionID string `json:"asset_version_id"`
+			MediaState     string `json:"media_state"`
+			State          string `json:"state"`
+			RetryAction    string `json:"retry_action"`
+		} `json:"items"`
+	}
+	decodeAdminResponse(t, response, http.StatusOK, &result)
+	assertMediaFailure := func(id, mediaState, state, retryAction string) {
+		t.Helper()
+		for _, item := range result.Items {
+			if item.AssetVersionID == id {
+				if item.MediaState != mediaState || item.State != state || item.RetryAction != retryAction {
+					t.Fatalf("media failure %s = %+v, want state=%s/%s action=%s", id, item, mediaState, state, retryAction)
+				}
+				return
+			}
+		}
+		t.Fatalf("media failure %s missing from %+v", id, result.Items)
+	}
+	assertMediaFailure(scanErrorID, "SCAN_ERROR", "failed", "retry")
+	assertMediaFailure(staleScanningID, "SCANNING", "stuck", "")
+}
+
 func TestT7SearchMetricsPrioritizeZeroResultQueriesAndDeclareRetention(t *testing.T) {
 	ts, pool, _, _, _, _, adminToken, _ := setupAdminPricingAPIServer(t)
 	ctx := context.Background()
@@ -135,6 +259,10 @@ func TestT7SearchMetricsPrioritizeZeroResultQueriesAndDeclareRetention(t *testin
 	}{
 		{query: "biology", results: 2, locale: "en"},
 		{query: "biology", results: 0, locale: "en"},
+		{query: "biology", results: 3, locale: "en"},
+		{query: "biology", results: 1, locale: "en"},
+		{query: "quantum", results: 0, locale: "en"},
+		{query: "quantum", results: 0, locale: "en"},
 		{query: "quantum", results: 0, locale: "en"},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO catalog_search_events (normalized_query, result_count, locale) VALUES ($1, $2, $3)`, event.query, event.results, event.locale); err != nil {
@@ -163,10 +291,86 @@ func TestT7SearchMetricsPrioritizeZeroResultQueriesAndDeclareRetention(t *testin
 	}
 }
 
-func seedTransactionalEmailDelivery(t *testing.T, pool *pgxpool.Pool, accountID, destination string) string {
+func TestT7AccountExportUsesTheDedicatedTightRatePolicy(t *testing.T) {
+	store := &countingExportRateStore{}
+	ts, _, _, _, _, _, adminToken, _ := setupAdminPricingAPIServerWithRateStore(t, store)
+	for attempt := 1; attempt <= 6; attempt++ {
+		response := doPricingRequest(t, ts.Client(), http.MethodGet,
+			ts.URL+"/api/v1/admin/accounts/export", adminToken, "", adminToken, nil)
+		response.Body.Close()
+		want := http.StatusOK
+		if attempt == 6 {
+			want = http.StatusTooManyRequests
+		}
+		if response.StatusCode != want {
+			t.Fatalf("export attempt %d status = %d, want %d", attempt, response.StatusCode, want)
+		}
+	}
+	for _, entry := range store.firstEntries {
+		if strings.Contains(entry.Key, ":identifier:") {
+			if entry.Limit != 5 || entry.Window != time.Hour {
+				t.Fatalf("export identifier rate entry = %+v, want 5/hour", entry)
+			}
+			return
+		}
+	}
+	t.Fatalf("export rate store did not receive an identifier dimension: %+v", store.firstEntries)
+}
+
+type countingExportRateStore struct {
+	calls        int
+	firstEntries []ratelimit.Entry
+}
+
+func (s *countingExportRateStore) Decide(_ context.Context, entries []ratelimit.Entry) (bool, error) {
+	s.calls++
+	if s.calls == 1 {
+		s.firstEntries = append([]ratelimit.Entry(nil), entries...)
+	}
+	return s.calls <= 5, nil
+}
+
+func seedAdminMediaFailure(t *testing.T, pool *pgxpool.Pool, ownerID, courseID, state, failureCategory string) string {
 	t.Helper()
 	ctx := context.Background()
-	writer, err := outbox.NewWriter("key-v1", []byte("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"))
+	assetID := uuid.NewString()
+	versionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, 'PROTECTED')`, assetID, ownerID, courseID); err != nil {
+		t.Fatalf("seeding media asset: %v", err)
+	}
+	if state == "SCANNING" {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_asset_versions
+			(id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes,
+			 work_claim_token, work_claimed_at, work_lease_expires_at)
+			VALUES ($1::uuid, $2::uuid, 'VIDEO', 'SCANNING', $3, 'fixture-v1', 'video/mp4', 12,
+			 'fixture-claim', now() - interval '2 hours', now() - interval '1 hour')`,
+			versionID, assetID, "quarantine/"+versionID); err != nil {
+			t.Fatalf("seeding stale scanning version: %v", err)
+		}
+		return versionID
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_asset_versions
+		(id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes,
+		 last_failure_category)
+		VALUES ($1::uuid, $2::uuid, 'VIDEO', $3::media_asset_version_state, $4, 'fixture-v1', 'video/mp4', 12, $5)`,
+		versionID, assetID, state, "quarantine/"+versionID, failureCategory); err != nil {
+		t.Fatalf("seeding media failure version: %v", err)
+	}
+	return versionID
+}
+
+func seedTransactionalEmailDelivery(t *testing.T, pool *pgxpool.Pool, accountID, destination string) string {
+	return seedTransactionalEmailDeliveryWithKey(t, pool, accountID, destination, 0x42)
+}
+
+func seedTransactionalEmailDeliveryWithKey(t *testing.T, pool *pgxpool.Pool, accountID, destination string, keyByte byte) string {
+	t.Helper()
+	ctx := context.Background()
+	writer, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{keyByte}, 32))
 	if err != nil {
 		t.Fatalf("constructing email visibility writer: %v", err)
 	}

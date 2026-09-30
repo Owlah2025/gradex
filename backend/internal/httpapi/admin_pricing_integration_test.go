@@ -71,14 +71,22 @@ func (r *tokenSessionRepo) Resolve(_ context.Context, request identity.SessionRe
 }
 
 func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
-	return setupAdminPricingAPIServerWithDevices(t, 15*time.Minute, nil)
+	return setupAdminPricingAPIServerWithRateStore(t, fakeRateStore{})
 }
 
 func setupAdminPricingAPIServerWithRecentAuthWindow(t *testing.T, recentAuthWindow time.Duration) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
-	return setupAdminPricingAPIServerWithDevices(t, recentAuthWindow, nil)
+	return setupAdminPricingAPIServerWithDevicesAndRateStore(t, recentAuthWindow, nil, fakeRateStore{})
 }
 
 func setupAdminPricingAPIServerWithDevices(t *testing.T, recentAuthWindow time.Duration, devices adminUser360DeviceReader) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
+	return setupAdminPricingAPIServerWithDevicesAndRateStore(t, recentAuthWindow, devices, fakeRateStore{})
+}
+
+func setupAdminPricingAPIServerWithRateStore(t *testing.T, store ratelimit.Store) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
+	return setupAdminPricingAPIServerWithDevicesAndRateStore(t, 15*time.Minute, nil, store)
+}
+
+func setupAdminPricingAPIServerWithDevicesAndRateStore(t *testing.T, recentAuthWindow time.Duration, devices adminUser360DeviceReader, rateStore ratelimit.Store) (*httptest.Server, *pgxpool.Pool, string, string, string, string, string, string) {
 	t.Helper()
 	freshSchema(t)
 	p, ctx := pool(t)
@@ -138,11 +146,17 @@ func setupAdminPricingAPIServerWithDevices(t *testing.T, recentAuthWindow time.D
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)
 	}
+	limiter, _ := ratelimit.New(rateStore, bytes.Repeat([]byte{0x31}, 32), time.Second)
 	adminRepository, err := adminread.NewRepositoryWithOptions(p, adminread.RepositoryOptions{Devices: devices, EmailPayloadReader: obWriter})
 	if err != nil {
 		t.Fatalf("admin repository: %v", err)
 	}
-	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{Service: adminRepository, RecentAuthWindow: recentAuthWindow})
+	adminFoundation, err := NewAdminFoundation(AdminFoundationOptions{
+		Service: adminRepository, Limiter: limiter, RecentAuthWindow: recentAuthWindow,
+		EndpointPolicies: map[string]ratelimit.Policy{
+			"admin-account-export": ratelimit.AdminExportPolicy("admin-account-export"),
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewAdminFoundation: %v", err)
 	}
@@ -201,7 +215,6 @@ func setupAdminPricingAPIServerWithDevices(t *testing.T, recentAuthWindow time.D
 		},
 	}
 
-	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
 	sessionPolicies := testSessionEndpointPolicies()
 
 	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{

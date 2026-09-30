@@ -18,6 +18,7 @@ const (
 	emailVisibilityTargetType = "TRANSACTIONAL_EMAIL_DELIVERIES"
 	emailVisibilityTargetID   = "DELIVERIES"
 	emailUserScanLimit        = 500
+	emailRecipientUnavailable = "unavailable"
 )
 
 // ProtectedPayloadReader is deliberately narrower than the outbox writer. The
@@ -168,21 +169,27 @@ func (r *Repository) queryEmailDeliveries(
 	defer rows.Close()
 
 	items := make([]EmailDelivery, 0, request.Limit)
+	maxItems := request.Limit + 1
+	if request.RecipientEmail != "" {
+		maxItems = request.Limit
+	}
 	for rows.Next() {
-		item, recipient, err := r.scanEmailDelivery(ctx, rows)
+		item, recipient, recipientAvailable, err := r.scanEmailDelivery(ctx, rows)
 		if err != nil {
 			return EmailDeliveriesResult{}, err
 		}
-		if request.RecipientEmail != "" && !strings.EqualFold(recipient, request.RecipientEmail) {
+		if request.RecipientEmail != "" && (!recipientAvailable || !strings.EqualFold(recipient, request.RecipientEmail)) {
 			continue
 		}
-		if !request.RevealRecipient {
+		if !recipientAvailable {
+			item.Recipient = emailRecipientUnavailable
+		} else if !request.RevealRecipient {
 			item.Recipient = maskEmail(recipient)
 		} else {
 			item.Recipient = recipient
 		}
 		items = append(items, item)
-		if len(items) == request.Limit {
+		if len(items) == maxItems {
 			break
 		}
 	}
@@ -217,7 +224,7 @@ func emailDeliveryWhere(request EmailDeliveriesRequest) (string, []any) {
 		add("d.template_contract = $%d", strings.TrimSpace(request.Kind))
 	}
 	if request.AccountID != "" {
-		add("e.aggregate_id = $%d::uuid", request.AccountID)
+		add(accountEmailDeliveryCondition(), request.AccountID)
 	}
 	if request.OccurredFrom != nil {
 		add("e.occurred_at >= $%d", request.OccurredFrom.UTC())
@@ -228,7 +235,40 @@ func emailDeliveryWhere(request EmailDeliveriesRequest) (string, []any) {
 	return strings.Join(conditions, " AND "), args
 }
 
-func (r *Repository) scanEmailDelivery(ctx context.Context, rows pgx.Rows) (EmailDelivery, string, error) {
+func accountEmailDeliveryCondition() string {
+	return `EXISTS (
+		SELECT 1
+		  FROM accounts target_account
+		 WHERE target_account.id = $%d::uuid
+		   AND (
+			(e.aggregate_type = 'ACCOUNT' AND e.aggregate_id = target_account.id)
+			OR (e.aggregate_type = 'ENTITLEMENT' AND EXISTS (
+				SELECT 1 FROM entitlements entitlement
+				 WHERE entitlement.id = e.aggregate_id
+				   AND entitlement.student_account_id = target_account.id
+			))
+			OR (e.aggregate_type = 'COURSE_ACCESS_INVITATION' AND EXISTS (
+				SELECT 1 FROM course_access_invitations invitation
+				 WHERE invitation.id = e.aggregate_id
+				   AND (invitation.accepted_by_account_id = target_account.id
+					OR invitation.normalized_email = target_account.normalized_email)
+			))
+			OR (e.aggregate_type = 'PURCHASE_REQUEST' AND EXISTS (
+				SELECT 1 FROM purchase_requests purchase_request
+				 WHERE purchase_request.id = e.aggregate_id
+				   AND (purchase_request.requester_account_id = target_account.id
+					OR purchase_request.normalized_email = target_account.normalized_email)
+			))
+			OR (e.aggregate_type = 'STAFF_INVITATION' AND EXISTS (
+				SELECT 1 FROM staff_invitations staff_invitation
+				 WHERE staff_invitation.id = e.aggregate_id
+				   AND staff_invitation.normalized_email = target_account.normalized_email
+			))
+		   )
+	)`
+}
+
+func (r *Repository) scanEmailDelivery(ctx context.Context, rows pgx.Rows) (EmailDelivery, string, bool, error) {
 	var event outbox.Event
 	var availableAt time.Time
 	var templateContract, locale, status string
@@ -245,25 +285,27 @@ func (r *Repository) scanEmailDelivery(ctx context.Context, rows pgx.Rows) (Emai
 		&attemptCount, &lastFailure, &queuedAt, &acceptedAt, &terminalAt,
 		&updatedAt, &attemptedAt, &payload.KeyVersion, &nonce, &ciphertext,
 	); err != nil {
-		return EmailDelivery{}, "", fmt.Errorf("scanning email delivery row: %w", err)
+		return EmailDelivery{}, "", false, fmt.Errorf("scanning email delivery row: %w", err)
 	}
 	event.AvailableAt = &availableAt
 	payload.Nonce = nonce
 	payload.Ciphertext = ciphertext
-	var protected protectedEmailPayload
-	if err := r.emailPayloadReader.OpenProtectedPayload(ctx, event, payload, &protected); err != nil {
-		return EmailDelivery{}, "", fmt.Errorf("opening email delivery destination: %w", err)
-	}
 	item := EmailDelivery{
 		ID: event.ID, Kind: templateContract, Locale: identity.Locale(locale),
-		State: normalizedEmailState(status), Recipient: protected.Destination,
+		State:    normalizedEmailState(status),
 		QueuedAt: queuedAt, AttemptedAt: attemptedAt, DeliveredAt: acceptedAt,
 		FailedAt: terminalAt, UpdatedAt: updatedAt, AttemptCount: attemptCount,
 	}
 	if lastFailure != nil {
 		item.LastErrorClass = *lastFailure
 	}
-	return item, protected.Destination, nil
+	var protected protectedEmailPayload
+	if err := r.emailPayloadReader.OpenProtectedPayload(ctx, event, payload, &protected); err != nil {
+		item.Recipient = emailRecipientUnavailable
+		return item, "", false, nil
+	}
+	item.Recipient = protected.Destination
+	return item, protected.Destination, true, nil
 }
 
 func normalizedEmailState(status string) string {

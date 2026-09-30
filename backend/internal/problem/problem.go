@@ -123,6 +123,12 @@ func ValidationFailed() Problem {
 		"One or more fields are invalid.")
 }
 
+func ExportTooLarge() Problem {
+	return New(http.StatusUnprocessableEntity, "export-too-large",
+		"Export limit reached",
+		"Narrow the filters; exports are limited to 5,000 rows.")
+}
+
 // LessonPreviewNeedsVideo reports the one authoring state anonymous Lesson
 // preview refuses: a Lesson marked publicly previewable that carries no video.
 //

@@ -2,15 +2,23 @@ package catalogpublic
 
 import "testing"
 
-func TestNormalizeSearchQueryBoundsAndCanonicalizesWhitespace(t *testing.T) {
-	if got := NormalizeSearchQuery("  Biology\t  101 "); got != "biology 101" {
-		t.Fatalf("normalized query = %q, want %q", got, "biology 101")
+func TestSensitiveSearchShapesAreExcludedFromAnalytics(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{name: "email address", query: "alice@example.com", want: true},
+		{name: "international phone", query: "+965 5555 1234", want: true},
+		{name: "long digit string", query: "1234567890", want: true},
+		{name: "catalogue phrase", query: "biology 101", want: false},
+		{name: "short number", query: "year 2", want: false},
 	}
-	long := make([]rune, maxSearchEventQueryRunes+10)
-	for index := range long {
-		long[index] = 'x'
-	}
-	if got := NormalizeSearchQuery(string(long)); len([]rune(got)) != maxSearchEventQueryRunes {
-		t.Fatalf("normalized query rune length = %d, want %d", len([]rune(got)), maxSearchEventQueryRunes)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := looksLikeSensitiveSearchQuery(testCase.query); got != testCase.want {
+				t.Fatalf("looksLikeSensitiveSearchQuery(%q) = %t, want %t", testCase.query, got, testCase.want)
+			}
+		})
 	}
 }

@@ -71,6 +71,7 @@ func querySearchMetrics(
 		  FROM catalog_search_events
 		 WHERE occurred_at >= $1`+filter+`
 		 GROUP BY normalized_query, locale
+		 HAVING COUNT(*) >= 3
 		 ORDER BY `+order+`
 		 LIMIT 10`, since)
 	if err != nil {

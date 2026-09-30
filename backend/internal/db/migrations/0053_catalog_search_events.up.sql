@@ -20,5 +20,8 @@ CREATE INDEX catalog_search_events_occurred_idx
 CREATE INDEX catalog_search_events_query_locale_idx
     ON catalog_search_events (normalized_query, locale, occurred_at DESC);
 
+CREATE INDEX transactional_email_deliveries_updated_event_idx
+    ON transactional_email_deliveries (updated_at DESC, event_id DESC);
+
 COMMENT ON TABLE catalog_search_events IS
     'Anonymous catalogue search analytics retained for 180 days by operational cleanup; contains normalized query, result count, locale, and occurrence time only.';

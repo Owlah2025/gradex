@@ -14,6 +14,7 @@ var (
 	ErrAccountNotFound            = errors.New("admin account was not found")
 	ErrCourseNotFound             = errors.New("admin course was not found")
 	ErrEmailVisibilityUnavailable = errors.New("admin email visibility is unavailable")
+	ErrExportTooLarge             = errors.New("admin account export exceeds the requested limit")
 )
 
 const (
@@ -149,6 +150,7 @@ type EmailDeliveriesResult struct {
 type MediaFailuresRequest struct {
 	Principal identity.Principal
 	Locale    identity.Locale
+	State     string
 	Page      int
 	Limit     int
 }

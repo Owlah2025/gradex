@@ -6,6 +6,7 @@ import {
   retryAdminMedia,
   retryAdminMediaEnhancements,
   type AdminMediaFailure,
+  type AdminMediaFailureState,
   type AdminMediaFailurePage,
 } from "@/lib/api/admin-operations";
 import { describeApiError } from "@/lib/api/api-error";
@@ -30,27 +31,27 @@ export function AdminMediaFailures() {
   const [result, setResult] = useState<AdminMediaFailurePage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "failed" | "stuck">("all");
+  const [filter, setFilter] = useState<AdminMediaFailureState>("");
   const [page, setPage] = useState(1);
   const [pending, setPending] = useState<AdminMediaFailure | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   const load = useCallback(async () => {
     setState("loading");
     setError(null);
     try {
-      setResult(await listAdminMediaFailures(locale, page, PAGE_LIMIT));
+      setResult(await listAdminMediaFailures(locale, page, PAGE_LIMIT, filter));
       setState("ready");
     } catch (cause) {
       setError(describeApiError(cause, locale));
       setState("failed");
     }
-  }, [locale, page]);
+  }, [filter, locale, page]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const visible = useMemo(() => result?.items.filter((item) => filter === "all" || item.state === filter) ?? [], [filter, result]);
+  const visible = useMemo(() => result?.items ?? [], [result]);
   const runRetry = async () => {
     if (!pending || busy || !pending.retry_action) return;
     setBusy(true);
@@ -61,28 +62,28 @@ export function AdminMediaFailures() {
       } else {
         await retryAdminMedia(pending.asset_version_id, locale);
       }
-      setNotice(copy.retryQueued);
+      setNotice({ tone: "success", message: copy.retryQueued });
       setPending(null);
       await load();
     } catch (cause) {
-      setNotice(describeApiError(cause, locale));
+      setNotice({ tone: "error", message: describeApiError(cause, locale) });
     } finally {
       setBusy(false);
     }
   };
 
   return <WorkspacePage testID="admin-media-failures-page">
-    <WorkspacePageHeader title={copy.title} description={copy.description} actions={<Select aria-label={copy.filterLabel} value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="all">{copy.allStates}</option><option value="failed">{copy.failed}</option><option value="stuck">{copy.stuck}</option></Select>} />
+    <WorkspacePageHeader title={copy.title} description={copy.description} actions={<Select aria-label={copy.filterLabel} value={filter} onChange={(event) => { setFilter(event.target.value as AdminMediaFailureState); setPage(1); }}><option value="">{copy.allStates}</option><option value="failed">{copy.failed}</option><option value="stuck">{copy.stuck}</option></Select>} />
     <WorkspaceToolbar><p className="max-w-3xl text-sm text-muted-foreground">{copy.safetyNote}</p></WorkspaceToolbar>
-    {notice ? <div className="mt-4"><Alert tone="info" title={notice} /></div> : null}
+    {notice ? <div className="mt-4"><Alert tone={notice.tone} title={notice.message} /></div> : null}
     {state === "failed" ? <ErrorState className="mt-6" title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={() => void load()} /> : null}
     {state === "loading" ? <LoadingState className="mt-6" label={copy.loading} /> : null}
     {state === "ready" && visible.length === 0 ? <div className="mt-6"><EmptyState title={copy.empty} description={copy.emptyDescription} /></div> : null}
     {state === "ready" && visible.length > 0 ? <>
       <div className="mt-6 hidden md:block"><FailureTable items={visible} copy={copy} locale={locale} onRetry={setPending} /></div>
       <ul className="mt-6 space-y-3 md:hidden" aria-label={copy.title}>{visible.map((item) => <li key={item.asset_version_id}><FailureCard item={item} copy={copy} locale={locale} onRetry={setPending} /></li>)}</ul>
-      <nav className="mt-6 flex items-center justify-between gap-3" aria-label={copy.pagination}><Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{copy.previous}</Button><span className="text-sm font-semibold text-muted-foreground">{copy.page} {page}</span><Button type="button" variant="outline" size="sm" disabled={!result?.has_more} onClick={() => setPage((value) => value + 1)}>{copy.next}</Button></nav>
     </> : null}
+    {state === "ready" && result ? <nav className="mt-6 flex items-center justify-between gap-3" aria-label={copy.pagination}><Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{copy.previous}</Button><span className="text-sm font-semibold text-muted-foreground">{copy.page} {page}</span><Button type="button" variant="outline" size="sm" disabled={!result.has_more} onClick={() => setPage((value) => value + 1)}>{copy.next}</Button></nav> : null}
     <ConfirmDialog open={pending !== null} onOpenChange={(open) => { if (!busy && !open) setPending(null); }} title={copy.confirmTitle} body={pending?.retry_action === "retry-enhancements" ? copy.confirmEnhancements : copy.confirmRetry} confirmLabel={copy.confirm} cancelLabel={copy.cancel} busy={busy} onConfirm={() => void runRetry()} testID="admin-media-failure-confirm" />
   </WorkspacePage>;
 }

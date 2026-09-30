@@ -19,7 +19,7 @@ func (r *Repository) ListMediaFailures(
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT count(*) OVER (), mav.id::text, mav.state::text,
-		       CASE WHEN mav.state = 'PROCESS_FAILED' THEN 'failed' ELSE 'stuck' END,
+		       CASE WHEN mav.state IN ('PROCESS_FAILED', 'SCAN_ERROR', 'SCAN_FAILED') THEN 'failed' ELSE 'stuck' END,
 		       mav.kind::text,
 		       COALESCE(live.title_ar, latest.title_ar, ''),
 		       COALESCE(live.title_en, latest.title_en, ''),
@@ -28,7 +28,7 @@ func (r *Repository) ListMediaFailures(
 		       mav.processing_stage, mav.processing_progress_percent,
 		       mav.created_at, COALESCE(mav.processing_updated_at, mav.created_at),
 		       CASE
-		         WHEN mav.state = 'PROCESS_FAILED' THEN 'retry'
+		         WHEN mav.state IN ('PROCESS_FAILED', 'SCAN_ERROR', 'SCAN_FAILED') THEN 'retry'
 		         WHEN mav.state = 'PLAYABLE' AND recovery.state = 'NEEDS_OPERATOR' THEN 'retry-enhancements'
 		         ELSE ''
 		       END
@@ -48,12 +48,7 @@ func (r *Repository) ListMediaFailures(
 		  LEFT JOIN media_auto_enhancement_recovery recovery
 		    ON recovery.asset_version_id = mav.id
 		 WHERE ma.retired_at IS NULL
-		   AND (
-			 mav.state = 'PROCESS_FAILED'
-			 OR (mav.state = 'PROCESSING' AND
-			     (mav.work_lease_expires_at IS NULL OR mav.work_lease_expires_at <= now()))
-			 OR (mav.state = 'PLAYABLE' AND recovery.state = 'NEEDS_OPERATOR')
-		   )
+		   AND (`+mediaFailureWhere(request.State)+`)
 		 ORDER BY COALESCE(mav.processing_updated_at, mav.created_at) ASC, mav.id ASC
 		 LIMIT $1 OFFSET $2`, request.Limit+1, (request.Page-1)*request.Limit)
 	if err != nil {
@@ -107,7 +102,23 @@ func validateMediaFailuresRequest(request MediaFailuresRequest) error {
 	if !request.Locale.Valid() || !validPage(request.Page, request.Limit) {
 		return ErrInvalidInput
 	}
+	if request.State != "" && request.State != "failed" && request.State != "stuck" {
+		return ErrInvalidInput
+	}
 	return nil
+}
+
+func mediaFailureWhere(state string) string {
+	failed := "mav.state IN ('PROCESS_FAILED', 'SCAN_ERROR', 'SCAN_FAILED')"
+	stuck := "((mav.state IN ('SCANNING', 'PROCESSING') AND (mav.work_lease_expires_at IS NULL OR mav.work_lease_expires_at <= now())) OR (mav.state = 'PLAYABLE' AND recovery.state = 'NEEDS_OPERATOR'))"
+	switch state {
+	case "failed":
+		return failed
+	case "stuck":
+		return stuck
+	default:
+		return failed + " OR " + stuck
+	}
 }
 
 var _ interface {

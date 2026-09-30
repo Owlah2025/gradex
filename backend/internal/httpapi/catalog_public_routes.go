@@ -1,12 +1,10 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,8 +21,8 @@ const (
 )
 
 type publicCatalogHandlers struct {
-	repository        *catalogpublic.Repository
-	searchEventWriter func(context.Context, string, int, string) error
+	repository          *catalogpublic.Repository
+	searchEventRecorder func(string, int, string)
 }
 
 func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoundation) error {
@@ -32,7 +30,7 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 		return errors.New("complete public catalogue foundation is required")
 	}
 
-	handlers := &publicCatalogHandlers{repository: foundation.repository, searchEventWriter: foundation.searchEventWriter}
+	handlers := &publicCatalogHandlers{repository: foundation.repository, searchEventRecorder: foundation.searchEventRecorder}
 	catalog := v1.Group("/catalog")
 	catalog.Use(publicCatalogCache())
 	catalog.GET("/courses", handlers.list)
@@ -88,20 +86,16 @@ func (h *publicCatalogHandlers) browseSubjects(c *gin.Context) {
 }
 
 func (h *publicCatalogHandlers) recordSearchEvent(query string, resultCount int, arabic bool) {
-	if h.searchEventWriter == nil {
+	if h.searchEventRecorder == nil {
 		return
 	}
 	locale := "en"
 	if arabic {
 		locale = "ar"
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		// Analytics is deliberately best-effort: catalogue availability and
-		// latency must never depend on the optional telemetry write.
-		_ = h.searchEventWriter(ctx, query, resultCount, locale)
-	}()
+	// Analytics is deliberately best-effort: the recorder is bounded, sampled,
+	// and asynchronous so catalogue availability never depends on telemetry.
+	h.searchEventRecorder(query, resultCount, locale)
 }
 
 func (h *publicCatalogHandlers) subjectDetail(c *gin.Context) {
@@ -223,7 +217,7 @@ func (h *publicCatalogHandlers) list(c *gin.Context) {
 		writeProblem(c, problem.Internal(""))
 		return
 	}
-	if searching && strings.TrimSpace(query) != "" {
+	if searching && page == 1 && strings.TrimSpace(query) != "" {
 		h.recordSearchEvent(query, result.Total, publicCatalogArabic(c))
 	}
 	c.JSON(http.StatusOK, result)

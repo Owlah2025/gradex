@@ -211,7 +211,7 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
       <Select id="admin-user-tab-select" className="md:hidden" value={activeTab} onChange={(event) => setActiveTab(event.target.value as Tab)}>{visibleTabs.map((tab) => <option key={tab} value={tab}>{copy.tabs[tab]}</option>)}</Select>
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as Tab)} dir={locale === "ar" ? "rtl" : "ltr"} className="mt-4">
         <TabsList className="hidden flex-wrap md:flex" aria-label={copy.sectionsLabel}>{visibleTabs.map((tab) => <TabsTrigger key={tab} value={tab}>{copy.tabs[tab]}</TabsTrigger>)}</TabsList>
-        <TabsContent value="overview"><Overview account={account} emails={emails} student={student} instructor={instructor} copy={copy} locale={locale} /></TabsContent>
+        <TabsContent value="overview"><Overview account={account} emails={emails} emailsTruncated={model.emails_truncated === true} student={student} instructor={instructor} copy={copy} locale={locale} /></TabsContent>
         {student ? <TabsContent value="access"><AccessPanel student={student} copy={copy} locale={locale} options={courseOptions} selectedCourse={selectedCourse} onCourseChange={setSelectedCourse} onGrant={() => setPending({ kind: "grant" })} onAction={(next) => { setReason(""); setExpiryDate(""); setPending(next); }} /></TabsContent> : null}
         {student ? <TabsContent value="progress"><ProgressPanel student={student} copy={copy} locale={locale} /></TabsContent> : null}
         {student ? <TabsContent value="security"><SecurityPanel accountID={accountID} student={student} copy={copy} locale={locale} onAction={(next) => { setReason(""); setPending(next); }} /></TabsContent> : null}
@@ -224,17 +224,19 @@ export function AdminUserDetail({ accountID }: { accountID: string }) {
   </WorkspacePage>;
 }
 
-function Overview({ account, emails, student, instructor, copy, locale }: { account: AdminUser360["identity"]; emails: AdminEmailDelivery[]; student?: AdminUser360["student"]; instructor?: AdminUser360["instructor"]; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en" }) {
+function Overview({ account, emails, emailsTruncated, student, instructor, copy, locale }: { account: AdminUser360["identity"]; emails: AdminEmailDelivery[]; emailsTruncated: boolean; student?: AdminUser360["student"]; instructor?: AdminUser360["instructor"]; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en" }) {
   return <>
     <WorkspaceSection title={copy.identitySection} description={copy.identityDescription}><div className="rounded-lg border border-border bg-card p-5"><dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"><IdentityFact label={copy.name} value={account.display_name} /><IdentityFact label={copy.email} value={account.email} direction="ltr" /><IdentityFact label={copy.role} value={copy.roles[account.role]} /><IdentityFact label={copy.statusLabel} value={copy.status[account.status]} /><IdentityFact label={copy.locale} value={account.locale === "ar" ? copy.arabic : copy.english} /><IdentityFact label={copy.emailVerified} value={account.email_verified ? copy.verified : copy.notVerified} /><IdentityFact label={copy.joined} value={formatDate(account.created_at, locale)} /><IdentityFact label={copy.lastActivity} value={account.last_sign_in_activity_at ? formatDateTime(account.last_sign_in_activity_at, locale) : copy.noActivity} /><IdentityFact label={copy.learningActivity} value={account.last_learning_activity_at ? formatDateTime(account.last_learning_activity_at, locale) : copy.noActivity} /></dl></div></WorkspaceSection>
-    <EmailPanel emails={emails} copy={copy} locale={locale} />
+    <EmailPanel emails={emails} emailsTruncated={emailsTruncated} copy={copy} locale={locale} />
     {student?.academic_profile ? <WorkspaceSection title={copy.academicProfile} description={copy.academicDescription}><Facts values={[[copy.institution, student.academic_profile.institution_label || copy.notAvailable], [copy.academicUnit, student.academic_profile.academic_unit_label || copy.notAvailable], [copy.program, student.academic_profile.program_label || copy.notAvailable], [copy.curriculum, student.academic_profile.curriculum_label || copy.notAvailable], [copy.enrollmentStatus, labelFor(copy.enrollmentStatuses, student.academic_profile.enrollment_status, copy.unknownValue)], [copy.level, student.academic_profile.current_level ? String(student.academic_profile.current_level) : copy.notAvailable]]} /></WorkspaceSection> : null}
     {instructor ? <WorkspaceSection title={copy.ownedCourses} description={copy.instructorDescription}><CourseTable courses={instructor.owned_courses} copy={copy} locale={locale} instructor /></WorkspaceSection> : null}
   </>;
 }
 
-function EmailPanel({ emails, copy, locale }: { emails: AdminEmailDelivery[]; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en" }) {
+function EmailPanel({ emails, emailsTruncated, copy, locale }: { emails: AdminEmailDelivery[]; emailsTruncated: boolean; copy: ReturnType<typeof useLocale>["t"]["adminUserDetail"]; locale: "ar" | "en" }) {
+  const errors = copy.errorClasses as Record<string, string>;
   return <WorkspaceSection title={copy.emailsTitle} description={copy.emailsDescription}>
+    {emailsTruncated ? <p className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">{copy.emailsPartial}</p> : null}
     {emails.length === 0 ? <EmptyState density="compact" title={copy.noEmails} /> : (
       <div className="space-y-3">
         {emails.map((email) => (
@@ -242,7 +244,7 @@ function EmailPanel({ emails, copy, locale }: { emails: AdminEmailDelivery[]; co
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-semibold text-foreground">{(copy.emailKinds as Record<string, string>)[email.kind] ?? copy.unknownValue}</p>
-                <p className="mt-1 text-sm text-muted-foreground" dir="ltr"><bdi>{email.recipient}</bdi></p>
+                <p className="mt-1 text-sm text-muted-foreground" dir="ltr"><bdi>{email.recipient === "unavailable" ? copy.recipientUnavailable : email.recipient}</bdi></p>
               </div>
               <StatusBadge tone={email.state === "delivered" ? "success" : email.state === "failed" ? "accent" : "neutral"} label={copy.emailStates[email.state]} />
             </div>
@@ -250,7 +252,7 @@ function EmailPanel({ emails, copy, locale }: { emails: AdminEmailDelivery[]; co
               <IdentityFact label={copy.emailQueued} value={formatDateTime(email.queued_at, locale)} />
               <IdentityFact label={copy.emailAttempted} value={email.attempted_at ? formatDateTime(email.attempted_at, locale) : copy.notAvailable} />
               <IdentityFact label={copy.emailAttempts} value={String(email.attempt_count)} />
-              <IdentityFact label={copy.emailLastError} value={email.last_error_class || copy.notAvailable} />
+              <IdentityFact label={copy.emailLastError} value={email.last_error_class ? (errors[email.last_error_class] ?? copy.unknownValue) : copy.notAvailable} />
             </dl>
           </article>
         ))}

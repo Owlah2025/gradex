@@ -300,15 +300,9 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // introduces the table, not the one before it. Automatic device rotation also
 // writes AUTO_REPLACED, introduced in schema 43; readiness requires that enum.
 //
-// The floor is now schema 44, because Admin payment confirmation grants Course
-// access directly. GrantDirectCoursePurchaseAccess inserts an Entitlement with
-// grant_source = 'PURCHASE_REQUEST', source_invitation_id NULL and
-// source_purchase_request_id set, and moves the request to ACCESS_GRANTED with no
-// invitation. Schema 43 refuses both shapes — ent_purchase_needs_invitation
-// requires the invitation, and purchase_requests_transition_coherent requires it
-// on a granted COURSE request — so a process serving schema 43 would report ready
-// and then fail every payment confirmation on a constraint violation, after the
-// Administrator has already taken the money. Readiness fails closed instead.
+// T4–T7 mounted routes read the instructor profile, completion, announcement,
+// catalogue search analytics, and operations tables, so readiness must stay at
+// the schema that introduces the latest of those tables.
 func requiredSchemaVersion(cfg *config.Config) int64 {
 	return db.CatalogSearchAnalyticsSchemaVersion
 }
@@ -890,7 +884,7 @@ func buildAdminFoundation(
 		EndpointPolicies: map[string]ratelimit.Policy{
 			"admin-notes":               ratelimit.AdminMutationPolicy("admin-notes"),
 			"admin-session-revocations": ratelimit.AdminMutationPolicy("admin-session-revocations"),
-			"admin-account-export":      ratelimit.AdminMutationPolicy("admin-account-export"),
+			"admin-account-export":      ratelimit.AdminExportPolicy("admin-account-export"),
 		},
 		RecentAuthWindow: recentAuthWindow,
 	})

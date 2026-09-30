@@ -767,19 +767,15 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 // TestRequiredSchemaVersionCoversMountedRoutes pins the readiness floor to the
 // newest schema any mounted route actually WRITES or reads.
 //
-// The floor is schema 44. Admin payment confirmation grants Course access
-// directly: it inserts an Entitlement with grant_source = 'PURCHASE_REQUEST' and
-// no invitation, and moves the purchase request to ACCESS_GRANTED with no
-// invitation. Schema 43 refuses both — ent_purchase_needs_invitation and the
-// schema-43 purchase_requests_transition_coherent each require the invitation —
-// so a process serving 43 would report ready and then fail confirmation after the
-// Administrator had already taken the money.
+// The floor is schema 53. T4–T7 mounted routes read the instructor profile,
+// completion, announcement, catalogue search analytics, and operations tables;
+// serving an earlier schema would report ready and then fail on those reads.
 //
 // The earlier floor of 38 (subject_demand_signals, D-106) and 43 (AUTO_REPLACED
 // device rotation) are both still covered, because the floor only rises.
 func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
-	if got := requiredSchemaVersion(nil); got != db.DirectPurchaseAccessGrantSchemaVersion {
-		t.Fatalf("required schema = %d, want %d", got, db.DirectPurchaseAccessGrantSchemaVersion)
+	if got := requiredSchemaVersion(nil); got != db.CatalogSearchAnalyticsSchemaVersion {
+		t.Fatalf("required schema = %d, want %d", got, db.CatalogSearchAnalyticsSchemaVersion)
 	}
 	// The floor must never exceed what this build can serve, or readiness would
 	// be unsatisfiable at every version.
@@ -799,12 +795,12 @@ func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
 	}
 }
 
-// TestSchemaFloorRefusesSchema43AndAcceptsSchema44 proves the floor is a real
+// TestSchemaFloorRefusesSchema52AndAcceptsSchema53 proves the floor is a real
 // startup gate rather than a constant nobody consults. It runs the exact
 // predicate cmd/api evaluates at readiness against a real database staged at
-// each exact schema: 43 — which is what production ran before the direct grant —
-// must be refused, and 44 must be accepted.
-func TestSchemaFloorRefusesSchema43AndAcceptsSchema44(t *testing.T) {
+// each exact schema: 52 — before the T7 analytics table — must be refused, and
+// 53 must be accepted.
+func TestSchemaFloorRefusesSchema52AndAcceptsSchema53(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), apiOpTimeout)
 	defer cancel()
 
@@ -827,18 +823,18 @@ func TestSchemaFloorRefusesSchema43AndAcceptsSchema44(t *testing.T) {
 	pool, poolCtx := apiPool(t)
 	floor := requiredSchemaVersion(nil)
 
-	if err := m.Migrate(uint(db.AutoDeviceReplacementSchemaVersion)); err != nil {
-		t.Fatalf("staging schema 43: %v", err)
+	if err := m.Migrate(uint(db.CourseAnnouncementsSchemaVersion)); err != nil {
+		t.Fatalf("staging schema 52: %v", err)
 	}
 	if err := db.CheckSchemaAtLeast(poolCtx, pool, floor); !errors.Is(err, db.ErrSchemaIncompatible) {
-		t.Fatalf("schema 43 readiness = %v, want ErrSchemaIncompatible; the direct Course grant is unrepresentable there", err)
+		t.Fatalf("schema 52 readiness = %v, want ErrSchemaIncompatible; T7 routes require the schema-53 analytics table", err)
 	}
 
-	if err := m.Migrate(uint(db.DirectPurchaseAccessGrantSchemaVersion)); err != nil {
-		t.Fatalf("staging schema 44: %v", err)
+	if err := m.Migrate(uint(db.CatalogSearchAnalyticsSchemaVersion)); err != nil {
+		t.Fatalf("staging schema 53: %v", err)
 	}
 	if err := db.CheckSchemaAtLeast(poolCtx, pool, floor); err != nil {
-		t.Fatalf("schema 44 readiness = %v, want accepted", err)
+		t.Fatalf("schema 53 readiness = %v, want accepted", err)
 	}
 }
 

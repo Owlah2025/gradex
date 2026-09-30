@@ -87,6 +87,8 @@ export type AdminMediaFailure = {
   retry_action?: "retry" | "retry-enhancements";
 };
 
+export type AdminMediaFailureState = "" | "failed" | "stuck";
+
 export type AdminMediaFailurePage = {
   items: AdminMediaFailure[];
   page: number;
@@ -241,6 +243,7 @@ export type AdminNote = {
 export type AdminUser360 = {
   identity: User360Identity;
   emails: AdminEmailDelivery[];
+  emails_truncated?: boolean;
   student?: {
     academic_profile?: {
       setup_state: string;
@@ -291,6 +294,10 @@ export function provenanceLabel(source: string, labels: Record<string, string>):
 
 export function isRecentAuthRequired(error: unknown): boolean {
   return error instanceof ProblemError && error.problem.code === "RECENT_AUTHENTICATION_REQUIRED";
+}
+
+export function isExportTooLarge(error: unknown): boolean {
+  return error instanceof ProblemError && error.problem.code === "EXPORT_TOO_LARGE";
 }
 
 export function buildAdminAccountQuery(filters: AdminAccountFilters): string {
@@ -369,9 +376,16 @@ export async function listAdminEmailDeliveries(
   return response;
 }
 
-export async function listAdminMediaFailures(locale: AdminLocale, page = 1, limit = 20): Promise<AdminMediaFailurePage> {
+export async function listAdminMediaFailures(
+  locale: AdminLocale,
+  page = 1,
+  limit = 20,
+  state: AdminMediaFailureState = "",
+): Promise<AdminMediaFailurePage> {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (state) query.set("state", state);
   const response = await authenticatedRequest<AdminMediaFailurePage>(
-    `/admin/media/failures?page=${page}&limit=${limit}`, "GET", locale,
+    `/admin/media/failures?${query.toString()}`, "GET", locale,
   );
   if (response === null) throw new Error(locale === "ar" ? "لم يتم استلام أعطال الوسائط" : "No media failures returned");
   return response;

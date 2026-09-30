@@ -90,7 +90,7 @@ func (h *adminHandlers) listMediaFailures(c *gin.Context) {
 		return
 	}
 	result, err := h.service.ListMediaFailures(c.Request.Context(), adminread.MediaFailuresRequest{
-		Principal: principal, Locale: locale, Page: page, Limit: limit,
+		Principal: principal, Locale: locale, State: strings.TrimSpace(c.Query("state")), Page: page, Limit: limit,
 	})
 	if err != nil {
 		writeAdminReadError(c, err)

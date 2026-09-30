@@ -120,6 +120,28 @@ func TestPublicCatalogSearchAnalyticsIsAnonymousAndBestEffort(t *testing.T) {
 	if query != "biology" || locale != "en" || resultCount != 1 {
 		t.Fatalf("search analytics row = %q/%q/%d", query, locale, resultCount)
 	}
+	var eventCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM catalog_search_events`).Scan(&eventCount); err != nil {
+		t.Fatalf("counting search analytics rows: %v", err)
+	}
+	pageTwo := publicCatalogRequestWithLanguage(router, http.MethodGet, "/api/v1/catalog/courses?q=Biology&page=2", "en")
+	if pageTwo.Code != http.StatusOK {
+		t.Fatalf("page-two search status = %d, want 200: %s", pageTwo.Code, pageTwo.Body.String())
+	}
+	sensitive := publicCatalogRequestWithLanguage(router, http.MethodGet, "/api/v1/catalog/courses?q=alice%40example.com", "en")
+	if sensitive.Code != http.StatusOK {
+		t.Fatalf("sensitive search status = %d, want 200: %s", sensitive.Code, sensitive.Body.String())
+	}
+	deadline = time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM catalog_search_events`).Scan(&resultCount); err != nil {
+			t.Fatalf("counting post-page search analytics rows: %v", err)
+		}
+		if resultCount > eventCount {
+			t.Fatalf("page-two or sensitive search created an analytics row; count=%d before=%d", resultCount, eventCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	var piiColumns int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM information_schema.columns
