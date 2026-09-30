@@ -97,6 +97,13 @@ export type CourseAnnouncement = {
   published_at: string;
 };
 
+export type CourseAnnouncementPage = {
+  items: CourseAnnouncement[];
+  page: number;
+  page_size: number;
+  has_more: boolean;
+};
+
 /**
  * An opaque, server-encrypted report context (D-065).
  *

@@ -47,20 +47,14 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
 
 test("Instructor workspace navigation exposes the existing authoring journey", () => {
   assert.deepEqual(roleWorkspaceNavigation("INSTRUCTOR", "en"), [
-    { key: "instructorStudio", href: "/en/instructor/courses" },
+    { key: "instructorDashboard", href: "/en/instructor" },
     { key: "instructorProfile", href: "/en/instructor/profile" },
-    {
-      key: "courseBuilder",
-      href: "/en/instructor/courses#course-builder",
-    },
+    { key: "courseBuilder", href: "/en/instructor/courses" },
   ]);
   assert.deepEqual(roleWorkspaceNavigation("INSTRUCTOR", "ar"), [
-    { key: "instructorStudio", href: "/ar/instructor/courses" },
+    { key: "instructorDashboard", href: "/ar/instructor" },
     { key: "instructorProfile", href: "/ar/instructor/profile" },
-    {
-      key: "courseBuilder",
-      href: "/ar/instructor/courses#course-builder",
-    },
+    { key: "courseBuilder", href: "/ar/instructor/courses" },
   ]);
 });
 
@@ -70,8 +64,8 @@ test("authenticated header destinations and labels follow the signed-in role", (
     href: "/en/learn/dashboard",
   });
   assert.deepEqual(roleHomeNavigation("INSTRUCTOR", "ar"), {
-    key: "instructorStudio",
-    href: "/ar/instructor/courses",
+    key: "instructorDashboard",
+    href: "/ar/instructor",
   });
   assert.deepEqual(roleHomeNavigation("ADMIN", "en"), {
     key: "adminWorkspace",

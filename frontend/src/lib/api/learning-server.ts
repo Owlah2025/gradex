@@ -7,7 +7,7 @@ import type {
   LearningDashboard,
   LearningHistory,
   LessonReadModel,
-  CourseAnnouncement,
+	CourseAnnouncementPage,
 } from "./learning";
 import type { StudentCourseAccessHistoryResponse } from "./access";
 
@@ -52,9 +52,9 @@ export function requestCourseHomeServer(courseID: string, locale: "ar" | "en"): 
 export function requestCourseAnnouncementsServer(
   courseID: string,
   locale: "ar" | "en",
-): Promise<CourseAnnouncement[]> {
-  return requestProtectedRead<CourseAnnouncement[]>(
-    `/learn/courses/${encodeURIComponent(courseID)}/announcements`,
+): Promise<CourseAnnouncementPage> {
+	return requestProtectedRead<CourseAnnouncementPage>(
+		`/learn/courses/${encodeURIComponent(courseID)}/announcements?page=1`,
     locale,
   );
 }

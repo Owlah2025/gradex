@@ -22,6 +22,7 @@ export type WorkspaceNavigationKey =
   | "instructorStudio"
   | "instructorProfile"
   | "adminInstructorProfiles"
+  | "instructorDashboard"
   | "courseBuilder";
 
 export type WorkspaceNavigationItem = {
@@ -31,7 +32,7 @@ export type WorkspaceNavigationItem = {
 
 export type RoleHomeNavigationKey =
   | "dashboard"
-  | "instructorStudio"
+  | "instructorDashboard"
   | "adminWorkspace";
 
 /**
@@ -53,7 +54,7 @@ export function roleHomeNavigation(
     role === "ADMIN"
       ? "adminWorkspace"
       : role === "INSTRUCTOR"
-        ? "instructorStudio"
+        ? "instructorDashboard"
         : "dashboard";
   return { key, href };
 }
@@ -93,8 +94,8 @@ export function roleWorkspaceNavigation(
     ];
   }
   return [
-    { key: "instructorStudio", href: home },
+    { key: "instructorDashboard", href: home },
     { key: "instructorProfile", href: `/${locale}/instructor/profile` },
-    { key: "courseBuilder", href: `${home}#course-builder` },
+    { key: "courseBuilder", href: `/${locale}/instructor/courses` },
   ];
 }

@@ -77,8 +77,8 @@ test("prefers a safe destination and falls back to the role root", () => {
 test("maps every role to its existing localized home", () => {
   assert.equal(roleRoot("STUDENT", "en"), "/en/learn/dashboard");
   assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
-  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
-  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
+  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor");
+  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor");
   assert.equal(roleRoot("ADMIN", "en"), "/en/admin");
   assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin");
 });
@@ -200,11 +200,11 @@ test("the password-change screen is never an accepted destination", () => {
 test("a completed change lands each role on its own authorized surface", () => {
   assert.equal(
     postPasswordChangeDestination("INSTRUCTOR", null, "en"),
-    "/en/instructor/courses",
+    "/en/instructor",
   );
   assert.equal(
     postPasswordChangeDestination("INSTRUCTOR", null, "ar"),
-    "/ar/instructor/courses",
+    "/ar/instructor",
   );
   assert.equal(
     postPasswordChangeDestination("ADMIN", null, "en"),
@@ -255,8 +255,8 @@ function namesARoleWorkspace(path: string): boolean {
 test("every known role still resolves to its own workspace", () => {
   assert.equal(roleRoot("STUDENT", "en"), "/en/learn/dashboard");
   assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
-  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
-  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
+  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor");
+  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor");
   assert.equal(roleRoot("ADMIN", "en"), "/en/admin");
   assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin");
 });

@@ -179,6 +179,13 @@ export function authoringPlan(
   // Raised by the cover upload itself when its asset cannot be resolved. It disables submission in
   // the studio, so it is a real blocking state and not merely an empty field.
   const thumbnailUnresolved = options?.thumbnailUnresolved === true;
+  const lessonMediaPhases = sections.flatMap((section) =>
+    (section.lessons ?? []).map((lesson) =>
+      recoverMediaPhase(lesson.video_asset_version_id, lesson.video_asset_state),
+    ),
+  );
+  const lessonMediaAttention = lessonMediaPhases.includes("FAILED");
+  const lessonMediaProcessing = lessonMediaPhases.includes("PROCESSING_BACKGROUND");
 
   const stateOf = (key: AuthoringSectionKey): AuthoringSectionState => {
     switch (key) {
@@ -193,6 +200,10 @@ export function authoringPlan(
         if (previewAttached || thumbnailAttached) return "COMPLETE";
         // Neither attached, and the server asks for neither. Nothing to do here.
         return "OPTIONAL";
+      case "CURRICULUM":
+        if (lessonMediaAttention) return "ATTENTION";
+        if (lessonMediaProcessing) return "PROCESSING";
+        return (outstandingBySection.get(key) ?? []).length === 0 ? "COMPLETE" : "INCOMPLETE";
       case "REVIEW":
         return readiness.ready ? "COMPLETE" : "INCOMPLETE";
       default:

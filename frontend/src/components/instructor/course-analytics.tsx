@@ -8,7 +8,6 @@ import { getCourseAnalytics, type CourseAnalytics as CourseAnalyticsData } from 
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
@@ -21,12 +20,10 @@ function titleFor(data: CourseAnalyticsData, locale: "ar" | "en"): string {
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <Card>
-      <CardContent className="p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
         <dt className="text-sm text-muted-foreground">{label}</dt>
         <dd className="mt-2 font-display text-2xl font-bold text-foreground">{value}</dd>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 

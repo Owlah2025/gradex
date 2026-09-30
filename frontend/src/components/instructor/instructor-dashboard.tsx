@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
 import { WorkspacePage, WorkspacePageHeader, WorkspaceSection } from "@/components/layout/workspace-page";
+import { canManageCourseAnnouncements } from "./dashboard-course-actions";
 
 function titleFor(course: InstructorDashboardCourse, locale: "ar" | "en", fallback: string): string {
   const title = locale === "ar" ? course.title_ar : course.title_en;
@@ -49,7 +50,9 @@ function CourseActions({ course, labels, locale }: { course: InstructorDashboard
     { href: base, label: labels.edit, icon: Pencil },
     { href: `${base}/analytics`, label: labels.analytics, icon: BarChart3 },
     { href: `${base}/students`, label: labels.students, icon: Users },
-    { href: `${base}/announcements`, label: labels.announcements, icon: Megaphone },
+    ...(canManageCourseAnnouncements(course)
+      ? [{ href: `${base}/announcements`, label: labels.announcements, icon: Megaphone }]
+      : []),
   ];
   return (
     <div className="flex flex-wrap gap-2">
@@ -84,7 +87,7 @@ function CourseCard({ course, locale, labels }: { course: InstructorDashboardCou
           ) : null}
         </CardHeader>
         <CardContent className="flex h-full flex-col gap-5 pt-5">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-5">
             <div>
               <dt className="text-muted-foreground">{labels.enrollments}</dt>
               <dd className="mt-1 font-display text-lg font-bold">{course.enrollments}</dd>
@@ -100,6 +103,10 @@ function CourseCard({ course, locale, labels }: { course: InstructorDashboardCou
             <div>
               <dt className="text-muted-foreground">{labels.completions}</dt>
               <dd className="mt-1 font-display text-lg font-bold">{course.completions}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">{labels.mediaFailures}</dt>
+              <dd className="mt-1 font-display text-lg font-bold">{course.media_processing_failures}</dd>
             </div>
           </dl>
           {course.latest_change_request_reason ? (

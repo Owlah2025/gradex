@@ -72,6 +72,13 @@ export type CourseAnnouncement = {
   published_at: string;
 };
 
+export type CourseAnnouncementPage = {
+  items: CourseAnnouncement[];
+  page: number;
+  page_size: number;
+  has_more: boolean;
+};
+
 type Locale = "ar" | "en";
 
 function requireResult<T>(result: T | null, locale: Locale, fallback: string): T {
@@ -95,11 +102,11 @@ export async function getCourseAnalytics(courseID: string, locale: Locale): Prom
   return requireResult(result, locale, "No course analytics returned from server");
 }
 
-export async function getCourseAnnouncements(courseID: string, locale: Locale): Promise<CourseAnnouncement[]> {
-  const result = await authenticatedRequest<CourseAnnouncement[]>(
-    `/courses/${encodeURIComponent(courseID)}/announcements`,
-    "GET",
-    locale,
+export async function getCourseAnnouncements(courseID: string, locale: Locale, page = 1): Promise<CourseAnnouncementPage> {
+	const result = await authenticatedRequest<CourseAnnouncementPage>(
+		`/courses/${encodeURIComponent(courseID)}/announcements?page=${page}`,
+		"GET",
+		locale,
   );
   return requireResult(result, locale, "No course announcements returned from server");
 }

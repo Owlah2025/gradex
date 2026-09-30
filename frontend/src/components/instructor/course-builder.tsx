@@ -43,6 +43,7 @@ import { CoursePricingSummary } from "./course-pricing-summary";
 import { NewCourseForm } from "./new-course-form";
 import { SubmissionPanel } from "./submission-panel";
 import { CourseStandingBanner } from "./course-standing-banner";
+import { CourseBuilderGuidance } from "./course-builder-guidance";
 import { SubmittedCourseSummary } from "./submitted-course-summary";
 import { describeSubmissionRejection } from "./submission-readiness";
 import { CurriculumBuilder } from "./curriculum-builder";
@@ -775,7 +776,7 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
         </div>
 
         {selectedCourse ? (
-          <div className="space-y-6 md:col-span-2">
+          <div className="min-w-0 space-y-6 md:col-span-2">
             {/*
               The academic identity panel used to be rendered *inside* this header's flex row,
               between the course title and the status pill — a whole titled section wedged into a
@@ -820,6 +821,16 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
               bannerLabels={instructor.standingBanner}
             />
 
+            <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />
+
+            {editableWorkflow && plan ? (
+              <CourseBuilderGuidance
+                plan={plan}
+                labels={instructor.builderGuidance}
+                submissionLabels={instructor.submission}
+              />
+            ) : null}
+
             {showRoster ? <CourseRoster courseID={selectedCourse.id} /> : null}
 
             {/*
@@ -845,9 +856,6 @@ export function CourseBuilder({ initialCourseID }: { initialCourseID?: string } 
                 <CoursePricingSummary course={selectedCourse} labels={instructor.price} />
               </>
             )}
-
-            {/* Standing notice, not a toast: the Instructor usually returns in a later session. */}
-            <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />
 
             {/* Edits to a candidate behind a live revision reach nobody until an Admin approves. */}
             {editingPublished ? <EditingPublishedNotice labels={t.instructor.revision} /> : null}

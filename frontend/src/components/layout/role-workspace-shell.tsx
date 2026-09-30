@@ -35,6 +35,7 @@ export function RoleWorkspaceShell({
     adminAudit: t.nav.adminAudit,
     adminInstructorProfiles: t.nav.adminInstructorProfiles,
     instructorStudio: t.nav.instructorStudio,
+    instructorDashboard: t.nav.instructorDashboard,
     instructorProfile: t.nav.instructorProfile,
     courseBuilder: t.nav.courseBuilder,
   };

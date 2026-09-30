@@ -52,14 +52,13 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
   const shell = shellLabels(dictionary);
   const Backward = locale === "ar" ? ArrowRight : ArrowLeft;
   try {
-    const course = await requestCourseHomeServer(courseId, locale);
-    let announcements: CourseAnnouncement[] = [];
-    let announcementsFailed = false;
-    try {
-      announcements = await requestCourseAnnouncementsServer(courseId, locale);
-    } catch {
-      announcementsFailed = true;
-    }
+    const [course, announcementResult] = await Promise.all([
+      requestCourseHomeServer(courseId, locale),
+      requestCourseAnnouncementsServer(courseId, locale)
+        .then((page) => ({ announcements: page.items as CourseAnnouncement[], failed: false, hasMore: page.has_more }))
+        .catch(() => ({ announcements: [] as CourseAnnouncement[], failed: true, hasMore: false })),
+    ]);
+    const { announcements, failed: announcementsFailed, hasMore: announcementsHaveMore } = announcementResult;
     const sections = courseCurriculum(course.sections);
     // The one way into the learning experience from here. There is no second player on this page:
     // the Lesson route is the canonical addressable surface and this control simply chooses which
@@ -165,6 +164,9 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
                 ))}
               </div>
             )}
+            {announcementsHaveMore && !announcementsFailed ? (
+              <p className="mt-4 text-sm text-muted-foreground">{dictionary.learning.announcementsMore}</p>
+            ) : null}
           </section>
 
           {/* One control, above the contents, so a Student returning to a Course does not have to
