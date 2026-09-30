@@ -271,7 +271,11 @@ func TestEveryProtectedLearningRouteRevalidates(t *testing.T) {
 				t.Fatalf("%s %s did not perform its own fresh handler evaluation after revocation: evaluate calls %d -> %d", route.method, route.path, beforeEvaluate, afterEvaluate)
 			}
 			var denied *learningWireResponse
-			if route.method == http.MethodGet && strings.HasSuffix(route.path, "/dashboard") {
+			if route.method == http.MethodGet && strings.HasSuffix(route.path, "/history") {
+				if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), `"access_ended_reason":"revoked"`) {
+					t.Fatalf("revoked history = status %d headers=%v body=%q, want ended-access history", response.Code, response.Header(), response.Body.String())
+				}
+			} else if route.method == http.MethodGet && strings.HasSuffix(route.path, "/dashboard") {
 				if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || response.Body.String() != `{"courses":[]}` {
 					t.Fatalf("revoked dashboard = status %d headers=%v body=%q, want empty no-store dashboard", response.Code, response.Header(), response.Body.String())
 				}

@@ -63,12 +63,21 @@ type learningCourseProgressResponse struct {
 	Percent          int `json:"percent"`
 }
 
+type learningCourseCompletionResponse struct {
+	CompletedAt          time.Time `json:"completed_at"`
+	RequiredLessonCount  int       `json:"required_lesson_count"`
+	CompletedLessonCount int       `json:"completed_lesson_count"`
+	NewContentAdded      bool      `json:"new_content_added"`
+}
+
 type dashboardCourseResponse struct {
-	CourseID       string                         `json:"course_id"`
-	Title          string                         `json:"title"`
-	LearningStatus learningStatus                 `json:"learning_status"`
-	ExpiresAt      *time.Time                     `json:"expires_at"`
-	Progress       learningCourseProgressResponse `json:"progress"`
+	CourseID       string                            `json:"course_id"`
+	Title          string                            `json:"title"`
+	LearningStatus learningStatus                    `json:"learning_status"`
+	ExpiresAt      *time.Time                        `json:"expires_at"`
+	Progress       learningCourseProgressResponse    `json:"progress"`
+	Completion     *learningCourseCompletionResponse `json:"completion,omitempty"`
+	ResumeLessonID *string                           `json:"resume_lesson_id,omitempty"`
 }
 
 // dashboardResumeResponse is the single "continue learning" target, or absent when the Student has
@@ -103,16 +112,33 @@ type courseHomeSectionResponse struct {
 }
 
 type courseHomeResponse struct {
-	CourseID       string                         `json:"course_id"`
-	Title          string                         `json:"title"`
-	LearningStatus learningStatus                 `json:"learning_status"`
-	ExpiresAt      *time.Time                     `json:"expires_at"`
-	Progress       learningCourseProgressResponse `json:"progress"`
-	Sections       []courseHomeSectionResponse    `json:"sections"`
+	CourseID       string                            `json:"course_id"`
+	Title          string                            `json:"title"`
+	LearningStatus learningStatus                    `json:"learning_status"`
+	ExpiresAt      *time.Time                        `json:"expires_at"`
+	Progress       learningCourseProgressResponse    `json:"progress"`
+	Completion     *learningCourseCompletionResponse `json:"completion,omitempty"`
+	Sections       []courseHomeSectionResponse       `json:"sections"`
 	// ReportContext is an opaque encrypted token binding a COURSE report to the exact Revision
 	// this response rendered (D-065). Issued only for an active read; absent otherwise. It is
 	// evidence, not a capability — possessing one authorises nothing.
 	ReportContext string `json:"report_context,omitempty"`
+}
+
+type learningHistoryCourseResponse struct {
+	CourseID          string                            `json:"course_id"`
+	Title             string                            `json:"title"`
+	Progress          learningCourseProgressResponse    `json:"progress"`
+	Completion        *learningCourseCompletionResponse `json:"completion,omitempty"`
+	LastWatchedAt     *time.Time                        `json:"last_watched_at,omitempty"`
+	AccessEndedAt     *time.Time                        `json:"access_ended_at,omitempty"`
+	AccessEndedReason string                            `json:"access_ended_reason,omitempty"`
+}
+
+type learningHistoryResponse struct {
+	InProgress  []learningHistoryCourseResponse `json:"in_progress"`
+	Completed   []learningHistoryCourseResponse `json:"completed"`
+	EndedAccess []learningHistoryCourseResponse `json:"ended_access"`
 }
 
 // lessonReportContexts carries one opaque token per reportable target present in the visible
@@ -165,6 +191,7 @@ func mountLearningRoutes(v1 *gin.RouterGroup, foundation *LearningFoundation, au
 	learn := v1.Group("/learn")
 	learn.Use(requireProtectedLearningAccess(authenticator, principals, logger))
 	learn.GET("/dashboard", h.dashboard)
+	learn.GET("/history", h.history)
 	learn.GET("/courses/:courseId", h.courseHome)
 	learn.GET("/courses/:courseId/lessons/:lessonId", h.lesson)
 	learn.POST("/lessons/:lessonId/playback", h.issuePlayback)
@@ -205,9 +232,48 @@ func (h *learningHandlers) dashboard(c *gin.Context) {
 		writeProtectedUnavailable(c)
 		return
 	}
-	model := h.dashboardReadModel(c, summaries, decisions)
+	model := h.dashboardReadModel(c, summaries, decisions, candidates)
 	model.Resume = h.resumeReadModel(c, summaries, candidates, decisions)
 	writeLearningJSON(c, model)
+}
+
+func (h *learningHandlers) history(c *gin.Context) {
+	studentID := c.GetString(ctxUserIDKey)
+	summaries, err := h.foundation.readRepository.ListStudentCourseSummaries(c.Request.Context(), studentID)
+	if err != nil {
+		h.logDenial(c, entitlement.ReasonDependency)
+		writeProtectedUnavailable(c)
+		return
+	}
+	decisions, err := h.foundation.readEvaluator.EvaluateCourseHistory(c.Request.Context(), studentID, h.now().UTC())
+	if err != nil {
+		h.logDenial(c, entitlement.ReasonDependency)
+		writeProtectedUnavailable(c)
+		return
+	}
+	response := learningHistoryResponse{
+		InProgress:  make([]learningHistoryCourseResponse, 0),
+		Completed:   make([]learningHistoryCourseResponse, 0),
+		EndedAccess: make([]learningHistoryCourseResponse, 0),
+	}
+	for _, summary := range summaries {
+		classification, ok := decisions[summary.CourseID]
+		if !ok || !classification.CourseWide {
+			continue
+		}
+		course := historyCourseReadModel(c, summary)
+		switch {
+		case classification.Decision.State == entitlement.ReadActive && summary.Progress.Completion != nil:
+			response.Completed = append(response.Completed, course)
+		case classification.Decision.State == entitlement.ReadActive:
+			response.InProgress = append(response.InProgress, course)
+		case classification.EndedReason == entitlement.ReasonExpired || classification.EndedReason == entitlement.ReasonRevoked:
+			course.AccessEndedAt = utcTimePtr(classification.EndedAt)
+			course.AccessEndedReason = historyAccessEndedReason(classification.EndedReason)
+			response.EndedAccess = append(response.EndedAccess, course)
+		}
+	}
+	writeLearningJSON(c, response)
 }
 
 // resumeReadModel picks the first candidate the Student may still read.
@@ -258,20 +324,68 @@ func courseTitleFor(
 	return "", false
 }
 
-func (h *learningHandlers) dashboardReadModel(c *gin.Context, summaries []learning.StudentCourseSummary, decisions map[string]entitlement.ReadDecision) dashboardResponse {
+func (h *learningHandlers) dashboardReadModel(
+	c *gin.Context,
+	summaries []learning.StudentCourseSummary,
+	decisions map[string]entitlement.ReadDecision,
+	candidates []learning.ResumeCandidate,
+) dashboardResponse {
 	response := dashboardResponse{Courses: make([]dashboardCourseResponse, 0, len(summaries))}
+	resumeByCourse := make(map[string]learning.ResumeCandidate, len(candidates))
+	for _, candidate := range candidates {
+		resumeByCourse[candidate.CourseID] = candidate
+	}
 	for _, summary := range summaries {
 		decision, ok := decisions[summary.CourseID]
 		if !ok || !decision.CourseWide || (decision.State != entitlement.ReadActive && decision.State != entitlement.ReadExpired) {
 			continue
 		}
-		response.Courses = append(response.Courses, dashboardCourseResponse{
+		course := dashboardCourseResponse{
 			CourseID: summary.CourseID, Title: localizedLearningTitle(c, summary.TitleAr, summary.TitleEn),
 			LearningStatus: presentationLearningStatus(decision), ExpiresAt: utcTimePtr(decision.ExpiresAt),
-			Progress: courseProgressResponse(summary.Progress),
-		})
+			Progress:   courseProgressResponse(summary.Progress),
+			Completion: courseCompletionResponse(summary.Progress),
+		}
+		if candidate, ok := resumeByCourse[summary.CourseID]; ok && decision.State == entitlement.ReadActive {
+			lessonID := candidate.LessonID
+			course.ResumeLessonID = &lessonID
+		}
+		response.Courses = append(response.Courses, course)
 	}
 	return response
+}
+
+func historyCourseReadModel(c *gin.Context, summary learning.StudentCourseSummary) learningHistoryCourseResponse {
+	return learningHistoryCourseResponse{
+		CourseID:      summary.CourseID,
+		Title:         localizedLearningTitle(c, summary.TitleAr, summary.TitleEn),
+		Progress:      courseProgressResponse(summary.Progress),
+		Completion:    courseCompletionResponse(summary.Progress),
+		LastWatchedAt: utcTimePtr(summary.LastWatchedAt),
+	}
+}
+
+func courseCompletionResponse(summary learning.CourseProgressSummary) *learningCourseCompletionResponse {
+	if summary.Completion == nil {
+		return nil
+	}
+	return &learningCourseCompletionResponse{
+		CompletedAt:          summary.Completion.CompletedAt.UTC(),
+		RequiredLessonCount:  summary.Completion.RequiredLessonCount,
+		CompletedLessonCount: summary.Completion.CompletedLessonCount,
+		NewContentAdded:      summary.Completion.CompletedLessonCount < summary.TotalLessons,
+	}
+}
+
+func historyAccessEndedReason(reason entitlement.Reason) string {
+	switch reason {
+	case entitlement.ReasonExpired:
+		return "expired"
+	case entitlement.ReasonRevoked:
+		return "revoked"
+	default:
+		return ""
+	}
 }
 
 func (h *learningHandlers) courseHome(c *gin.Context) {
@@ -370,7 +484,8 @@ func courseHomeReadModel(c *gin.Context, graph learning.CourseGraph, decision en
 	response := courseHomeResponse{
 		CourseID: graph.CourseID, Title: localizedLearningTitle(c, graph.TitleAr, graph.TitleEn),
 		LearningStatus: presentationLearningStatus(decision), ExpiresAt: utcTimePtr(decision.ExpiresAt),
-		Progress: courseProgressResponse(summary), Sections: make([]courseHomeSectionResponse, 0, len(graph.Sections)),
+		Completion: courseCompletionResponse(summary),
+		Progress:   courseProgressResponse(summary), Sections: make([]courseHomeSectionResponse, 0, len(graph.Sections)),
 	}
 	for _, section := range graph.Sections {
 		response.Sections = append(response.Sections, courseHomeSectionReadModel(c, graph.CourseID, section, progressByLesson, materialKinds))

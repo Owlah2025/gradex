@@ -288,6 +288,7 @@ func TestLearningDashboardScopesOrdersAndRetainsExpiry(t *testing.T) {
 		CourseID string `json:"course_id"`
 		Title    string `json:"title"`
 		Status   string `json:"learning_status"`
+		Resume   string `json:"resume_lesson_id"`
 		Progress struct {
 			Completed int `json:"completed_lessons"`
 			Total     int `json:"total_lessons"`
@@ -305,7 +306,11 @@ func TestLearningDashboardScopesOrdersAndRetainsExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rawCourse := range rawCourses {
-		course := assertJSONKeys(t, mustJSON(t, rawCourse), []string{"course_id", "expires_at", "learning_status", "progress", "title"})
+		wantKeys := []string{"course_id", "expires_at", "learning_status", "progress", "title"}
+		if string(rawCourse["learning_status"]) == `"active"` {
+			wantKeys = append(wantKeys, "resume_lesson_id")
+		}
+		course := assertJSONKeys(t, mustJSON(t, rawCourse), wantKeys)
 		assertJSONKeys(t, course["progress"], []string{"completed_lessons", "percent", "total_lessons"})
 	}
 	if _, err := f.pool.Exec(context.Background(), `UPDATE entitlements SET access_ends_at = $1, original_access_ends_at = $1 WHERE student_account_id = $2::uuid AND course_id = $3::uuid`, f.clock.Now(), f.studentID, f.courseID); err != nil {

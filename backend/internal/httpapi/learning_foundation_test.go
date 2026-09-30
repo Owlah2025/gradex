@@ -62,6 +62,10 @@ func (learningFoundationEvaluator) EvaluateCourseReads(context.Context, string, 
 	return map[string]entitlement.ReadDecision{}, nil
 }
 
+func (learningFoundationEvaluator) EvaluateCourseHistory(context.Context, string, time.Time) (map[string]entitlement.CourseHistoryDecision, error) {
+	return map[string]entitlement.CourseHistoryDecision{}, nil
+}
+
 type learningFoundationMedia struct{}
 
 func (learningFoundationMedia) IssuePlayback(context.Context, media.PlaybackRequest) (media.PlaybackAuthorization, error) {

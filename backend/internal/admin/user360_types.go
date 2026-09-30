@@ -68,6 +68,8 @@ type UserCourse struct {
 	CompletedLessons       int        `json:"completed_lessons,omitempty"`
 	TotalLessons           int        `json:"total_lessons,omitempty"`
 	ProgressPercent        float64    `json:"progress_percent,omitempty"`
+	Completed              bool       `json:"completed,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
 	LastWatchedAt          *time.Time `json:"last_watched_at,omitempty"`
 }
 

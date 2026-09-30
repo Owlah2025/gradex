@@ -49,6 +49,10 @@ func (e fixedLearningEvaluator) EvaluateCourseReads(context.Context, string, tim
 	return map[string]entitlement.ReadDecision{}, nil
 }
 
+func (e fixedLearningEvaluator) EvaluateCourseHistory(context.Context, string, time.Time) (map[string]entitlement.CourseHistoryDecision, error) {
+	return map[string]entitlement.CourseHistoryDecision{}, nil
+}
+
 type recordingLearningEvaluator struct {
 	studentID string
 	lessonID  string
@@ -79,6 +83,10 @@ func (e *recordingLearningEvaluator) EvaluateRead(_ context.Context, studentID, 
 
 func (e *recordingLearningEvaluator) EvaluateCourseReads(context.Context, string, time.Time) (map[string]entitlement.ReadDecision, error) {
 	return map[string]entitlement.ReadDecision{}, nil
+}
+
+func (e *recordingLearningEvaluator) EvaluateCourseHistory(context.Context, string, time.Time) (map[string]entitlement.CourseHistoryDecision, error) {
+	return map[string]entitlement.CourseHistoryDecision{}, nil
 }
 
 type unavailableLearningMedia struct{}

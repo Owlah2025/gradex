@@ -84,12 +84,14 @@ progress_summary AS (
         COALESCE(
             avg(completed_lessons::numeric / NULLIF(total_lessons, 0)) * 100,
             0
-        ) AS average_progress,
-        count(*) FILTER (
-            WHERE total_lessons > 0
-              AND completed_lessons::numeric / total_lessons >= 0.9
-        ) AS completions
+        ) AS average_progress
     FROM student_enrollment_progress
+),
+durable_completion_summary AS (
+    SELECT count(*) AS completions
+    FROM course_completions completion
+    JOIN enrollments e ON e.id = completion.enrollment_id
+    JOIN accounts student ON student.id = e.student_account_id AND student.role = 'STUDENT'
 ),
 course_lifecycle_counts AS (
     SELECT lifecycle::text AS lifecycle, count(*) AS total
@@ -153,7 +155,7 @@ metric_rows AS (
     UNION ALL SELECT 41, 'learning_activity.30d', to_jsonb(learning_activity.days_30), 'learning_activity' FROM learning_activity
     UNION ALL SELECT 42, 'students.started_lessons', to_jsonb(learning_activity.students_started), 'students.started_lessons' FROM learning_activity
     UNION ALL SELECT 43, 'learning.average_course_progress', to_jsonb(progress_summary.average_progress), 'learning.average_course_progress' FROM progress_summary
-    UNION ALL SELECT 44, 'learning.completions', to_jsonb(progress_summary.completions), 'learning.completions' FROM progress_summary
+    UNION ALL SELECT 44, 'learning.completions', to_jsonb(durable_completion_summary.completions), 'learning.completions' FROM durable_completion_summary
     UNION ALL SELECT 50, 'courses.draft', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'DRAFT'), 0)), 'courses.lifecycle'
     UNION ALL SELECT 51, 'courses.pending_review', to_jsonb(COALESCE((SELECT total FROM course_lifecycle_counts WHERE lifecycle = 'PENDING_REVIEW'), 0)), 'courses.lifecycle'
 	    UNION ALL SELECT 52, 'courses.revisions_pending_review', to_jsonb((SELECT count(*) FROM course_revisions WHERE state = 'PENDING_REVIEW')), 'courses.revisions_pending_review'
@@ -238,14 +240,16 @@ enrollment_progress AS (
         count(DISTINCT lesson.lesson_identity_id) AS total_lessons,
         count(DISTINCT progress.course_lesson_identity_id) FILTER (WHERE progress.completed_at IS NOT NULL) AS completed_lessons,
         count(DISTINCT progress.id) AS progress_rows,
-        max(progress.last_watched_at) AS last_watched_at
+        max(progress.last_watched_at) AS last_watched_at,
+        completion.id IS NOT NULL AS completed_durably
     FROM enrollments e
     JOIN accounts student ON student.id = e.student_account_id AND student.role = 'STUDENT'
     LEFT JOIN current_course_lessons lesson ON lesson.course_id = e.course_id
     LEFT JOIN progress
       ON progress.enrollment_id = e.id
      AND progress.course_lesson_identity_id = lesson.lesson_identity_id
-    GROUP BY e.id, e.course_id, e.student_account_id
+    LEFT JOIN course_completions completion ON completion.enrollment_id = e.id
+    GROUP BY e.id, e.course_id, e.student_account_id, completion.id
 ),
 course_rollup AS (
     SELECT
@@ -254,7 +258,7 @@ course_rollup AS (
         count(*) FILTER (WHERE progress_rows > 0) AS started,
         count(DISTINCT student_account_id) FILTER (WHERE last_watched_at >= now() - interval '7 days') AS learning_active_7d,
         COALESCE(avg(completed_lessons::numeric / NULLIF(total_lessons, 0)) * 100, 0) AS average_progress,
-        count(*) FILTER (WHERE total_lessons > 0 AND completed_lessons::numeric / total_lessons >= 0.9) AS completed
+        count(*) FILTER (WHERE completed_durably) AS completed
     FROM enrollment_progress
     GROUP BY course_id
 )

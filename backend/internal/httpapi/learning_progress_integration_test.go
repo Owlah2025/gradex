@@ -141,6 +141,13 @@ func (e *learningIntegrationEvaluator) EvaluateCourseReads(ctx context.Context, 
 	return e.delegate.EvaluateCourseReads(ctx, studentID, now)
 }
 
+func (e *learningIntegrationEvaluator) EvaluateCourseHistory(ctx context.Context, studentID string, now time.Time) (map[string]entitlement.CourseHistoryDecision, error) {
+	e.mu.Lock()
+	e.evaluate++
+	e.mu.Unlock()
+	return e.delegate.EvaluateCourseHistory(ctx, studentID, now)
+}
+
 func (e *learningIntegrationEvaluator) EvaluateTarget(ctx context.Context, studentID, lessonID string, retiredAt *time.Time, now time.Time) entitlement.Decision {
 	e.mu.Lock()
 	e.target++

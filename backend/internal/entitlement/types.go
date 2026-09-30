@@ -80,6 +80,7 @@ const (
 	ReasonAllowed           Reason = "ALLOWED"
 	ReasonNoApplicableGrant Reason = "NO_APPLICABLE_GRANT"
 	ReasonExpired           Reason = "EXPIRED"
+	ReasonRevoked           Reason = "REVOKED"
 	ReasonAccountSuspended  Reason = "ACCOUNT_SUSPENDED"
 	ReasonCourseSuspended   Reason = "COURSE_ACCESS_SUSPENDED"
 	ReasonRetired           Reason = "RETIRED_WITHOUT_ELIGIBILITY"
@@ -111,6 +112,16 @@ type ReadDecision struct {
 	Reason     Reason
 	ExpiresAt  *time.Time
 	CourseWide bool
+}
+
+// CourseHistoryDecision is the evaluator-owned classification used by the
+// Student history read. EndedAt is populated only for an expired or revoked
+// grant; the learning package never decides those states from raw rows.
+type CourseHistoryDecision struct {
+	Decision    ReadDecision
+	CourseWide  bool
+	EndedAt     *time.Time
+	EndedReason Reason
 }
 
 // CourseReadSnapshot is loaded in bulk by the S4 repository so Dashboard

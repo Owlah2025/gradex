@@ -32,6 +32,7 @@ type learningEvaluator interface {
 type learningReadEvaluator interface {
 	EvaluateRead(context.Context, string, string, time.Time) entitlement.ReadDecision
 	EvaluateCourseReads(context.Context, string, time.Time) (map[string]entitlement.ReadDecision, error)
+	EvaluateCourseHistory(context.Context, string, time.Time) (map[string]entitlement.CourseHistoryDecision, error)
 }
 
 type learningRepository interface {

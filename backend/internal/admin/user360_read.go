@@ -259,6 +259,11 @@ func (r *Repository) queryStudentCourses(ctx context.Context, locale identity.Lo
 		item := UserCourse{ID: summary.CourseID, Title: localizedTitle(locale, summary.TitleAr, summary.TitleEn),
 			CompletedLessons: summary.Progress.CompletedLessons, TotalLessons: summary.Progress.TotalLessons,
 			LastWatchedAt: summary.LastWatchedAt}
+		if summary.Progress.Completion != nil {
+			item.Completed = true
+			completedAt := summary.Progress.Completion.CompletedAt.UTC()
+			item.CompletedAt = &completedAt
+		}
 		if item.TotalLessons > 0 {
 			item.ProgressPercent = float64(item.CompletedLessons) * 100 / float64(item.TotalLessons)
 		}

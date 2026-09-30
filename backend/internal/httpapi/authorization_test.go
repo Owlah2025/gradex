@@ -391,6 +391,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/courses":                                                               {Method: http.MethodGet, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
 	"GET /api/v1/taxonomy/terms":                                                        {Method: http.MethodGet, Path: "/api/v1/taxonomy/terms", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/dashboard":                                                       {Method: http.MethodGet, Path: "/api/v1/learn/dashboard", Class: ClassCapabilityProtected},
+	"GET /api/v1/learn/history":                                                         {Method: http.MethodGet, Path: "/api/v1/learn/history", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/courses/:courseId":                                               {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId", Class: ClassCapabilityProtected},
 	"GET /api/v1/learn/courses/:courseId/lessons/:lessonId":                             {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId/lessons/:lessonId", Class: ClassCapabilityProtected},
 	"POST /api/v1/learn/lessons/:lessonId/playback":                                     {Method: http.MethodPost, Path: "/api/v1/learn/lessons/:lessonId/playback", Class: ClassCapabilityProtected},

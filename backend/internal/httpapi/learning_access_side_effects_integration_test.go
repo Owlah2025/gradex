@@ -140,7 +140,15 @@ func TestEveryDenialLeavesEntitlementEnrollmentAndProgressUnchanged(t *testing.T
 				before := f.authoritySnapshot(t)
 				response := f.request(method, path, body)
 				if route.method == http.MethodGet {
-					if transition.name == "account suspended" {
+					if strings.HasSuffix(route.path, "/history") && transition.name != "account suspended" {
+						assertReadSuccess(t, response)
+						if transition.name == "expired" && !strings.Contains(response.Body.String(), `"access_ended_reason":"expired"`) {
+							t.Fatalf("expired history response = %s", response.Body.String())
+						}
+						if transition.name == "revoked" && !strings.Contains(response.Body.String(), `"access_ended_reason":"revoked"`) {
+							t.Fatalf("revoked history response = %s", response.Body.String())
+						}
+					} else if transition.name == "account suspended" {
 						assertProtectedUnavailable(t, response)
 					} else if transition.name == "expired" {
 						assertReadSuccess(t, response)

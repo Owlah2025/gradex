@@ -557,6 +557,12 @@ func seedAdminMetricsFixture(t *testing.T, pool *pgxpool.Pool, adminID, instruct
 			INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, completed_at, completing_asset_version_id, last_watched_at)
 			VALUES ($1::uuid, $2::uuid, $3, $3, $4, $5::uuid, $6)`, row.enrollmentID, row.lessonID, row.position, row.completedAt, failedVersionID, row.watchedAt)
 	}
+	mustExecAdminMetrics(t, pool, `
+		INSERT INTO course_completions (
+			enrollment_id, student_account_id, course_id, completed_at, course_revision_id,
+			course_revision_number, required_lesson_count, completed_lesson_count, source
+		) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, 1, 2, 2, 'PROGRESS')`,
+		enrollmentA, studentIDs[0], courseID, now.Add(-2*time.Hour), revisionID)
 
 	institutionID := "10000000-0000-0000-0000-000000000910"
 	subjectID := "10000000-0000-0000-0000-000000000911"

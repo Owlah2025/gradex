@@ -109,6 +109,77 @@ func (e *Evaluator) EvaluateCourseReads(ctx context.Context, studentID string, n
 	return decisions, nil
 }
 
+// EvaluateCourseHistory uses the same bulk authority snapshot and classifier as
+// dashboard reads, while retaining the one extra historical fact needed for a
+// revoked-only course: the entitlement's authoritative revoked_at instant.
+// Learning receives a classification, never raw entitlement policy inputs.
+func (e *Evaluator) EvaluateCourseHistory(ctx context.Context, studentID string, now time.Time) (map[string]CourseHistoryDecision, error) {
+	if e == nil || e.reader == nil || studentID == "" || now.IsZero() {
+		return nil, fmt.Errorf("entitlement history classification requires student and clock")
+	}
+	reader, ok := e.reader.(courseReadReader)
+	if !ok {
+		return nil, fmt.Errorf("entitlement reader does not support course history classification")
+	}
+	snapshots, err := reader.LoadCourseReadSnapshots(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+	decisions := make(map[string]CourseHistoryDecision, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.CourseID == "" || !validSnapshot(Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}, studentID) {
+			continue
+		}
+		decision, expiresAt, courseWide := classifySnapshot(
+			Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}, studentID, nil, now,
+		)
+		read := readDecision(decision, expiresAt, courseWide)
+		classification := CourseHistoryDecision{Decision: read, CourseWide: courseWide}
+		switch {
+		case read.State == ReadExpired:
+			classification.EndedAt = expiresAt
+			classification.EndedReason = ReasonExpired
+		case read.State == ReadDenied && decision.Reason == ReasonNoApplicableGrant:
+			classification.CourseWide = historyCourseWide(snapshot, studentID)
+			if revokedAt := latestRevokedAt(snapshot, studentID); revokedAt != nil {
+				classification.EndedAt = revokedAt
+				classification.EndedReason = ReasonRevoked
+			}
+		}
+		if classification.EndedReason != "" || classification.Decision.State == ReadActive {
+			decisions[snapshot.CourseID] = classification
+		}
+	}
+	return decisions, nil
+}
+
+func historyCourseWide(snapshot CourseReadSnapshot, studentID string) bool {
+	for _, record := range snapshot.Entitlements {
+		if record.StudentAccountID == studentID && record.ScopeKind == ScopeCourse &&
+			record.ScopeKind.Valid() && record.GrantSource.Valid() && record.State.Valid() &&
+			Covers(record, snapshot.Lesson) {
+			return true
+		}
+	}
+	return false
+}
+
+func latestRevokedAt(snapshot CourseReadSnapshot, studentID string) *time.Time {
+	var latest *time.Time
+	for _, record := range snapshot.Entitlements {
+		if record.StudentAccountID != studentID || !record.ScopeKind.Valid() || !record.GrantSource.Valid() ||
+			!record.State.Valid() || !record.Revoked() || !Covers(record, snapshot.Lesson) || record.RevokedAt == nil {
+			continue
+		}
+		value := record.RevokedAt.UTC()
+		if latest == nil || value.After(*latest) {
+			copy := value
+			latest = &copy
+		}
+	}
+	return latest
+}
+
 func readRuntimeReason(lesson Lesson) Reason {
 	if lesson.AccountStatus != "ACTIVE" {
 		return ReasonAccountSuspended
