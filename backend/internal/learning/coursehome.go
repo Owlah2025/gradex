@@ -59,6 +59,20 @@ func (g CourseGraph) LessonIDs() []string {
 type CourseProgressSummary struct {
 	CompletedLessons int
 	TotalLessons     int
+	Completion       *CourseCompletion
+}
+
+// CourseCompletion is the append-only fact that an Enrollment completed the
+// required lessons of one published revision. Progress remains the source of
+// the current graph percentage, so a later revision can show new content while
+// retaining this historical completion.
+type CourseCompletion struct {
+	CompletedAt          time.Time
+	CourseRevisionID     string
+	CourseRevisionNumber int
+	RequiredLessonCount  int
+	CompletedLessonCount int
+	Source               string
 }
 
 type StudentCourseSummary struct {
@@ -232,7 +246,44 @@ func (r *Repository) ReadCourseProgress(ctx context.Context, enrollmentID, cours
 	if len(progressByLesson) != len(ids) {
 		return nil, CourseProgressSummary{}, ErrCourseGraphInvalid
 	}
-	return progressByLesson, CourseProgressSummary{CompletedLessons: completed, TotalLessons: len(ids)}, nil
+	completion, err := r.readCourseCompletion(ctx, enrollmentID)
+	if err != nil {
+		return nil, CourseProgressSummary{}, err
+	}
+	return progressByLesson, CourseProgressSummary{CompletedLessons: completed, TotalLessons: len(ids), Completion: completion}, nil
+}
+
+func (r *Repository) readCourseCompletion(ctx context.Context, enrollmentID string) (*CourseCompletion, error) {
+	if r == nil || r.pool == nil || enrollmentID == "" {
+		return nil, ErrProgressNotFound
+	}
+	r.observeQuery("learning.course-completion")
+	var completion CourseCompletion
+	err := r.pool.QueryRow(ctx, `
+		SELECT completed_at,
+		       course_revision_id::text,
+		       course_revision_number,
+		       required_lesson_count,
+		       completed_lesson_count,
+		       source::text
+		FROM course_completions
+		WHERE enrollment_id = $1::uuid
+	`, enrollmentID).Scan(
+		&completion.CompletedAt,
+		&completion.CourseRevisionID,
+		&completion.CourseRevisionNumber,
+		&completion.RequiredLessonCount,
+		&completion.CompletedLessonCount,
+		&completion.Source,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading course completion: %w", err)
+	}
+	completion.CompletedAt = completion.CompletedAt.UTC()
+	return &completion, nil
 }
 
 // ReadLessonProgress performs the single bounded lookup used by the Lesson
@@ -257,7 +308,13 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 		SELECT e.course_id::text, e.created_at, cr.title_ar, cr.title_en,
 		       count(DISTINCT cli.id),
 		       count(DISTINCT p.course_lesson_identity_id) FILTER (WHERE p.completed_at IS NOT NULL),
-		       max(p.last_watched_at)
+		       max(p.last_watched_at),
+		       completion.completed_at,
+		       completion.course_revision_id::text,
+		       completion.course_revision_number,
+		       completion.required_lesson_count,
+		       completion.completed_lesson_count,
+		       completion.source::text
 		FROM enrollments e
 		JOIN courses c ON c.id = e.course_id
 		JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id AND cr.state = 'APPROVED'
@@ -267,8 +324,13 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 		  ON cli.id = cl.lesson_identity_id AND cli.course_id = c.id AND cli.section_identity_id = cl.section_identity_id
 		LEFT JOIN progress p
 		  ON p.enrollment_id = e.id AND p.course_lesson_identity_id = cli.id
+		LEFT JOIN course_completions completion
+		  ON completion.enrollment_id = e.id
 		WHERE e.student_account_id = $1::uuid
-		GROUP BY e.course_id, e.created_at, cr.title_ar, cr.title_en
+		GROUP BY e.course_id, e.created_at, cr.title_ar, cr.title_en,
+		         completion.completed_at, completion.course_revision_id,
+		         completion.course_revision_number, completion.required_lesson_count,
+		         completion.completed_lesson_count, completion.source
 		ORDER BY e.created_at DESC, e.course_id ASC
 	`, studentID)
 	if err != nil {
@@ -279,10 +341,28 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 	for rows.Next() {
 		var summary StudentCourseSummary
 		var total, completed int64
-		if err := rows.Scan(&summary.CourseID, &summary.EnrollmentCreatedAt, &summary.TitleAr, &summary.TitleEn, &total, &completed, &summary.LastWatchedAt); err != nil {
+		var completionAt *time.Time
+		var completionRevisionID, completionSource *string
+		var completionRevisionNumber, requiredLessonCount, completedLessonCount *int
+		if err := rows.Scan(
+			&summary.CourseID, &summary.EnrollmentCreatedAt, &summary.TitleAr, &summary.TitleEn,
+			&total, &completed, &summary.LastWatchedAt,
+			&completionAt, &completionRevisionID, &completionRevisionNumber,
+			&requiredLessonCount, &completedLessonCount, &completionSource,
+		); err != nil {
 			return nil, fmt.Errorf("scanning student course summary: %w", err)
 		}
 		summary.Progress = CourseProgressSummary{CompletedLessons: int(completed), TotalLessons: int(total)}
+		if completionAt != nil {
+			if completionRevisionID == nil || completionRevisionNumber == nil || requiredLessonCount == nil || completedLessonCount == nil || completionSource == nil {
+				return nil, fmt.Errorf("incomplete course completion for enrollment course %s", summary.CourseID)
+			}
+			summary.Progress.Completion = &CourseCompletion{
+				CompletedAt: completionAt.UTC(), CourseRevisionID: *completionRevisionID,
+				CourseRevisionNumber: *completionRevisionNumber, RequiredLessonCount: *requiredLessonCount,
+				CompletedLessonCount: *completedLessonCount, Source: *completionSource,
+			}
+		}
 		summaries = append(summaries, summary)
 	}
 	if err := rows.Err(); err != nil {

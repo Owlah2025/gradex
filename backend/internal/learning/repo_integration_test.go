@@ -266,6 +266,16 @@ func TestSaveProgressUsesOneStableRowAndWriteOnceCompletion(t *testing.T) {
 	if completingVersion != firstVersion || rows != 1 {
 		t.Fatalf("completion evidence = version %s rows %d, want first version and one durable row", completingVersion, rows)
 	}
+	var completionRows int
+	var completionSource string
+	if err := fixture.repository.pool.QueryRow(ctx, `
+		SELECT count(*), max(source::text)
+		FROM course_completions WHERE enrollment_id = $1::uuid`, enrollment.ID).Scan(&completionRows, &completionSource); err != nil {
+		t.Fatalf("reading durable course completion: %v", err)
+	}
+	if completionRows != 1 || completionSource != "PROGRESS" {
+		t.Fatalf("durable course completions = %d/%q, want exactly one PROGRESS row", completionRows, completionSource)
+	}
 }
 
 func TestProgressConcurrentWritersPreserveMonotonicMaximum(t *testing.T) {
@@ -331,6 +341,12 @@ func TestProgressConcurrentWritersPreserveMonotonicMaximum(t *testing.T) {
 	}
 	if completedAt == nil || storedVersion != completingVersion {
 		t.Fatalf("concurrent completion evidence = completed_at %v version %q", completedAt, storedVersion)
+	}
+	if err := fixture.repository.pool.QueryRow(ctx, `SELECT count(*) FROM course_completions WHERE enrollment_id = $1::uuid`, enrollment.ID).Scan(&rows); err != nil {
+		t.Fatalf("counting concurrent course completions: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("concurrent writes created %d course completion rows, want one", rows)
 	}
 }
 

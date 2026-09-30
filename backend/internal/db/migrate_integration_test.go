@@ -134,6 +134,7 @@ var (
 	subjectDemandTables      = []string{"subject_demand_signals"}
 	adminUser360Tables       = []string{"admin_notes"}
 	instructorProfileTables  = []string{"instructor_profiles", "instructor_profile_expertise"}
+	courseCompletionTables   = []string{"course_completions"}
 )
 
 func allTables() []string {
@@ -153,7 +154,8 @@ func allTables() []string {
 	all = append(all, trustedDeviceTables...)
 	all = append(all, subjectDemandTables...)
 	all = append(all, adminUser360Tables...)
-	return append(all, instructorProfileTables...)
+	all = append(all, instructorProfileTables...)
+	return append(all, courseCompletionTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -780,9 +782,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("instructor profiles schema = %d, want one past admin User 360 hardening %d",
 			InstructorProfilesSchemaVersion, AdminUser360HardeningSchemaVersion)
 	}
-	if MaxSchemaVersion != InstructorProfilesSchemaVersion {
+	if CourseCompletionsSchemaVersion != InstructorProfilesSchemaVersion+1 {
+		t.Fatalf("course completions schema = %d, want one past instructor profiles %d",
+			CourseCompletionsSchemaVersion, InstructorProfilesSchemaVersion)
+	}
+	if MaxSchemaVersion != CourseCompletionsSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, InstructorProfilesSchemaVersion)
+			MaxSchemaVersion, CourseCompletionsSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -891,13 +897,15 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 		t.Fatal("published instructor profile without a snapshot was accepted")
 	}
 
-	if err := m.Steps(-1); err != nil {
+	// Course completions is the newer migration, so step back twice to test the
+	// instructor-profile boundary itself rather than only the newest down file.
+	if err := m.Steps(-2); err != nil {
 		t.Fatalf("rolling back instructor profile schema: %v", err)
 	}
 	if tableExists(t, pool, "instructor_profiles") {
 		t.Fatal("instructor_profiles survived the migration down")
 	}
-	if err := m.Steps(1); err != nil {
+	if err := m.Steps(2); err != nil {
 		t.Fatalf("reapplying instructor profile schema: %v", err)
 	}
 	if !tableExists(t, pool, "instructor_profiles") {
@@ -932,6 +940,83 @@ func TestAdminNotesMigrationIsAppendOnly(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM admin_notes WHERE id = $1::uuid`, noteID); err == nil {
 		t.Fatal("admin note delete unexpectedly succeeded")
+	}
+}
+
+func TestCourseCompletionsMigrationBackfillsPopulatedCompletionAndIsAppendOnly(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Migrate(uint(InstructorProfilesSchemaVersion)); err != nil {
+		t.Fatalf("migrating through instructor profiles schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+	studentID := "10000000-0000-0000-0000-000000000951"
+	instructorID := "10000000-0000-0000-0000-000000000952"
+	courseID := "10000000-0000-0000-0000-000000000953"
+	revisionID := "10000000-0000-0000-0000-000000000954"
+	sectionIdentityID := "10000000-0000-0000-0000-000000000955"
+	lessonIdentityID := "10000000-0000-0000-0000-000000000956"
+	sectionID := "10000000-0000-0000-0000-000000000957"
+	lessonID := "10000000-0000-0000-0000-000000000958"
+	assetID := "10000000-0000-0000-0000-000000000959"
+	versionID := "10000000-0000-0000-0000-000000000960"
+	enrollmentID := "10000000-0000-0000-0000-000000000961"
+	completedAt := time.Date(2026, 9, 30, 10, 11, 12, 0, time.UTC)
+
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+			VALUES ($1::uuid, 'completion-student@example.test', 'completion-student@example.test', 'STUDENT', 'ACTIVE', 'Completion Student'),
+			       ($2::uuid, 'completion-instructor@example.test', 'completion-instructor@example.test', 'INSTRUCTOR', 'ACTIVE', 'Completion Instructor')`, []any{studentID, instructorID}},
+		{`INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, []any{courseID, instructorID}},
+		{`INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, 'APPROVED', 4, 'مقرر الإكمال', 'Completion Course')`, []any{revisionID, courseID}},
+		{`UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $1::uuid WHERE id = $2::uuid`, []any{revisionID, courseID}},
+		{`INSERT INTO course_section_identities (id, course_id) VALUES ($1::uuid, $2::uuid)`, []any{sectionIdentityID, courseID}},
+		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{lessonIdentityID, courseID, sectionIdentityID}},
+		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم الإكمال', 'Completion Section', 0)`, []any{sectionID, revisionID, courseID, sectionIdentityID}},
+		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس الإكمال', 'Completion Lesson', 0)`, []any{lessonID, sectionID, courseID, sectionIdentityID, lessonIdentityID}},
+		{`INSERT INTO media_assets (id, kind, owner_account_id, course_id) VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid)`, []any{assetID, instructorID, courseID}},
+		{`INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
+			VALUES ($1::uuid, $2::uuid, 'VIDEO', 'READY', 'completion/lesson.mp4', 'v1', 'video/mp4', 1)`, []any{versionID, assetID}},
+		{`INSERT INTO enrollments (id, student_account_id, course_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{enrollmentID, studentID, courseID}},
+		{`INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, completed_at, completing_asset_version_id, last_watched_at)
+			VALUES ($1::uuid, $2::uuid, 90, 90, $3, $4::uuid, $3)`, []any{enrollmentID, lessonIdentityID, completedAt, versionID}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seeding populated completion fixture: %v\n%s", err, statement.query)
+		}
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("applying course completion migration: %v", err)
+	}
+
+	var gotCompletedAt time.Time
+	var gotRevisionID, gotSource string
+	var gotRevisionNumber, gotRequired, gotCompleted int
+	if err := pool.QueryRow(ctx, `
+		SELECT completed_at, course_revision_id::text, course_revision_number,
+		       required_lesson_count, completed_lesson_count, source::text
+		FROM course_completions WHERE enrollment_id = $1::uuid`, enrollmentID).Scan(
+		&gotCompletedAt, &gotRevisionID, &gotRevisionNumber, &gotRequired, &gotCompleted, &gotSource,
+	); err != nil {
+		t.Fatalf("reading backfilled completion: %v", err)
+	}
+	if !gotCompletedAt.Equal(completedAt) || gotRevisionID != revisionID || gotRevisionNumber != 4 ||
+		gotRequired != 1 || gotCompleted != 1 || gotSource != "BACKFILL" {
+		t.Fatalf("backfilled completion = %s/%s/%d/%d/%d/%s, want %s/%s/4/1/1/BACKFILL", gotCompletedAt, gotRevisionID, gotRevisionNumber, gotRequired, gotCompleted, gotSource, completedAt, revisionID)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE course_completions SET completed_lesson_count = 2 WHERE enrollment_id = $1::uuid`, enrollmentID); err == nil {
+		t.Fatal("course completion update unexpectedly succeeded")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM course_completions WHERE enrollment_id = $1::uuid`, enrollmentID); err == nil {
+		t.Fatal("course completion delete unexpectedly succeeded")
 	}
 }
 

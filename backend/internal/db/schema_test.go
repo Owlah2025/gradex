@@ -37,8 +37,9 @@ func TestSchemaConstants(t *testing.T) {
 		AdminUser360SchemaVersion != AdminOperationsSchemaVersion+1 ||
 		AdminUser360HardeningSchemaVersion != AdminUser360SchemaVersion+1 ||
 		InstructorProfilesSchemaVersion != AdminUser360HardeningSchemaVersion+1 ||
-		MaxSchemaVersion != InstructorProfilesSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want %d", MaxSchemaVersion, InstructorProfilesSchemaVersion)
+		CourseCompletionsSchemaVersion != InstructorProfilesSchemaVersion+1 ||
+		MaxSchemaVersion != CourseCompletionsSchemaVersion {
+		t.Fatalf("CourseCompletionsSchemaVersion = %d, MaxSchemaVersion = %d, want %d", CourseCompletionsSchemaVersion, MaxSchemaVersion, InstructorProfilesSchemaVersion+1)
 	}
 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",

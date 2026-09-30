@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestT058CourseScopeOrderingAggregationAndReadOnlyState(t *testing.T) {
@@ -105,6 +107,120 @@ func TestT058RevisionReplacementExcludesHistoricalLessonsAndPreservesStableProgr
 	}
 	if len(progress) != 1 || summary.CompletedLessons != 1 || summary.TotalLessons != 1 || progress[fixture.lessonID].LastPositionSeconds != 80 {
 		t.Fatalf("replacement progress=%v summary=%+v, want retained stable completion 1/1", progress, summary)
+	}
+}
+
+func TestDurableCourseCompletionSurvivesPublishedRevisionAddingLesson(t *testing.T) {
+	fixture := newLearningFixture(t)
+	ctx := context.Background()
+	enrollment, err := fixture.repository.EnrollmentForLesson(ctx, fixture.studentID, fixture.lessonID)
+	if err != nil {
+		t.Fatalf("resolving enrollment: %v", err)
+	}
+	versionID := seedProgressAssetVersion(t, ctx, fixture, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb8")
+	if err := fixture.repository.SaveProgress(ctx, ProgressWrite{
+		EnrollmentID: enrollment.ID, CourseLessonIdentityID: fixture.lessonID,
+		PositionSeconds: 90, Completed: true, CompletingAssetVersionID: versionID,
+	}); err != nil {
+		t.Fatalf("recording initial course completion: %v", err)
+	}
+
+	completionBefore := 0
+	if err := fixture.repository.pool.QueryRow(ctx, `SELECT count(*) FROM course_completions WHERE enrollment_id = $1::uuid`, enrollment.ID).Scan(&completionBefore); err != nil {
+		t.Fatalf("counting initial course completion: %v", err)
+	}
+	if completionBefore != 1 {
+		t.Fatalf("initial course completion rows = %d, want 1", completionBefore)
+	}
+
+	revisionID, sectionRowID, newLessonID, newLessonRowID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	sectionIdentityID := "66666666-6666-6666-6666-666666666666"
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, 'APPROVED', 2, 'مقرر محدث', 'Updated Course')`, []any{revisionID, fixture.courseID}},
+		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id)
+			VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{newLessonID, fixture.courseID, sectionIdentityID}},
+		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم محدث', 'Updated Section', 0)`, []any{sectionRowID, revisionID, fixture.courseID, sectionIdentityID}},
+		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس مكتمل', 'Completed Lesson', 0),
+			       ($6::uuid, $2::uuid, $3::uuid, $4::uuid, $7::uuid, 'درس جديد', 'New Lesson', 1)`, []any{uuid.NewString(), sectionRowID, fixture.courseID, sectionIdentityID, fixture.lessonID, newLessonRowID, newLessonID}},
+		{`UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, []any{revisionID, fixture.courseID}},
+	} {
+		if _, err := fixture.repository.pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("publishing revision with new lesson: %v", err)
+		}
+	}
+
+	graph, err := fixture.repository.ReadCourseGraph(ctx, fixture.courseID)
+	if err != nil {
+		t.Fatalf("reading revised graph: %v", err)
+	}
+	_, summary, err := fixture.repository.ReadCourseProgress(ctx, enrollment.ID, fixture.courseID, graph)
+	if err != nil {
+		t.Fatalf("reading revised progress: %v", err)
+	}
+	if summary.CompletedLessons != 1 || summary.TotalLessons != 2 || summary.Completion == nil {
+		t.Fatalf("revised progress summary = %+v, want durable completion and 1/2 current progress", summary)
+	}
+	var completionRows int
+	if err := fixture.repository.pool.QueryRow(ctx, `SELECT count(*) FROM course_completions WHERE enrollment_id = $1::uuid`, enrollment.ID).Scan(&completionRows); err != nil {
+		t.Fatalf("counting completion after new revision: %v", err)
+	}
+	if completionRows != 1 {
+		t.Fatalf("completion rows after new revision = %d, want one append-only fact", completionRows)
+	}
+}
+
+func TestConcurrentFinalLessonWritesRecordOneCourseCompletion(t *testing.T) {
+	fixture := newLearningFixture(t)
+	ctx := context.Background()
+	secondLessonID := uuid.NewString()
+	seedT058LessonInLiveRevision(t, fixture, secondLessonID, "second", 1)
+	enrollment, err := fixture.repository.EnrollmentForLesson(ctx, fixture.studentID, fixture.lessonID)
+	if err != nil {
+		t.Fatalf("resolving enrollment: %v", err)
+	}
+	versionID := seedProgressAssetVersion(t, ctx, fixture, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb7")
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var writers sync.WaitGroup
+	for _, lessonID := range []string{fixture.lessonID, secondLessonID} {
+		writers.Add(1)
+		go func(lessonID string) {
+			defer writers.Done()
+			<-start
+			errs <- fixture.repository.SaveProgressGuarded(ctx, ProgressWrite{
+				EnrollmentID: enrollment.ID, CourseLessonIdentityID: lessonID,
+				PositionSeconds: 90, Completed: true, CompletingAssetVersionID: versionID,
+			}, func(context.Context, pgx.Tx) error { return nil })
+		}(lessonID)
+	}
+	close(start)
+	writers.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent final lesson write: %v", err)
+		}
+	}
+	var completionRows int
+	if err := fixture.repository.pool.QueryRow(ctx, `SELECT count(*) FROM course_completions WHERE enrollment_id = $1::uuid`, enrollment.ID).Scan(&completionRows); err != nil {
+		t.Fatalf("counting concurrent durable completions: %v", err)
+	}
+	if completionRows != 1 {
+		t.Fatalf("concurrent final writes recorded %d completion rows, want one", completionRows)
+	}
+	graph, err := fixture.repository.ReadCourseGraph(ctx, fixture.courseID)
+	if err != nil {
+		t.Fatalf("reading concurrent completion graph: %v", err)
+	}
+	_, summary, err := fixture.repository.ReadCourseProgress(ctx, enrollment.ID, fixture.courseID, graph)
+	if err != nil || summary.CompletedLessons != 2 || summary.TotalLessons != 2 {
+		t.Fatalf("concurrent completion summary = %+v err=%v, want 2/2", summary, err)
 	}
 }
 
