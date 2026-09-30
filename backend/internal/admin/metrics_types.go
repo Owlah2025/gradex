@@ -102,9 +102,29 @@ type InboxResult struct {
 	Sections []InboxSection `json:"sections"`
 }
 
+type SearchMetricsRequest struct {
+	Principal identity.Principal
+}
+
+type SearchQueryMetric struct {
+	Query           string          `json:"query"`
+	Locale          identity.Locale `json:"locale"`
+	SearchCount     int             `json:"search_count"`
+	ZeroResultCount int             `json:"zero_result_count"`
+	LastSearchedAt  time.Time       `json:"last_searched_at"`
+}
+
+type SearchMetricsResult struct {
+	TopQueries        []SearchQueryMetric `json:"top_queries"`
+	ZeroResultQueries []SearchQueryMetric `json:"zero_result_queries"`
+	Since             time.Time           `json:"since"`
+	RetentionDays     int                 `json:"retention_days"`
+}
+
 type AdminMetricsService interface {
 	GetMetricsOverview(ctx context.Context, request MetricsOverviewRequest) (MetricsOverviewResult, error)
 	ListMetricsCourses(ctx context.Context, request MetricsCoursesRequest) (MetricsCoursesResult, error)
 	ListMetricsInstructors(ctx context.Context, request MetricsInstructorsRequest) (MetricsInstructorsResult, error)
 	GetInbox(ctx context.Context, request InboxRequest) (InboxResult, error)
+	GetSearchMetrics(ctx context.Context, request SearchMetricsRequest) (SearchMetricsResult, error)
 }

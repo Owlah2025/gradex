@@ -20,10 +20,11 @@ import (
 )
 
 type Repository struct {
-	pool      *pgxpool.Pool
-	learning  *learning.Repository
-	evaluator *entitlement.Evaluator
-	devices   deviceReader
+	pool               *pgxpool.Pool
+	learning           *learning.Repository
+	evaluator          *entitlement.Evaluator
+	devices            deviceReader
+	emailPayloadReader ProtectedPayloadReader
 }
 
 func NewRepository(pool *pgxpool.Pool) (*Repository, error) {

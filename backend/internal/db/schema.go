@@ -91,7 +91,10 @@ const (
 	CourseCompletionsSchemaVersion = InstructorProfilesSchemaVersion + 1
 	// T6 immutable, immediately-published Course announcements.
 	CourseAnnouncementsSchemaVersion = CourseCompletionsSchemaVersion + 1
-	MaxSchemaVersion                 = CourseAnnouncementsSchemaVersion
+	// T7 catalogue search analytics. The table contains only normalized query
+	// text, result count, locale, and time; it has no account or request identity.
+	CatalogSearchAnalyticsSchemaVersion = CourseAnnouncementsSchemaVersion + 1
+	MaxSchemaVersion                    = CatalogSearchAnalyticsSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

@@ -138,7 +138,7 @@ func setupAdminPricingAPIServerWithDevices(t *testing.T, recentAuthWindow time.D
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)
 	}
-	adminRepository, err := adminread.NewRepositoryWithOptions(p, adminread.RepositoryOptions{Devices: devices})
+	adminRepository, err := adminread.NewRepositoryWithOptions(p, adminread.RepositoryOptions{Devices: devices, EmailPayloadReader: obWriter})
 	if err != nil {
 		t.Fatalf("admin repository: %v", err)
 	}

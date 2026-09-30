@@ -168,6 +168,7 @@ type InstructorUser360 struct {
 
 type User360 struct {
 	Identity   User360Identity    `json:"identity"`
+	Emails     []EmailDelivery    `json:"emails"`
 	Student    *StudentUser360    `json:"student,omitempty"`
 	Instructor *InstructorUser360 `json:"instructor,omitempty"`
 }

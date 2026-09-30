@@ -110,6 +110,14 @@ func parseAccountDirectoryRequest(c *gin.Context, principal identity.Principal) 
 	if !ok {
 		return adminread.AccountDirectoryRequest{}, false
 	}
+	return parseAccountDirectoryFilters(c, principal, page, limit)
+}
+
+func parseAccountDirectoryFilters(
+	c *gin.Context,
+	principal identity.Principal,
+	page, limit int,
+) (adminread.AccountDirectoryRequest, bool) {
 	query := strings.TrimSpace(c.Query("q"))
 	if len([]rune(query)) > maxAdminQueryLength {
 		writeProblem(c, problem.ValidationFailed())

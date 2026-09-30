@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,7 +23,8 @@ const (
 )
 
 type publicCatalogHandlers struct {
-	repository *catalogpublic.Repository
+	repository        *catalogpublic.Repository
+	searchEventWriter func(context.Context, string, int, string) error
 }
 
 func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoundation) error {
@@ -29,7 +32,7 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 		return errors.New("complete public catalogue foundation is required")
 	}
 
-	handlers := &publicCatalogHandlers{repository: foundation.repository}
+	handlers := &publicCatalogHandlers{repository: foundation.repository, searchEventWriter: foundation.searchEventWriter}
 	catalog := v1.Group("/catalog")
 	catalog.Use(publicCatalogCache())
 	catalog.GET("/courses", handlers.list)
@@ -82,6 +85,23 @@ func (h *publicCatalogHandlers) browseSubjects(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *publicCatalogHandlers) recordSearchEvent(query string, resultCount int, arabic bool) {
+	if h.searchEventWriter == nil {
+		return
+	}
+	locale := "en"
+	if arabic {
+		locale = "ar"
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		// Analytics is deliberately best-effort: catalogue availability and
+		// latency must never depend on the optional telemetry write.
+		_ = h.searchEventWriter(ctx, query, resultCount, locale)
+	}()
 }
 
 func (h *publicCatalogHandlers) subjectDetail(c *gin.Context) {
@@ -202,6 +222,9 @@ func (h *publicCatalogHandlers) list(c *gin.Context) {
 	if err != nil {
 		writeProblem(c, problem.Internal(""))
 		return
+	}
+	if searching && strings.TrimSpace(query) != "" {
+		h.recordSearchEvent(query, result.Total, publicCatalogArabic(c))
 	}
 	c.JSON(http.StatusOK, result)
 }

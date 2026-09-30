@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -8,7 +9,8 @@ import (
 )
 
 type PublicCatalogFoundation struct {
-	repository *catalogpublic.Repository
+	repository        *catalogpublic.Repository
+	searchEventWriter func(context.Context, string, int, string) error
 }
 
 func (f *PublicCatalogFoundation) Repository() *catalogpublic.Repository {
@@ -19,14 +21,19 @@ func (f *PublicCatalogFoundation) Repository() *catalogpublic.Repository {
 }
 
 type PublicCatalogFoundationOptions struct {
-	Repository *catalogpublic.Repository
+	Repository        *catalogpublic.Repository
+	SearchEventWriter func(context.Context, string, int, string) error
 }
 
 func NewPublicCatalogFoundation(options PublicCatalogFoundationOptions) (*PublicCatalogFoundation, error) {
 	if options.Repository == nil {
 		return nil, errors.New("public catalogue repository is required")
 	}
-	return &PublicCatalogFoundation{repository: options.Repository}, nil
+	writer := options.SearchEventWriter
+	if writer == nil {
+		writer = options.Repository.RecordSearchEvent
+	}
+	return &PublicCatalogFoundation{repository: options.Repository, searchEventWriter: writer}, nil
 }
 
 func WithPublicCatalogFoundation(foundation *PublicCatalogFoundation) RouterOption {

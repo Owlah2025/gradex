@@ -14,6 +14,9 @@ type AdminService interface {
 	SearchAccounts(context.Context, adminread.AccountDirectoryRequest) (adminread.AccountDirectoryResult, error)
 	GetAccount(context.Context, adminread.AccountIdentityRequest) (adminread.AccountDirectoryEntry, error)
 	ListAuditEvents(context.Context, adminread.AuditEventRequest) (adminread.AuditEventResult, error)
+	ListEmailDeliveries(context.Context, adminread.EmailDeliveriesRequest) (adminread.EmailDeliveriesResult, error)
+	ListMediaFailures(context.Context, adminread.MediaFailuresRequest) (adminread.MediaFailuresResult, error)
+	ExportAccounts(context.Context, adminread.AccountDirectoryRequest) (adminread.AccountExportResult, error)
 }
 
 type AdminUserService interface {

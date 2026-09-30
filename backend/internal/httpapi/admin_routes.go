@@ -28,6 +28,21 @@ func mountAdminRoutes(
 		return fmt.Errorf("principal resolver is required to mount admin routes")
 	}
 	h := &adminHandlers{service: foundation.service, userService: foundation.userService, recentAuthWindow: foundation.recentAuthWindow}
+	exportGroup := v1.Group("/admin/accounts")
+	exportGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapUserAdministration),
+		foundation.requireAdminRateDecision("admin-account-export"),
+	)
+	exportGroup.GET("/export", h.exportAccounts)
+
+	mediaOperations := v1.Group("/admin/media")
+	mediaOperations.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapAdminOperations),
+	)
+	mediaOperations.GET("/failures", h.listMediaFailures)
+
 	readGroup := v1.Group("/admin")
 	readGroup.Use(
 		requireAuth(authenticator),
@@ -45,12 +60,14 @@ func mountAdminRoutes(
 			readGroup.GET("/accounts/:accountId", h.getAccount)
 		}
 		readGroup.GET("/audit-events", h.listAuditEvents)
+		readGroup.GET("/email-deliveries", h.listEmailDeliveries)
 		if foundation.metricsService != nil {
 			metrics := &adminMetricsHandlers{service: foundation.metricsService}
 			readGroup.GET("/metrics/overview", metrics.getOverview)
 			readGroup.GET("/metrics/courses", metrics.listCourses)
 			readGroup.GET("/metrics/instructors", metrics.listInstructors)
 			readGroup.GET("/inbox", metrics.getInbox)
+			readGroup.GET("/metrics/search", metrics.getSearchMetrics)
 		}
 	}
 	if foundation.userService != nil && sessionFoundation != nil {

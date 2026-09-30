@@ -33,6 +33,8 @@ export function RoleWorkspaceShell({
     staffOperations: t.nav.staffOperations,
     adminUsers: t.nav.adminUsers,
     adminAudit: t.nav.adminAudit,
+    adminEmailDeliveries: t.nav.adminEmailDeliveries,
+    adminMediaFailures: t.nav.adminMediaFailures,
     adminInstructorProfiles: t.nav.adminInstructorProfiles,
     instructorStudio: t.nav.instructorStudio,
     instructorDashboard: t.nav.instructorDashboard,

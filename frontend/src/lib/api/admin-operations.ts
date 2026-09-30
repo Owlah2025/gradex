@@ -1,4 +1,4 @@
-import { authenticatedRequest, ensureAnonymousBrowser } from "./http";
+import { authenticatedDownload, authenticatedRequest, ensureAnonymousBrowser } from "./http";
 import { currentCSRFToken } from "../identity/session";
 import { ProblemError } from "./problem";
 
@@ -36,6 +36,62 @@ export type AdminAccountFilters = {
   joinedTo?: string;
   page?: number;
   limit?: number;
+};
+
+export type AdminEmailDeliveryState = "queued" | "attempted" | "delivered" | "failed";
+
+export type AdminEmailDelivery = {
+  id: string;
+  kind: string;
+  locale: AdminLocale;
+  state: AdminEmailDeliveryState;
+  recipient: string;
+  queued_at: string;
+  attempted_at?: string | null;
+  delivered_at?: string | null;
+  failed_at?: string | null;
+  updated_at: string;
+  attempt_count: number;
+  last_error_class?: string;
+};
+
+export type AdminEmailDeliveryFilters = {
+  state?: AdminEmailDeliveryState | "";
+  kind?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type AdminEmailDeliveryPage = {
+  items: AdminEmailDelivery[];
+  page: number;
+  limit: number;
+  has_more: boolean;
+};
+
+export type AdminMediaFailure = {
+  asset_version_id: string;
+  media_state: string;
+  state: "failed" | "stuck";
+  kind: string;
+  course_title: string;
+  lesson_title?: string;
+  owner_display_name: string;
+  failure_category?: string;
+  processing_stage?: string;
+  processing_progress_percent?: number;
+  created_at: string;
+  updated_at: string;
+  retry_action?: "retry" | "retry-enhancements";
+};
+
+export type AdminMediaFailurePage = {
+  items: AdminMediaFailure[];
+  page: number;
+  limit: number;
+  has_more: boolean;
 };
 
 export type AdminAuditEvent = {
@@ -184,6 +240,7 @@ export type AdminNote = {
 
 export type AdminUser360 = {
   identity: User360Identity;
+  emails: AdminEmailDelivery[];
   student?: {
     academic_profile?: {
       setup_state: string;
@@ -265,6 +322,17 @@ export function buildAdminAuditQuery(filters: AdminAuditFilters): string {
   return query.toString();
 }
 
+export function buildAdminEmailDeliveriesQuery(filters: AdminEmailDeliveryFilters = {}): string {
+  const query = new URLSearchParams();
+  setText(query, "state", filters.state);
+  setText(query, "kind", filters.kind);
+  setLocalDateBoundary(query, "from", filters.from, false);
+  setLocalDateBoundary(query, "to", filters.to, true);
+  setNumber(query, "page", filters.page);
+  setNumber(query, "limit", filters.limit);
+  return query.toString();
+}
+
 export function auditActionLabel(action: string, labels: AuditLabelSet): string {
   return labels.actions[action] ?? action;
 }
@@ -287,6 +355,39 @@ export async function listAdminAccounts(
     throw new Error(locale === "ar" ? "لم يتم استلام دليل الحسابات" : "No account directory returned");
   }
   return response;
+}
+
+export async function listAdminEmailDeliveries(
+  locale: AdminLocale,
+  filters: AdminEmailDeliveryFilters = {},
+): Promise<AdminEmailDeliveryPage> {
+  const query = buildAdminEmailDeliveriesQuery(filters);
+  const response = await authenticatedRequest<AdminEmailDeliveryPage>(
+    "/admin/email-deliveries" + (query ? "?" + query : ""), "GET", locale,
+  );
+  if (response === null) throw new Error(locale === "ar" ? "لم يتم استلام سجل البريد" : "No email delivery log returned");
+  return response;
+}
+
+export async function listAdminMediaFailures(locale: AdminLocale, page = 1, limit = 20): Promise<AdminMediaFailurePage> {
+  const response = await authenticatedRequest<AdminMediaFailurePage>(
+    `/admin/media/failures?page=${page}&limit=${limit}`, "GET", locale,
+  );
+  if (response === null) throw new Error(locale === "ar" ? "لم يتم استلام أعطال الوسائط" : "No media failures returned");
+  return response;
+}
+
+export async function retryAdminMedia(assetVersionID: string, locale: AdminLocale): Promise<void> {
+  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retries`, "POST", locale, await resolveAdminCSRF());
+}
+
+export async function retryAdminMediaEnhancements(assetVersionID: string, locale: AdminLocale): Promise<void> {
+  await authenticatedRequest(`/media/assets/${encodeURIComponent(assetVersionID)}/retry-enhancements`, "POST", locale, await resolveAdminCSRF());
+}
+
+export async function exportAdminAccounts(filters: AdminAccountFilters, locale: AdminLocale): Promise<Blob> {
+  const query = buildAdminAccountQuery({ ...filters, page: undefined, limit: undefined });
+  return authenticatedDownload(`/admin/accounts/export${query ? `?${query}` : ""}`, locale);
 }
 
 export async function getAdminAccount(accountID: string, locale: AdminLocale): Promise<{ identity: AdminAccount }> {

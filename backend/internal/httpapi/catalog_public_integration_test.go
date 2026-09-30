@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/gin-gonic/gin"
@@ -87,6 +88,56 @@ func TestPublicCatalogRoutesExposeOnlyVisibleCourses(t *testing.T) {
 	}
 	malformed := publicCatalogRequest(r, http.MethodGet, "/api/v1/catalog/courses/not-a-canonical-slug")
 	assertSamePublicCatalogNotFound(t, missing, malformed)
+}
+
+func TestPublicCatalogSearchAnalyticsIsAnonymousAndBestEffort(t *testing.T) {
+	freshSchema(t)
+	pool, ctx := pool(t)
+	seedPublicCatalogOwner(t, pool, ctx)
+	courseID := seedPublicCatalogCourse(t, pool, ctx, publicCourseVisibility{lifecycle: "PUBLISHED"})
+	setSearchRevision(t, pool, ctx, courseID, "علم الأحياء", "Biology 101", "وصف", "Biology course")
+	seedPricedPublicSection(t, pool, ctx, courseID)
+
+	router := buildPublicCatalogRouter(t, pool)
+	response := publicCatalogRequestWithLanguage(router, http.MethodGet, "/api/v1/catalog/courses?q=Biology", "en")
+	if response.Code != http.StatusOK {
+		t.Fatalf("search status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var query, locale string
+	var resultCount int
+	for time.Now().Before(deadline) {
+		err := pool.QueryRow(ctx, `
+			SELECT normalized_query, locale, result_count
+			  FROM catalog_search_events
+			 ORDER BY occurred_at DESC LIMIT 1`).Scan(&query, &locale, &resultCount)
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if query != "biology" || locale != "en" || resultCount != 1 {
+		t.Fatalf("search analytics row = %q/%q/%d", query, locale, resultCount)
+	}
+	var piiColumns int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'catalog_search_events'
+		   AND column_name IN ('account_id', 'ip_address', 'user_agent')`).Scan(&piiColumns); err != nil {
+		t.Fatalf("checking search analytics columns: %v", err)
+	}
+	if piiColumns != 0 {
+		t.Fatalf("search analytics has %d prohibited identity columns", piiColumns)
+	}
+
+	failingRouter := buildPublicCatalogRouterWithSearchWriter(t, pool, func(context.Context, string, int, string) error {
+		return context.Canceled
+	})
+	failing := publicCatalogRequestWithLanguage(failingRouter, http.MethodGet, "/api/v1/catalog/courses?q=Biology", "en")
+	if failing.Code != http.StatusOK {
+		t.Fatalf("search with failing analytics status = %d, want 200: %s", failing.Code, failing.Body.String())
+	}
 }
 
 func TestPublicCatalogBilingualProjectionAndCacheVariants(t *testing.T) {

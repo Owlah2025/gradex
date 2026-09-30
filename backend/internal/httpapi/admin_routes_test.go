@@ -31,6 +31,18 @@ func (fakeAdminService) ListAuditEvents(context.Context, adminread.AuditEventReq
 	return adminread.AuditEventResult{Events: []adminread.AuditEvent{}, Page: 1, Limit: 25}, nil
 }
 
+func (fakeAdminService) ListEmailDeliveries(context.Context, adminread.EmailDeliveriesRequest) (adminread.EmailDeliveriesResult, error) {
+	return adminread.EmailDeliveriesResult{Items: []adminread.EmailDelivery{}, Page: 1, Limit: 25}, nil
+}
+
+func (fakeAdminService) ListMediaFailures(context.Context, adminread.MediaFailuresRequest) (adminread.MediaFailuresResult, error) {
+	return adminread.MediaFailuresResult{Items: []adminread.MediaFailure{}, Page: 1, Limit: 25}, nil
+}
+
+func (fakeAdminService) ExportAccounts(context.Context, adminread.AccountDirectoryRequest) (adminread.AccountExportResult, error) {
+	return adminread.AccountExportResult{Accounts: []adminread.AccountDirectoryEntry{}}, nil
+}
+
 func (fakeAdminService) GetMetricsOverview(context.Context, adminread.MetricsOverviewRequest) (adminread.MetricsOverviewResult, error) {
 	return adminread.MetricsOverviewResult{Metrics: []adminread.Metric{}, AsOf: time.Now().UTC()}, nil
 }
@@ -47,6 +59,10 @@ func (fakeAdminService) GetInbox(context.Context, adminread.InboxRequest) (admin
 	return adminread.InboxResult{Sections: []adminread.InboxSection{}}, nil
 }
 
+func (fakeAdminService) GetSearchMetrics(context.Context, adminread.SearchMetricsRequest) (adminread.SearchMetricsResult, error) {
+	return adminread.SearchMetricsResult{TopQueries: []adminread.SearchQueryMetric{}, ZeroResultQueries: []adminread.SearchQueryMetric{}}, nil
+}
+
 func TestAdminOperationsRoutesAuthorization(t *testing.T) {
 	paths := []string{
 		"/api/v1/admin/accounts",
@@ -56,6 +72,9 @@ func TestAdminOperationsRoutesAuthorization(t *testing.T) {
 		"/api/v1/admin/metrics/courses",
 		"/api/v1/admin/metrics/instructors",
 		"/api/v1/admin/inbox",
+		"/api/v1/admin/email-deliveries",
+		"/api/v1/admin/media/failures",
+		"/api/v1/admin/accounts/export",
 	}
 	t.Run("anonymous is refused", func(t *testing.T) {
 		router, _ := authzRouterWithSessionAndAuthenticator(

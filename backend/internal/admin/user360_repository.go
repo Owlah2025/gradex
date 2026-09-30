@@ -11,7 +11,8 @@ import (
 )
 
 type RepositoryOptions struct {
-	Devices deviceReader
+	Devices            deviceReader
+	EmailPayloadReader ProtectedPayloadReader
 }
 
 func NewRepositoryWithOptions(pool *pgxpool.Pool, options RepositoryOptions) (*Repository, error) {
@@ -32,6 +33,7 @@ func NewRepositoryWithOptions(pool *pgxpool.Pool, options RepositoryOptions) (*R
 	}
 	return &Repository{
 		pool: pool, learning: learningRepository, evaluator: evaluator, devices: options.Devices,
+		emailPayloadReader: options.EmailPayloadReader,
 	}, nil
 }
 

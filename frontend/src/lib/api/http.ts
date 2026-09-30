@@ -116,6 +116,25 @@ export async function authenticatedRequest<T>(
   return readJSONResponse<T>(response);
 }
 
+export async function authenticatedDownload(
+  path: string,
+  language: "ar" | "en",
+): Promise<Blob> {
+  const response = await fetch(`${apiBase}${path}`, {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "text/csv, application/problem+json",
+      "Accept-Language": language,
+    },
+  });
+  if (!response.ok) {
+    await readJSONResponse<never>(response);
+  }
+  return response.blob();
+}
+
 export async function readJSONResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json().catch(() => null);
   if (response.ok) return body as T;

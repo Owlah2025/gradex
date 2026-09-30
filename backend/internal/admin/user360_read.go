@@ -43,7 +43,18 @@ func (r *Repository) GetUser360(ctx context.Context, req User360Request) (User36
 		return User360{}, err
 	}
 
-	result := User360{Identity: identityView}
+	result := User360{Identity: identityView, Emails: []EmailDelivery{}}
+	if r.emailPayloadReader != nil {
+		emails, err := r.queryEmailDeliveries(ctx, tx, EmailDeliveriesRequest{
+			Locale: identityView.Locale, RecipientEmail: identityView.Email,
+			OccurredFrom: &identityView.CreatedAt, Page: 1, Limit: 50,
+			RevealRecipient: true,
+		})
+		if err != nil {
+			return User360{}, err
+		}
+		result.Emails = emails.Items
+	}
 	switch identityView.Role {
 	case identity.RoleStudent:
 		student, err := r.queryStudentUser360(ctx, tx, req.Locale, identityView)
@@ -96,11 +107,11 @@ func validateUser360Request(req User360Request) error {
 func user360Sections(role identity.Role) []string {
 	switch role {
 	case identity.RoleStudent:
-		return []string{"identity", "academic_profile", "courses", "entitlements", "invitations", "purchase_requests", "devices", "security_events", "audit_events", "notes"}
+		return []string{"identity", "emails", "academic_profile", "courses", "entitlements", "invitations", "purchase_requests", "devices", "security_events", "audit_events", "notes"}
 	case identity.RoleInstructor:
-		return []string{"identity", "owned_courses", "audit_events", "notes"}
+		return []string{"identity", "emails", "owned_courses", "audit_events", "notes"}
 	default:
-		return []string{"identity"}
+		return []string{"identity", "emails"}
 	}
 }
 

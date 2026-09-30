@@ -310,7 +310,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // and then fail every payment confirmation on a constraint violation, after the
 // Administrator has already taken the money. Readiness fails closed instead.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.DirectPurchaseAccessGrantSchemaVersion
+	return db.CatalogSearchAnalyticsSchemaVersion
 }
 
 func buildLearningFoundation(
@@ -862,15 +862,24 @@ func buildCatalogFoundation(
 }
 
 func buildAdminFoundation(
+	cfg *config.Config,
 	pool *pgxpool.Pool,
 	devices *identity.DeviceService,
 	limiter *ratelimit.Limiter,
 	recentAuthWindow time.Duration,
 ) (*httpapi.AdminFoundation, error) {
+	reader, err := outbox.NewWriter(
+		cfg.Admission().ProtectedPayloadKeyVersion(),
+		[]byte(cfg.Admission().ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("building admin email payload reader: %w", err)
+	}
 	options := adminread.RepositoryOptions{}
 	if devices != nil {
 		options.Devices = devices
 	}
+	options.EmailPayloadReader = reader
 	repository, err := adminread.NewRepositoryWithOptions(pool, options)
 	if err != nil {
 		return nil, fmt.Errorf("building admin read repository: %w", err)
@@ -881,6 +890,7 @@ func buildAdminFoundation(
 		EndpointPolicies: map[string]ratelimit.Policy{
 			"admin-notes":               ratelimit.AdminMutationPolicy("admin-notes"),
 			"admin-session-revocations": ratelimit.AdminMutationPolicy("admin-session-revocations"),
+			"admin-account-export":      ratelimit.AdminMutationPolicy("admin-account-export"),
 		},
 		RecentAuthWindow: recentAuthWindow,
 	})
@@ -1144,7 +1154,7 @@ func buildProductionFoundationsWithStaffSource(
 
 	if cfg.Sessions().Enabled() {
 		adminFoundation, err := buildAdminFoundation(
-			pool, pf.Devices, admissionFoundation.RateLimiter(), cfg.Sessions().HighestRiskRecentAuthWindow(),
+			cfg, pool, pf.Devices, admissionFoundation.RateLimiter(), cfg.Sessions().HighestRiskRecentAuthWindow(),
 		)
 		if err != nil {
 			pf.Close()

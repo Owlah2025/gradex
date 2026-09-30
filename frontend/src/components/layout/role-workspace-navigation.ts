@@ -19,6 +19,8 @@ export type WorkspaceNavigationKey =
   | "staffOperations"
   | "adminUsers"
   | "adminAudit"
+  | "adminEmailDeliveries"
+  | "adminMediaFailures"
   | "instructorStudio"
   | "instructorProfile"
   | "adminInstructorProfiles"
@@ -90,6 +92,8 @@ export function roleWorkspaceNavigation(
       { key: "reportedContent", href: `/${locale}/admin/reported-content` },
       { key: "adminUsers", href: `/${locale}/admin/users` },
       { key: "adminAudit", href: `/${locale}/admin/audit` },
+      { key: "adminEmailDeliveries", href: `/${locale}/admin/email-deliveries` },
+      { key: "adminMediaFailures", href: `/${locale}/admin/media/failures` },
       { key: "staffOperations", href: "/staff" },
     ];
   }

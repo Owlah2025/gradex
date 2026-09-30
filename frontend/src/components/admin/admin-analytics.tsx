@@ -4,6 +4,7 @@ import { Info, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getAdminMetricsOverview,
+  getAdminSearchMetrics,
   listAdminMetricCourses,
   listAdminMetricInstructors,
   metricByKey,
@@ -16,6 +17,7 @@ import {
   type AdminMetricsPage,
   type AdminCourseMetric,
   type AdminInstructorMetric,
+  type AdminSearchMetrics,
 } from "@/lib/api/admin-metrics";
 import { describeApiError } from "@/lib/api/api-error";
 import { useLocale } from "@/lib/i18n/locale-provider";
@@ -108,11 +110,13 @@ export function AdminAnalytics() {
   const [overview, setOverview] = useState<AdminMetricsOverview | null>(null);
   const [courses, setCourses] = useState<AdminMetricsPage<AdminCourseMetric> | null>(null);
   const [instructors, setInstructors] = useState<AdminMetricsPage<AdminInstructorMetric> | null>(null);
+  const [searchMetrics, setSearchMetrics] = useState<AdminSearchMetrics | null>(null);
   const [courseFilters, setCourseFilters] = useState<AdminMetricsPageFilters>(defaultAdminCourseMetricsFilters);
   const [instructorFilters, setInstructorFilters] = useState<AdminMetricsPageFilters>(defaultAdminInstructorMetricsFilters);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [instructorsError, setInstructorsError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   const loadOverview = useCallback(async () => {
@@ -145,6 +149,16 @@ export function AdminAnalytics() {
     }
   }, [instructorFilters, locale]);
 
+  const loadSearchMetrics = useCallback(async () => {
+    setSearchMetrics(null);
+    setSearchError(null);
+    try {
+      setSearchMetrics(await getAdminSearchMetrics(locale));
+    } catch (reason) {
+      setSearchError(describeApiError(reason, locale));
+    }
+  }, [locale]);
+
   useEffect(() => {
     void loadOverview();
   }, [loadOverview, attempt]);
@@ -156,6 +170,10 @@ export function AdminAnalytics() {
   useEffect(() => {
     void loadInstructors();
   }, [loadInstructors, attempt]);
+
+  useEffect(() => {
+    void loadSearchMetrics();
+  }, [loadSearchMetrics, attempt]);
 
   const demand = useMemo(() => (overview ? metricSubjectDemand(overview.metrics) : []), [overview]);
 
@@ -183,6 +201,7 @@ export function AdminAnalytics() {
               <MetricGroup key={group.key} group={group} metrics={overview.metrics} copy={copy} locale={locale} />
             ))}
           </div>
+          <SearchPanel metrics={searchMetrics} error={searchError} copy={copy} locale={locale} onRetry={() => void loadSearchMetrics()} />
           <DemandPanel demand={demand} copy={copy} locale={locale} />
         </>
       ) : (
@@ -300,6 +319,48 @@ function MetricTile({
       </CardContent>
     </Card>
   );
+}
+
+function SearchPanel({
+  metrics,
+  error,
+  copy,
+  locale,
+  onRetry,
+}: {
+  metrics: AdminSearchMetrics | null;
+  error: string | null;
+  copy: ReturnType<typeof useLocale>["t"]["adminAnalytics"];
+  locale: "ar" | "en";
+  onRetry: () => void;
+}) {
+  return <WorkspaceSection title={copy.search.title} description={copy.search.description} testID="admin-analytics-search">
+    {error ? <ErrorState title={copy.loadFailed} detail={error} retryLabel={copy.retry} onRetry={onRetry} /> : metrics === null ? <LoadingState label={copy.loading} /> : (
+      <div className="space-y-6">
+        <p className="text-xs text-muted-foreground">{copy.search.retention.replace("{days}", metrics.retention_days.toLocaleString(locale))}</p>
+        <SearchMetricList title={copy.search.zeroResults} items={metrics.zero_result_queries} copy={copy} locale={locale} empty={copy.search.zeroEmpty} zeroFirst />
+        <SearchMetricList title={copy.search.topQueries} items={metrics.top_queries} copy={copy} locale={locale} empty={copy.search.topEmpty} />
+      </div>
+    )}
+  </WorkspaceSection>;
+}
+
+function SearchMetricList({
+  title,
+  items,
+  copy,
+  locale,
+  empty,
+  zeroFirst = false,
+}: {
+  title: string;
+  items: AdminSearchMetrics["top_queries"];
+  copy: ReturnType<typeof useLocale>["t"]["adminAnalytics"];
+  locale: "ar" | "en";
+  empty: string;
+  zeroFirst?: boolean;
+}) {
+  return <div><div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-display text-base font-bold text-foreground">{title}</h3>{zeroFirst ? <Badge variant="accent">{copy.search.priority}</Badge> : null}</div>{items.length === 0 ? <EmptyState density="compact" title={empty} /> : <ul className="divide-y divide-border rounded-lg border border-border bg-card">{items.map((item) => <li key={`${item.locale}-${item.query}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div className="min-w-0"><p className="truncate font-semibold text-foreground">{item.query}</p><p className="mt-1 text-xs text-muted-foreground">{item.locale === "ar" ? copy.search.arabic : copy.search.english}</p></div><div className="flex items-center gap-4 text-sm tabular-nums text-muted-foreground"><span>{item.search_count.toLocaleString(locale)} {copy.search.searches}</span><span>{item.zero_result_count.toLocaleString(locale)} {copy.search.zero}</span></div></li>)}</ul>}</div>;
 }
 
 function DemandPanel({

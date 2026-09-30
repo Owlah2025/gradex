@@ -122,6 +122,25 @@ func (h *adminMetricsHandlers) getInbox(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *adminMetricsHandlers) getSearchMetrics(c *gin.Context) {
+	principal, ok := principalFrom(c)
+	if !ok {
+		writeProblem(c, problem.NotAuthorized())
+		return
+	}
+	if _, exists := c.GetQuery("window"); exists {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	result, err := h.service.GetSearchMetrics(c.Request.Context(), adminread.SearchMetricsRequest{Principal: principal})
+	if err != nil {
+		writeAdminReadError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, result)
+}
+
 func parseMetricsSort(c *gin.Context, allowed []string, fallback string) (string, string, bool) {
 	sort := strings.TrimSpace(c.Query("sort"))
 	if sort == "" {

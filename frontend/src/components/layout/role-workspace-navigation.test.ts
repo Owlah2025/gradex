@@ -25,6 +25,8 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "reportedContent", href: "/en/admin/reported-content" },
     { key: "adminUsers", href: "/en/admin/users" },
     { key: "adminAudit", href: "/en/admin/audit" },
+    { key: "adminEmailDeliveries", href: "/en/admin/email-deliveries" },
+    { key: "adminMediaFailures", href: "/en/admin/media/failures" },
     { key: "staffOperations", href: "/staff" },
   ]);
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "ar"), [
@@ -41,6 +43,8 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "reportedContent", href: "/ar/admin/reported-content" },
     { key: "adminUsers", href: "/ar/admin/users" },
     { key: "adminAudit", href: "/ar/admin/audit" },
+    { key: "adminEmailDeliveries", href: "/ar/admin/email-deliveries" },
+    { key: "adminMediaFailures", href: "/ar/admin/media/failures" },
     { key: "staffOperations", href: "/staff" },
   ]);
 });

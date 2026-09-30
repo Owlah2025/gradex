@@ -136,6 +136,7 @@ var (
 	instructorProfileTables  = []string{"instructor_profiles", "instructor_profile_expertise"}
 	courseCompletionTables   = []string{"course_completions"}
 	courseAnnouncementTables = []string{"course_announcements"}
+	catalogSearchTables      = []string{"catalog_search_events"}
 )
 
 func allTables() []string {
@@ -157,7 +158,8 @@ func allTables() []string {
 	all = append(all, adminUser360Tables...)
 	all = append(all, instructorProfileTables...)
 	all = append(all, courseCompletionTables...)
-	return append(all, courseAnnouncementTables...)
+	all = append(all, courseAnnouncementTables...)
+	return append(all, catalogSearchTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -792,9 +794,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("course announcements schema = %d, want one past course completions %d",
 			CourseAnnouncementsSchemaVersion, CourseCompletionsSchemaVersion)
 	}
-	if MaxSchemaVersion != CourseAnnouncementsSchemaVersion {
+	if CatalogSearchAnalyticsSchemaVersion != CourseAnnouncementsSchemaVersion+1 {
+		t.Fatalf("catalogue search analytics schema = %d, want one past course announcements %d",
+			CatalogSearchAnalyticsSchemaVersion, CourseAnnouncementsSchemaVersion)
+	}
+	if MaxSchemaVersion != CatalogSearchAnalyticsSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, CourseAnnouncementsSchemaVersion)
+			MaxSchemaVersion, CatalogSearchAnalyticsSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -913,6 +919,51 @@ func TestCourseAnnouncementsMigrationEnforcesShapeAndImmutability(t *testing.T) 
 	`, announcementID)
 }
 
+func TestCatalogSearchEventsMigrationIsAnonymousBoundedAndReversible(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating catalogue search analytics schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx := context.Background()
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO catalog_search_events (normalized_query, result_count, locale)
+		VALUES ('biology 101', 2, 'en')`); err != nil {
+		t.Fatalf("inserting valid search event: %v", err)
+	}
+	longQuery := strings.Repeat("x", 121)
+	for name, values := range map[string]struct {
+		query       string
+		resultCount int
+		locale      string
+	}{
+		"query too long":        {query: longQuery, resultCount: 1, locale: "en"},
+		"negative result count": {query: "biology", resultCount: -1, locale: "en"},
+		"unsupported locale":    {query: "biology", resultCount: 1, locale: "fr"},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO catalog_search_events (normalized_query, result_count, locale)
+			VALUES ($1, $2, $3)`, values.query, values.resultCount, values.locale); err == nil {
+			t.Errorf("%s: invalid search event was accepted", name)
+		}
+	}
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back catalogue search analytics migration: %v", err)
+	}
+	if tableExists(t, pool, "catalog_search_events") {
+		t.Fatal("catalog_search_events survived migration down")
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying catalogue search analytics migration: %v", err)
+	}
+	if !tableExists(t, pool, "catalog_search_events") {
+		t.Fatal("catalog_search_events missing after migration up")
+	}
+}
+
 func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 	freshDatabase(t)
 	m := openMigrator(t)
@@ -974,16 +1025,16 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 		t.Fatal("published instructor profile without a snapshot was accepted")
 	}
 
-	// Course completions and announcements are newer migrations, so step back
-	// three times to test the instructor-profile boundary itself rather than only
-	// the newest down file.
-	if err := m.Steps(-3); err != nil {
+	// Course completions, announcements, and catalogue search analytics are
+	// newer migrations, so step back four times to test the instructor-profile
+	// boundary itself rather than only the newest down file.
+	if err := m.Steps(-4); err != nil {
 		t.Fatalf("rolling back instructor profile schema: %v", err)
 	}
 	if tableExists(t, pool, "instructor_profiles") {
 		t.Fatal("instructor_profiles survived the migration down")
 	}
-	if err := m.Steps(3); err != nil {
+	if err := m.Steps(4); err != nil {
 		t.Fatalf("reapplying instructor profile schema: %v", err)
 	}
 	if !tableExists(t, pool, "instructor_profiles") {

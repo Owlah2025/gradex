@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { listInstitutions, type Institution } from "@/lib/api/academic";
 import {
   listAdminAccounts,
+  exportAdminAccounts,
+  isRecentAuthRequired,
   type AccountRole,
   type AccountStatus,
   type AdminAccount,
@@ -20,6 +22,7 @@ import { LoadingState } from "@/components/common/loading-state";
 import { StatusBadge } from "@/components/common/status-badge";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -69,6 +72,10 @@ export function AdminUsers() {
   const [error, setError] = useState<string | null>(null);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [institutionsError, setInstitutionsError] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNeedsSignIn, setExportNeedsSignIn] = useState(false);
   const requestSequence = useRef(0);
 
   const loadAccounts = useCallback(async () => {
@@ -132,11 +139,36 @@ export function AdminUsers() {
       filters.joinedTo,
   );
 
+  const downloadExport = async () => {
+    setExportBusy(true);
+    setExportError(null);
+    setExportNeedsSignIn(false);
+    try {
+      const blob = await exportAdminAccounts(filters, locale);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "gradex-user-directory.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setExportOpen(false);
+    } catch (cause) {
+      const needsSignIn = isRecentAuthRequired(cause);
+      setExportNeedsSignIn(needsSignIn);
+      setExportError(needsSignIn ? copy.recentAuth : describeApiError(cause, locale));
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   return (
     <WorkspacePage testID="admin-users-page">
       <WorkspacePageHeader
         title={copy.title}
         description={copy.description}
+        actions={<Button type="button" variant="outline" onClick={() => setExportOpen(true)}>{copy.export}</Button>}
         status={
           result ? (
             <span className="text-sm font-semibold text-muted-foreground" aria-live="polite">
@@ -231,6 +263,8 @@ export function AdminUsers() {
         </div>
       ) : null}
 
+      {exportError ? <div className="mt-4"><Alert tone="error" title={copy.exportFailed}>{exportError}{exportNeedsSignIn ? <Link className="ms-2 underline" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/admin/users`)}`}>{copy.signInAgain}</Link> : null}</Alert></div> : null}
+
       {loadState === "failed" ? (
         <ErrorState
           className="mt-6"
@@ -285,6 +319,19 @@ export function AdminUsers() {
           />
         </>
       ) : null}
+
+      <ConfirmDialog
+        open={exportOpen}
+        onOpenChange={(open) => { if (!exportBusy) setExportOpen(open); }}
+        title={copy.exportTitle}
+        body={copy.exportBody}
+        confirmLabel={copy.exportConfirm}
+        cancelLabel={copy.exportCancel}
+        busy={exportBusy}
+        tone="default"
+        onConfirm={() => void downloadExport()}
+        testID="admin-users-export-confirm"
+      />
     </WorkspacePage>
   );
 }

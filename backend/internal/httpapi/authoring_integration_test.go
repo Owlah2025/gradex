@@ -202,6 +202,14 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 }
 
 func buildPublicCatalogRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
+	return buildPublicCatalogRouterWithSearchWriter(t, pool, nil)
+}
+
+func buildPublicCatalogRouterWithSearchWriter(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	writer func(context.Context, string, int, string) error,
+) *gin.Engine {
 	t.Helper()
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -218,7 +226,7 @@ func buildPublicCatalogRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	if err != nil {
 		t.Fatalf("constructing public catalogue repository: %v", err)
 	}
-	foundation, err := NewPublicCatalogFoundation(PublicCatalogFoundationOptions{Repository: repository})
+	foundation, err := NewPublicCatalogFoundation(PublicCatalogFoundationOptions{Repository: repository, SearchEventWriter: writer})
 	if err != nil {
 		t.Fatalf("constructing public catalogue foundation: %v", err)
 	}

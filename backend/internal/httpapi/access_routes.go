@@ -978,6 +978,10 @@ func (h *accessHandlers) getAdminEntitlement(c *gin.Context) {
 // operation on existing access is refused, not degraded, when the session is
 // no longer recently authenticated.
 func requireRecentAdminAuthentication(c *gin.Context, now time.Time) bool {
+	return requireRecentAdminAuthenticationWithWindow(c, now, 15*time.Minute)
+}
+
+func requireRecentAdminAuthenticationWithWindow(c *gin.Context, now time.Time, window time.Duration) bool {
 	var session identity.Session
 	if val, ok := c.Get("authenticated_session"); ok {
 		if s, ok := val.(identity.Session); ok {
@@ -987,7 +991,10 @@ func requireRecentAdminAuthentication(c *gin.Context, now time.Time) bool {
 	if session.AuthenticatedAt.IsZero() {
 		return true
 	}
-	if err := identity.CheckRecentAuthentication(session, 15*time.Minute, now); err != nil {
+	if window <= 0 {
+		window = 15 * time.Minute
+	}
+	if err := identity.CheckRecentAuthentication(session, window, now); err != nil {
 		writeProblem(c, problem.New(http.StatusForbidden, "recent-authentication-required",
 			"Recent authentication required", "This operation requires recent authentication"))
 		return false

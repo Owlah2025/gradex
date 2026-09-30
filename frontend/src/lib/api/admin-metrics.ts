@@ -67,6 +67,21 @@ export type AdminInbox = {
   sections: AdminInboxSection[];
 };
 
+export type AdminSearchQueryMetric = {
+  query: string;
+  locale: AdminMetricsLocale;
+  search_count: number;
+  zero_result_count: number;
+  last_searched_at: string;
+};
+
+export type AdminSearchMetrics = {
+  top_queries: AdminSearchQueryMetric[];
+  zero_result_queries: AdminSearchQueryMetric[];
+  since: string;
+  retention_days: number;
+};
+
 export type AdminMetricsPageFilters = {
   sort?: string;
   direction?: "asc" | "desc";
@@ -151,6 +166,14 @@ export async function getAdminInbox(locale: AdminMetricsLocale, limit = 5): Prom
   const response = await authenticatedRequest<AdminInbox>(`/admin/inbox?limit=${encodeURIComponent(limit)}`, "GET", locale);
   if (response === null) {
     throw new Error(locale === "ar" ? "لم يتم استلام صندوق المتابعة" : "No operator inbox returned");
+  }
+  return response;
+}
+
+export async function getAdminSearchMetrics(locale: AdminMetricsLocale): Promise<AdminSearchMetrics> {
+  const response = await authenticatedRequest<AdminSearchMetrics>("/admin/metrics/search", "GET", locale);
+  if (response === null) {
+    throw new Error(locale === "ar" ? "لم يتم استلام تحليلات البحث" : "No search analytics returned");
   }
   return response;
 }
