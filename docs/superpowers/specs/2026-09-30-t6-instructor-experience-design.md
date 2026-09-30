@@ -42,10 +42,14 @@ and last learning activity. It never selects email or phone. Progress is calcula
 published lesson graph where present and remains zero-safe for enrolled students without progress.
 
 Migration 0052 creates `course_announcements` with UUID identity, course and author foreign keys,
-title/body length checks, publication timestamp, and an index for course chronology. A trigger keeps
+title/body length checks, publication timestamp, and an index for course chronology. The course
+foreign key is `ON DELETE RESTRICT`: `DeleteCourse` returns the existing lifecycle-conflict class
+when announcements exist, so the immutable trigger cannot turn deletion into a 500. A trigger keeps
 published content immutable. Owner POST is CSRF/session protected, rate limited, strict-JSON bound,
-and requires a published course; owner GET uses the same SQL ownership predicate. Student GET first
-uses the authoritative course read evaluator, then reads only announcements for an entitled course.
+and requires a published course; owner GET uses the same SQL ownership predicate and is available for
+every course lifecycle, returning empty history for a never-published course. Owner and student reads
+return bounded pages with `items`, `page`, `page_size`, and `has_more`; student GET first uses the
+authoritative course read evaluator, then reads only announcements for an entitled course.
 
 ## Frontend design
 
@@ -61,15 +65,25 @@ clear publish action, inline validation, loading/error/empty states, and a chron
 student course home adds an announcements section after the course status/progress summary and
 before the lesson graph.
 
-The existing builder status banner, admin feedback notice, readiness checklist, media processing
-state, and mobile layout are tightened in place; no revision state transition or approval rule is
-changed. Locale routes are canonical under `[locale]`; legacy non-locale instructor routes retain
-their existing behavior or redirect through the established pattern. All new labels are present in
-Arabic and English, with RTL/LTR-safe layout and keyboard-visible focus.
+The builder now places the existing status banner and change-request reason immediately below the
+selected-course header, adds a derived readiness/media guidance region above the authoring workflow,
+and keeps the existing submission checklist as the detailed review step. Curriculum empty states name
+the next action for missing sections, lessons, and videos; upload controls expose processing, ready,
+and failure/retry guidance from the server media state. The selected-course region and action groups
+use wrapping/min-width-safe layout for mobile and tablet. No revision state transition or approval
+rule is changed. Locale routes are canonical under `[locale]`; the Instructor role root is
+`/[locale]/instructor`, with a separate course-builder navigation entry at
+`/[locale]/instructor/courses`. All new labels are present in Arabic and English, with RTL/LTR-safe
+layout and keyboard-visible focus.
 
 ## Verification
 
-Integration coverage will seed populated course/revision/enrollment/progress/completion fixtures and
-prove instructor isolation, analytics values/order, roster privacy, announcement entitlement
-isolation, validation, rate limiting, and migration up/down/up behavior. Frontend tests cover API
-wire types, bilingual label parity, loading/error/empty states, and the new route components.
+Integration coverage seeds populated course/revision/enrollment/progress/completion fixtures and
+proves instructor isolation, three-lesson analytics ordering/drop-off, archived-roster visibility,
+dashboard alerts, roster privacy, announcement entitlement isolation for revoked and never-entitled
+students, draft POST/owner-history behavior, validation, and migration up/down/up behavior. The
+announcement rate-limit denial is covered at the route middleware boundary, while the course-delete
+announcement conflict is covered against real PostgreSQL. Frontend tests cover announcement draft
+validation, builder readiness/media helpers, dashboard announcement reachability, wire-shape and
+description-list contracts, bilingual dictionary parity, load/publish error separation, and the
+localized Instructor root/navigation routes.
