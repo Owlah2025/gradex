@@ -56,14 +56,15 @@ export function LearningShell({
   const dashboardHref = `/${locale}/learn/dashboard`;
   // A Student inside a Lesson could reach their own Courses and nothing else.
   // Finding another Course meant editing the address bar or leaving through the
-  // browser's history, so the two destinations that were missing are here: the
-  // catalogue, and the start of the product.
+  // browser's history, so the missing learning destinations are here: history,
+  // profile, catalogue, and the start of the product.
   //
   // The landing page is not locale-addressed — there is no `/[locale]/page.tsx`
   // — so its language comes from the preference every `/[locale]/…` visit
   // persists, which is exactly what got the reader here.
   const learningNavigation: Array<{ href: string; label: string }> = [
     { href: dashboardHref, label: labels.myCourses },
+    { href: `/${locale}/learn/history`, label: labels.learningHistory },
     { href: `/${locale}/learn/profile`, label: labels.myProfile },
     { href: `/${locale}/catalog`, label: labels.catalogue },
     { href: "/", label: labels.home },
@@ -87,7 +88,7 @@ export function LearningShell({
               same accessible name and the same destination on one screen. */}
 
           <div className="ms-auto flex shrink-0 items-center gap-2">
-            {/* Three destinations where there was one, so the row now has to
+            {/* Learning destinations are full targets, so the row now has to
                 satisfy the target-size rule it previously met by having almost
                 nothing in it: each link is a full 44px target and the gap
                 between adjacent targets is wide enough that axe does not read

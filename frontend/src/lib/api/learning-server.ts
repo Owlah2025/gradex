@@ -5,6 +5,7 @@ import { buildProtectedServerRequest } from "./learning-server-request";
 import type {
   CourseHome,
   LearningDashboard,
+  LearningHistory,
   LessonReadModel,
 } from "./learning";
 import type { StudentCourseAccessHistoryResponse } from "./access";
@@ -18,6 +19,10 @@ async function requestProtectedRead<T>(path: string, locale: "ar" | "en"): Promi
 
 export function requestLearningDashboardServer(locale: "ar" | "en"): Promise<LearningDashboard> {
   return requestProtectedRead<LearningDashboard>("/learn/dashboard", locale);
+}
+
+export function requestLearningHistoryServer(locale: "ar" | "en"): Promise<LearningHistory> {
+  return requestProtectedRead<LearningHistory>("/learn/history", locale);
 }
 
 /**

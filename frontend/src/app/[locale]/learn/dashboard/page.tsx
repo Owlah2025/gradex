@@ -2,12 +2,14 @@ import Link from "next/link";
 import { ArrowRight, GraduationCap } from "lucide-react";
 import {
   AccessUntil,
+  LearningCompletionSummary,
   LearningProgressSummary,
   LearningStatusBadge,
   LearningUnavailable,
 } from "@/components/learning/learning-views";
 import {
   accessLabels,
+  completionLabels,
   learningStatusDetail,
   learningStatusLabel,
   progressLabels,
@@ -15,6 +17,7 @@ import {
   unavailableLabels,
 } from "@/components/learning/learning-label-sets";
 import { LearningShell } from "@/components/learning/learning-shell";
+import { LearningCourseFilters } from "@/components/learning/learning-course-filters";
 import { requestLearningDashboardServer, requestStudentCourseAccessServer } from "@/lib/api/learning-server";
 import { hasPendingAccess, pendingAccessSummary } from "@/components/learning/pending-access-summary";
 import { ar } from "@/lib/i18n/dictionaries/ar";
@@ -171,44 +174,64 @@ export default async function LearningDashboardPage({ params }: { params: Promis
                 }
               />
             ) : (
-              <ul className="grid gap-4 md:grid-cols-2">
-                {dashboard.courses.map((course) => (
-                  <li key={course.course_id}>
-                    <Card asChild interactive>
-                      <article className="flex h-full flex-col p-5">
-                      <h2 className="font-display text-lg font-bold text-foreground">
-                        {course.title}
-                      </h2>
-                      <div className="mt-2">
-                      <LearningStatusBadge
-                        status={course.learning_status}
-                        label={learningStatusLabel(course.learning_status, dictionary.learning)}
-                        detail={learningStatusDetail(course.learning_status, dictionary.learning)}
-                      />
-                      </div>
-                      <LearningProgressSummary
-                        className="mt-4"
-                        progress={course.progress}
-                        labels={progressLabels(dictionary.learning)}
-                        locale={locale}
-                      />
-                      <AccessUntil
-                        className="mt-2"
-                        expiresAt={course.expires_at}
-                        labels={accessLabels(dictionary.learning)}
-                        locale={locale}
-                      />
-                      <Button asChild variant="outline" size="sm" className="mt-5 self-start">
-                        <Link href={`/${locale}/learn/courses/${course.course_id}`}>
-                          {dictionary.learning.openCourse}
-                          <ArrowRight aria-hidden className={locale === "ar" ? "rotate-180" : undefined} />
-                        </Link>
-                      </Button>
-                      </article>
-                    </Card>
-                  </li>
-                ))}
-              </ul>
+              <LearningCourseFilters
+                labels={{
+                  inProgress: dictionary.learning.inProgressTab,
+                  completed: dictionary.learning.completedTab,
+                  all: dictionary.learning.allTab,
+                  empty: dictionary.learning.noFilteredCourses,
+                }}
+                cards={dashboard.courses.map((course) => {
+                  const completed = Boolean(course.completion);
+                  const resumeHref = course.resume_lesson_id
+                    ? `/${locale}/learn/courses/${course.course_id}/lessons/${course.resume_lesson_id}`
+                    : `/${locale}/learn/courses/${course.course_id}`;
+                  return {
+                    key: course.course_id,
+                    completed,
+                    content: (
+                      <Card asChild interactive>
+                        <article className="flex h-full flex-col p-5">
+                          <h2 className="font-display text-lg font-bold text-foreground">{course.title}</h2>
+                          <div className="mt-2">
+                            <LearningStatusBadge
+                              status={course.learning_status}
+                              label={learningStatusLabel(course.learning_status, dictionary.learning)}
+                              detail={learningStatusDetail(course.learning_status, dictionary.learning)}
+                            />
+                          </div>
+                          {course.completion ? (
+                            <LearningCompletionSummary
+                              className="mt-3"
+                              completion={course.completion}
+                              labels={completionLabels(dictionary.learning)}
+                              locale={locale}
+                            />
+                          ) : null}
+                          <LearningProgressSummary
+                            className="mt-4"
+                            progress={course.progress}
+                            labels={progressLabels(dictionary.learning)}
+                            locale={locale}
+                          />
+                          <AccessUntil
+                            className="mt-2"
+                            expiresAt={course.expires_at}
+                            labels={accessLabels(dictionary.learning)}
+                            locale={locale}
+                          />
+                          <Button asChild variant="outline" size="sm" className="mt-5 self-start">
+                            <Link href={resumeHref}>
+                              {course.resume_lesson_id ? dictionary.learning.resumeAction : dictionary.learning.openCourse}
+                              <ArrowRight aria-hidden className={locale === "ar" ? "rotate-180" : undefined} />
+                            </Link>
+                          </Button>
+                        </article>
+                      </Card>
+                    ),
+                  };
+                })}
+              />
             )}
           </section>
         </div>

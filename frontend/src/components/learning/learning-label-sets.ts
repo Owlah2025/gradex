@@ -31,6 +31,7 @@ type LearningLabels = Dictionary["learning"];
 export type StatusLabels = Pick<LearningLabels, "active" | "expired" | "activeDetail" | "expiredDetail">;
 export type ProgressLabels = Pick<LearningLabels, "progress" | "completedLessons">;
 export type AccessLabels = Pick<LearningLabels, "accessUntil" | "noExpiry">;
+export type CompletionLabels = Pick<LearningLabels, "completed" | "completedOn" | "newContentAdded">;
 export type UnavailableLabels = Pick<LearningLabels, "unavailableTitle" | "unavailableBody">;
 
 /**
@@ -75,6 +76,7 @@ export type NavigationLabels = Pick<
 export type ShellLabels = {
   learningNavigation: string;
   myCourses: string;
+  learningHistory: string;
   myProfile: string;
   /** The public catalogue, so a Student can find a Course they do not yet hold. */
   catalogue: string;
@@ -107,6 +109,14 @@ export function progressLabels(labels: LearningLabels): ProgressLabels {
 
 export function accessLabels(labels: LearningLabels): AccessLabels {
   return { accessUntil: labels.accessUntil, noExpiry: labels.noExpiry };
+}
+
+export function completionLabels(labels: LearningLabels): CompletionLabels {
+  return {
+    completed: labels.completed,
+    completedOn: labels.completedOn,
+    newContentAdded: labels.newContentAdded,
+  };
 }
 
 export function unavailableLabels(labels: LearningLabels): UnavailableLabels {
@@ -159,6 +169,7 @@ export function shellLabels(dictionary: Dictionary): ShellLabels {
   return {
     learningNavigation: dictionary.learning.learningNavigation,
     myCourses: dictionary.learning.myCourses,
+    learningHistory: dictionary.learning.learningHistory,
     myProfile: dictionary.learning.myProfile,
     catalogue: dictionary.learning.shellCatalogue,
     home: dictionary.learning.shellHome,

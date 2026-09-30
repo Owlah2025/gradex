@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2, Play } from "lucide-react";
+import { ArrowLeft, ArrowRight, Play } from "lucide-react";
 import {
   AccessUntil,
+  LearningCompletionSummary,
   LearningProgressSummary,
   LearningStatusBadge,
   LearningUnavailable,
@@ -10,7 +11,6 @@ import {
 import { CourseCurriculum } from "@/components/learning/course-curriculum";
 import {
   courseCurriculum,
-  courseIsComplete,
   courseIsStarted,
   resumeLessonID,
 } from "@/components/learning/curriculum-model";
@@ -22,9 +22,9 @@ import { ReportTargetActions } from "@/components/learning/report-content-dialog
 import { courseReportTargets } from "@/components/learning/report-targets";
 import { reportLabels } from "@/components/learning/report-labels";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   accessLabels,
+  completionLabels,
   curriculumLabels,
   learningStatusDetail,
   learningStatusLabel,
@@ -53,7 +53,6 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
   try {
     const course = await requestCourseHomeServer(courseId, locale);
     const sections = courseCurriculum(course.sections);
-    const complete = courseIsComplete(course.progress);
     // The one way into the learning experience from here. There is no second player on this page:
     // the Lesson route is the canonical addressable surface and this control simply chooses which
     // Lesson to open, from the server's own ordering and the server's own per-Lesson flags.
@@ -122,6 +121,14 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
                 labels={accessLabels(dictionary.learning)}
                 locale={locale}
               />
+              {course.completion ? (
+                <LearningCompletionSummary
+                  className="mt-3"
+                  completion={course.completion}
+                  labels={completionLabels(dictionary.learning)}
+                  locale={locale}
+                />
+              ) : null}
             </div>
           </header>
 
@@ -138,22 +145,6 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
                 </Link>
               </Button>
             </div>
-          ) : null}
-
-          {/* The only completion state this product can honestly show: every Lesson the server
-              counts is done. No certificate, no score, no badge — none of those exist. */}
-          {complete ? (
-            <Card data-testid="course-complete" className="mt-6 flex items-start gap-3 p-5">
-              <CheckCircle2 aria-hidden className="mt-0.5 size-5 shrink-0 text-primary" />
-              <div>
-                <h2 className="font-display text-base font-bold text-foreground">
-                  {dictionary.learning.courseCompleteTitle}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {dictionary.learning.courseCompleteBody}
-                </p>
-              </div>
-            </Card>
           ) : null}
 
           {/* The contents are a navigation landmark — they are a named list of routes into the

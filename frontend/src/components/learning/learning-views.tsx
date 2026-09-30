@@ -2,12 +2,14 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, FileText } from "lucide-react";
 import type {
   LearningCourseProgress,
+  LearningCourseCompletion,
   LearningMaterial,
   LearningStatus,
   LessonNavigation as LessonNavigationModel,
 } from "@/lib/api/learning";
 import type {
   AccessLabels,
+  CompletionLabels,
   MaterialsLabels,
   NavigationLabels,
   ProgressLabels,
@@ -273,6 +275,35 @@ export function AccessUntil({
     <p className={cn("text-sm text-muted-foreground", className)}>
       {labels.accessUntil}: <time dateTime={formatted.dateTime}>{formatted.text}</time>
     </p>
+  );
+}
+
+export function LearningCompletionSummary({
+  completion,
+  labels,
+  locale,
+  className,
+}: {
+  completion: LearningCourseCompletion;
+  labels: CompletionLabels;
+  locale: "ar" | "en";
+  className?: string;
+}) {
+  const formatted = formatLearningExpiry(completion.completed_at, locale);
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1", className)} data-testid="course-completion">
+      <Badge variant="default" className="whitespace-nowrap">
+        {labels.completed}
+      </Badge>
+      {formatted ? (
+        <span className="text-sm text-muted-foreground">
+          {labels.completedOn}: <time dateTime={formatted.dateTime}>{formatted.text}</time>
+        </span>
+      ) : null}
+      {completion.new_content_added ? (
+        <span className="basis-full text-xs font-semibold text-primary">{labels.newContentAdded}</span>
+      ) : null}
+    </div>
   );
 }
 

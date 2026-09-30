@@ -38,6 +38,7 @@ function code(relativePath: string): string {
 }
 
 const DASHBOARD = "src/app/[locale]/learn/dashboard/page.tsx";
+const HISTORY = "src/app/[locale]/learn/history/page.tsx";
 const COURSE_HOME = "src/app/[locale]/learn/courses/[courseId]/page.tsx";
 const LESSON = "src/app/[locale]/learn/courses/[courseId]/lessons/[lessonId]/page.tsx";
 const VIEWS = "src/components/learning/learning-views.tsx";
@@ -45,8 +46,9 @@ const CURRICULUM = "src/components/learning/course-curriculum.tsx";
 const SHELL = "src/components/learning/learning-shell.tsx";
 const PANEL = "src/components/learning/lesson-curriculum-panel.tsx";
 const PLAYER = "src/components/learning/lesson-player.tsx";
+const FILTERS = "src/components/learning/learning-course-filters.tsx";
 
-const STUDENT_SOURCES = [DASHBOARD, COURSE_HOME, LESSON, VIEWS, CURRICULUM, SHELL, PANEL, PLAYER];
+const STUDENT_SOURCES = [DASHBOARD, HISTORY, COURSE_HOME, LESSON, VIEWS, CURRICULUM, SHELL, PANEL, PLAYER, FILTERS];
 
 // --- Progress and completion are the server's -----------------------------
 
@@ -148,7 +150,7 @@ test("the touched Student surfaces carry no stock Tailwind palette", () => {
 });
 
 test("every Student screen sits in the learning frame and sets its own direction", () => {
-  for (const file of [DASHBOARD, COURSE_HOME, LESSON]) {
+  for (const file of [DASHBOARD, HISTORY, COURSE_HOME, LESSON]) {
     const source = shipped(file);
     assert.ok(source.includes("<LearningShell"), `${file} does not use the learning frame`);
     assert.ok(
@@ -169,6 +171,20 @@ test("every Student screen sits in the learning frame and sets its own direction
 test("every new Student string exists in both languages and is real copy", () => {
   const added = [
     "myCourses",
+    "inProgressTab",
+    "completedTab",
+    "allTab",
+    "completedOn",
+    "newContentAdded",
+    "learningHistory",
+    "historyTitle",
+    "historyIntro",
+    "endedAccess",
+    "endedAccessExpired",
+    "endedAccessRevoked",
+    "noCompletedHistory",
+    "noEndedHistory",
+    "noFilteredCourses",
     "learningNavigation",
     "courseContents",
     "closeCourseContents",

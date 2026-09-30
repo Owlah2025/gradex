@@ -4,6 +4,7 @@ import { ProblemError } from "./problem";
 import {
   requestCourseHome,
   requestLearningDashboard,
+  requestLearningHistory,
   requestLessonReadModel,
   requestMaterialDownload,
   requestPlayback,
@@ -89,6 +90,13 @@ test("read-model clients preserve D-063 paths, credentials, locale, and wire sha
           }],
         }],
       },
+    },
+    {
+      name: "history",
+      call: () => requestLearningHistory("ar"),
+      url: "/api/v1/learn/history",
+      locale: "ar",
+      body: { in_progress: [], completed: [], ended_access: [] },
     },
     {
       name: "lesson",

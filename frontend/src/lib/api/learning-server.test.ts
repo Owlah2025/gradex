@@ -56,6 +56,7 @@ test("protected learning pages remain dynamic and uncached", () => {
   assert.match(serverAdapter, /const requestHeaders = await headers\(\)/);
   const pages = [
     "src/app/[locale]/learn/dashboard/page.tsx",
+    "src/app/[locale]/learn/history/page.tsx",
     "src/app/[locale]/learn/courses/[courseId]/page.tsx",
     "src/app/[locale]/learn/courses/[courseId]/lessons/[lessonId]/page.tsx",
   ];

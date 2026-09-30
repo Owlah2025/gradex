@@ -21,12 +21,21 @@ export type LearningCourseProgress = {
   percent: number;
 };
 
+export type LearningCourseCompletion = {
+  completed_at: string;
+  required_lesson_count: number;
+  completed_lesson_count: number;
+  new_content_added: boolean;
+};
+
 export type DashboardCourse = {
   course_id: string;
   title: string;
   learning_status: LearningStatus;
   expires_at: string | null;
   progress: LearningCourseProgress;
+  completion?: LearningCourseCompletion;
+  resume_lesson_id?: string;
 };
 
 /**
@@ -48,6 +57,22 @@ export type LearningResume = {
 export type LearningDashboard = {
   courses: DashboardCourse[];
   resume?: LearningResume | null;
+};
+
+export type LearningHistoryCourse = {
+  course_id: string;
+  title: string;
+  progress: LearningCourseProgress;
+  completion?: LearningCourseCompletion;
+  last_watched_at?: string;
+  access_ended_at?: string;
+  access_ended_reason?: "expired" | "revoked";
+};
+
+export type LearningHistory = {
+  in_progress: LearningHistoryCourse[];
+  completed: LearningHistoryCourse[];
+  ended_access: LearningHistoryCourse[];
 };
 
 export type CourseHomeLesson = {
@@ -80,6 +105,7 @@ export type CourseHome = {
   learning_status: LearningStatus;
   expires_at: string | null;
   progress: LearningCourseProgress;
+  completion?: LearningCourseCompletion;
   sections: CourseHomeSection[];
   /** Present only on an active read; absent when access has expired or content is unavailable. */
   report_context?: ReportContext;
@@ -326,6 +352,12 @@ function requireLearningResponse<T>(response: T | null, description: string): T 
 export function requestLearningDashboard(locale: "ar" | "en"): Promise<LearningDashboard> {
   return authenticatedRequest<LearningDashboard>("/learn/dashboard", "GET", locale).then((response) =>
     requireLearningResponse(response, "Learning dashboard response"),
+  );
+}
+
+export function requestLearningHistory(locale: "ar" | "en"): Promise<LearningHistory> {
+  return authenticatedRequest<LearningHistory>("/learn/history", "GET", locale).then((response) =>
+    requireLearningResponse(response, "Learning history response"),
   );
 }
 
