@@ -54,6 +54,9 @@ const courseRosterQuery = `
 	learning_activity AS (
 		SELECT enrollment_id, max(last_watched_at) AS last_learning_activity
 		FROM progress
+		WHERE enrollment_id IN (
+			SELECT id FROM enrollments WHERE course_id = $1::uuid
+		)
 		GROUP BY enrollment_id
 	)
 	SELECT a.display_name,

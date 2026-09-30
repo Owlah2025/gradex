@@ -49,6 +49,9 @@ func TestInstructorCourseRosterHTTPAPIRealPostgreSQL(t *testing.T) {
 	freshSchema(t)
 	pool, ctx := pool(t)
 	seedInstructorRoster(t, pool, ctx)
+	if _, err := pool.Exec(ctx, `UPDATE courses SET lifecycle = 'ARCHIVED' WHERE id = $1::uuid`, rosterCourseID); err != nil {
+		t.Fatalf("archiving roster Course A: %v", err)
+	}
 
 	ownerServer := buildTestRouterWithAccount(t, pool, rosterOwnerID, identity.RoleInstructor, identity.StatusActive)
 	otherOwnerServer := buildTestRouterWithAccount(t, pool, rosterOtherOwnerID, identity.RoleInstructor, identity.StatusActive)

@@ -45,7 +45,7 @@ func (h *authoringHandlers) getCourseAnalytics(c *gin.Context) {
 }
 
 func (h *authoringHandlers) listOwnedAnnouncements(c *gin.Context) {
-	items, err := h.repo.ListOwnedCourseAnnouncements(c.Request.Context(), c.Param("id"), c.GetString(ctxUserIDKey))
+	items, err := h.repo.ListOwnedCourseAnnouncements(c.Request.Context(), c.Param("id"), c.GetString(ctxUserIDKey), announcementPage(c))
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return

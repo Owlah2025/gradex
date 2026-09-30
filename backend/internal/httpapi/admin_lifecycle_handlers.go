@@ -28,7 +28,7 @@ func (h *adminLifecycleHandlers) handleLifecycleError(c *gin.Context, err error)
 	switch {
 	case errors.Is(err, catalog.ErrCourseNotFound):
 		writeProblem(c, problem.NotFound())
-	case errors.Is(err, catalog.ErrCourseHasAccess), errors.Is(err, catalog.ErrPendingCandidate), errors.Is(err, catalog.ErrCourseAccessAlreadySuspended), errors.Is(err, catalog.ErrCourseAccessNotSuspended):
+	case errors.Is(err, catalog.ErrCourseHasAccess), errors.Is(err, catalog.ErrCourseHasAnnouncements), errors.Is(err, catalog.ErrPendingCandidate), errors.Is(err, catalog.ErrCourseAccessAlreadySuspended), errors.Is(err, catalog.ErrCourseAccessNotSuspended):
 		writeProblem(c, problem.StateConflict())
 	case errors.Is(err, catalog.ErrInvalidLifecycle):
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{Code: "INVALID_LIFECYCLE", Detail: "The requested lifecycle transition is not allowed", Location: problem.LocationBody}))

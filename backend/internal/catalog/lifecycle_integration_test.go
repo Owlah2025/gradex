@@ -5,6 +5,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -160,5 +161,50 @@ func TestDeleteCourseWithoutAccessRemovesRevisionOwnedData(t *testing.T) {
 	}
 	if _, err := repo.ReadCourseAccessState(context.Background(), courseID); !errors.Is(err, ErrCourseNotFound) {
 		t.Fatalf("deleted course state error = %v, want ErrCourseNotFound", err)
+	}
+}
+
+func TestDeleteCourseWithAnnouncementReturnsLifecycleConflict(t *testing.T) {
+	repo, adminID, ownerID, courseID := setupPricingIntegrationTest(t)
+	ctx := context.Background()
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO course_announcements (course_id, author_account_id, title, body)
+		VALUES ($1::uuid, $2::uuid, 'Retained history', 'This history prevents destructive deletion.')
+	`, courseID, ownerID); err != nil {
+		t.Fatalf("seeding course announcement: %v", err)
+	}
+
+	if err := repo.DeleteCourse(ctx, LifecycleMutation{CourseID: courseID, AdminAccountID: adminID, ActorDescriptor: adminID}); !errors.Is(err, ErrCourseHasAnnouncements) {
+		t.Fatalf("deleting course with announcement error = %v, want ErrCourseHasAnnouncements", err)
+	}
+	if _, err := repo.ReadCourseAccessState(ctx, courseID); err != nil {
+		t.Fatalf("course was removed after announcement conflict: %v", err)
+	}
+}
+
+func TestCourseAnnouncementOwnerHistoryPaginatesNeverPublishedCourse(t *testing.T) {
+	repo, _, ownerID, courseID := setupPricingIntegrationTest(t)
+	ctx := context.Background()
+	for index := 0; index < 21; index++ {
+		if _, err := repo.pool.Exec(ctx, `
+			INSERT INTO course_announcements (course_id, author_account_id, title, body, created_at, published_at)
+			VALUES ($1::uuid, $2::uuid, $3, 'History item', now() + ($4::int * interval '1 second'), now() + ($4::int * interval '1 second'))
+		`, courseID, ownerID, fmt.Sprintf("History %02d", index), index); err != nil {
+			t.Fatalf("seeding announcement %d: %v", index, err)
+		}
+	}
+	first, err := repo.ListOwnedCourseAnnouncements(ctx, courseID, ownerID, 1)
+	if err != nil {
+		t.Fatalf("reading first announcement page: %v", err)
+	}
+	if first.Page != 1 || first.PageSize != 20 || len(first.Items) != 20 || !first.HasMore {
+		t.Fatalf("first announcement page = %+v, want 20 items with has_more", first)
+	}
+	second, err := repo.ListOwnedCourseAnnouncements(ctx, courseID, ownerID, 2)
+	if err != nil {
+		t.Fatalf("reading second announcement page: %v", err)
+	}
+	if second.Page != 2 || len(second.Items) != 1 || second.HasMore {
+		t.Fatalf("second announcement page = %+v, want one final item", second)
 	}
 }

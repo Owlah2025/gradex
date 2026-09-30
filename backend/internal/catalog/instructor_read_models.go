@@ -104,11 +104,16 @@ current_course_lessons AS (
      AND cli.course_id = c.id
      AND cli.section_identity_id = cl.section_identity_id
 ),
+current_lesson_counts AS (
+    SELECT course_id, count(*) AS total_lessons
+    FROM current_course_lessons
+    GROUP BY course_id
+),
 enrollment_progress AS (
     SELECT e.id AS enrollment_id,
            e.course_id,
            e.student_account_id,
-           count(DISTINCT lesson.lesson_identity_id) AS total_lessons,
+           COALESCE(lesson_counts.total_lessons, 0) AS total_lessons,
            count(DISTINCT progress.course_lesson_identity_id)
                FILTER (WHERE progress.completed_at IS NOT NULL) AS completed_lessons,
            count(DISTINCT progress.id) AS progress_rows,
@@ -116,11 +121,16 @@ enrollment_progress AS (
     FROM enrollments e
     JOIN owned_courses c ON c.id = e.course_id
     JOIN accounts student ON student.id = e.student_account_id AND student.role = 'STUDENT'
-    LEFT JOIN current_course_lessons lesson ON lesson.course_id = e.course_id
+    LEFT JOIN current_lesson_counts lesson_counts ON lesson_counts.course_id = e.course_id
     LEFT JOIN progress
-      ON progress.enrollment_id = e.id
-     AND progress.course_lesson_identity_id = lesson.lesson_identity_id
-    GROUP BY e.id, e.course_id, e.student_account_id
+       ON progress.enrollment_id = e.id
+      AND EXISTS (
+          SELECT 1
+          FROM current_course_lessons lesson
+          WHERE lesson.course_id = e.course_id
+            AND lesson.lesson_identity_id = progress.course_lesson_identity_id
+      )
+    GROUP BY e.id, e.course_id, e.student_account_id, lesson_counts.total_lessons
 ),
 course_rollup AS (
     SELECT course_id,
@@ -183,11 +193,30 @@ LEFT JOIN LATERAL (
 LEFT JOIN course_rollup rollup ON rollup.course_id = c.id
 LEFT JOIN LATERAL (
     SELECT count(DISTINCT mav.id) AS total
-    FROM media_assets ma
-    JOIN media_asset_versions mav ON mav.logical_asset_id = ma.id
-    WHERE ma.course_id = c.id
-      AND ma.owner_account_id = c.owner_account_id
-      AND mav.state = 'PROCESS_FAILED'
+    FROM (
+        SELECT cr.preview_asset_version_id AS asset_version_id
+        FROM course_revisions cr
+        WHERE cr.id IN (c.live_revision_id, candidate.id)
+        UNION ALL
+        SELECT cr.thumbnail_asset_version_id
+        FROM course_revisions cr
+        WHERE cr.id IN (c.live_revision_id, candidate.id)
+        UNION ALL
+        SELECT cl.video_asset_version_id
+        FROM course_revisions cr
+        JOIN course_sections cs ON cs.revision_id = cr.id
+        JOIN course_lessons cl ON cl.section_id = cs.id
+        WHERE cr.id IN (c.live_revision_id, candidate.id)
+        UNION ALL
+        SELECT lf.asset_version_id
+        FROM course_revisions cr
+        JOIN course_sections cs ON cs.revision_id = cr.id
+        JOIN course_lessons cl ON cl.section_id = cs.id
+        JOIN lesson_files lf ON lf.lesson_id = cl.id
+        WHERE cr.id IN (c.live_revision_id, candidate.id)
+    ) referenced
+    JOIN media_asset_versions mav ON mav.id = referenced.asset_version_id
+    WHERE mav.state IN ('PROCESS_FAILED', 'SCAN_FAILED', 'SCAN_ERROR')
 ) media_failures ON TRUE
 ORDER BY c.updated_at DESC, c.id ASC
 `
@@ -288,22 +317,30 @@ WITH current_course_lessons AS (
      AND cli.section_identity_id = cl.section_identity_id
     WHERE c.id = $1::uuid AND c.owner_account_id = $2::uuid
 ),
+current_lesson_counts AS (
+    SELECT count(*) AS total_lessons
+    FROM current_course_lessons
+),
 enrollment_progress AS (
     SELECT e.id AS enrollment_id,
            e.student_account_id,
-           count(DISTINCT lesson.lesson_identity_id) AS total_lessons,
+           COALESCE(lesson_counts.total_lessons, 0) AS total_lessons,
            count(DISTINCT progress.course_lesson_identity_id)
                FILTER (WHERE progress.completed_at IS NOT NULL) AS completed_lessons,
            count(DISTINCT progress.id) AS progress_rows,
            max(progress.last_watched_at) AS last_watched_at
     FROM enrollments e
     JOIN accounts student ON student.id = e.student_account_id AND student.role = 'STUDENT'
-    LEFT JOIN current_course_lessons lesson ON TRUE
+    CROSS JOIN current_lesson_counts lesson_counts
     LEFT JOIN progress
-      ON progress.enrollment_id = e.id
-     AND progress.course_lesson_identity_id = lesson.lesson_identity_id
+       ON progress.enrollment_id = e.id
+      AND EXISTS (
+          SELECT 1
+          FROM current_course_lessons lesson
+          WHERE lesson.lesson_identity_id = progress.course_lesson_identity_id
+      )
     WHERE e.course_id = $1::uuid
-    GROUP BY e.id, e.student_account_id
+    GROUP BY e.id, e.student_account_id, lesson_counts.total_lessons
 ),
 rollup AS (
     SELECT count(*) AS enrolled,
@@ -345,30 +382,47 @@ WHERE c.id = $1::uuid AND c.owner_account_id = $2::uuid
 `
 
 const courseAnalyticsLessonReachQuery = `
-SELECT cli.id::text,
-       cs.title_ar, cs.title_en,
-       cl.title_ar, cl.title_en,
-       cs.position, cl.position,
-       count(DISTINCT progress.enrollment_id) FILTER (WHERE progress.id IS NOT NULL),
-       count(DISTINCT progress.enrollment_id) FILTER (WHERE progress.completed_at IS NOT NULL)
-FROM courses c
-JOIN course_revisions live
-  ON live.id = c.live_revision_id AND live.course_id = c.id AND live.state = 'APPROVED'
-JOIN course_sections cs ON cs.revision_id = live.id AND cs.course_id = c.id
-JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
-JOIN course_lesson_identities cli
-  ON cli.id = cl.lesson_identity_id
- AND cli.course_id = cl.course_id
- AND cli.section_identity_id = cl.section_identity_id
-LEFT JOIN enrollments enrollment ON enrollment.course_id = c.id
-LEFT JOIN accounts student ON student.id = enrollment.student_account_id AND student.role = 'STUDENT'
-LEFT JOIN progress
-  ON progress.enrollment_id = enrollment.id
- AND progress.course_lesson_identity_id = cli.id
- AND student.id IS NOT NULL
-WHERE c.id = $1::uuid AND c.owner_account_id = $2::uuid
-GROUP BY cli.id, cs.id, cs.title_ar, cs.title_en, cl.id, cl.title_ar, cl.title_en, cs.position, cl.position
-ORDER BY cs.position ASC, cs.id ASC, cl.position ASC, cl.id ASC
+WITH current_lessons AS (
+    SELECT cli.id AS lesson_identity_id,
+           cli.id::text AS lesson_id,
+           cs.title_ar AS section_title_ar,
+           cs.title_en AS section_title_en,
+           cl.title_ar AS lesson_title_ar,
+           cl.title_en AS lesson_title_en,
+           cs.position AS section_position,
+           cl.position AS lesson_position,
+           cs.id AS section_id,
+           cl.id AS lesson_row_id
+    FROM courses c
+    JOIN course_revisions live
+      ON live.id = c.live_revision_id AND live.course_id = c.id AND live.state = 'APPROVED'
+    JOIN course_sections cs ON cs.revision_id = live.id AND cs.course_id = c.id
+    JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+    JOIN course_lesson_identities cli
+      ON cli.id = cl.lesson_identity_id
+     AND cli.course_id = cl.course_id
+     AND cli.section_identity_id = cl.section_identity_id
+    WHERE c.id = $1::uuid AND c.owner_account_id = $2::uuid
+),
+lesson_progress AS (
+    SELECT progress.course_lesson_identity_id AS lesson_identity_id,
+           count(DISTINCT progress.enrollment_id) AS students_reached,
+           count(DISTINCT progress.enrollment_id) FILTER (WHERE progress.completed_at IS NOT NULL) AS students_completed
+    FROM progress
+    JOIN enrollments enrollment ON enrollment.id = progress.enrollment_id AND enrollment.course_id = $1::uuid
+    JOIN accounts student ON student.id = enrollment.student_account_id AND student.role = 'STUDENT'
+    JOIN current_lessons lesson ON lesson.lesson_identity_id = progress.course_lesson_identity_id
+    GROUP BY progress.course_lesson_identity_id
+)
+SELECT lesson.lesson_id,
+       lesson.section_title_ar, lesson.section_title_en,
+       lesson.lesson_title_ar, lesson.lesson_title_en,
+       lesson.section_position, lesson.lesson_position,
+       COALESCE(lesson_progress.students_reached, 0),
+       COALESCE(lesson_progress.students_completed, 0)
+FROM current_lessons lesson
+LEFT JOIN lesson_progress ON lesson_progress.lesson_identity_id = lesson.lesson_identity_id
+ORDER BY lesson.section_position ASC, lesson.section_id ASC, lesson.lesson_position ASC, lesson.lesson_row_id ASC
 `
 
 func (r *Repository) ReadCourseAnalytics(ctx context.Context, request CourseAnalyticsRequest) (CourseAnalytics, error) {

@@ -890,6 +890,17 @@ func TestCourseAnnouncementsMigrationEnforcesShapeAndImmutability(t *testing.T) 
 	`, courseID, instructorID).Scan(&announcementID); err != nil {
 		t.Fatalf("inserting announcement: %v", err)
 	}
+	var deleteAction string
+	if err := pool.QueryRow(ctx, `
+		SELECT confdeltype::text
+		FROM pg_constraint
+		WHERE conname = 'course_announcements_course_id_fkey'
+	`).Scan(&deleteAction); err != nil {
+		t.Fatalf("reading announcement course foreign key: %v", err)
+	}
+	if deleteAction != "r" {
+		t.Fatalf("announcement course foreign key delete action = %q, want RESTRICT", deleteAction)
+	}
 	assertConstraintViolation(t, pool, ctx, "course_announcements_title_non_empty", `
 		INSERT INTO course_announcements (course_id, author_account_id, title, body)
 		VALUES ($1::uuid, $2::uuid, repeat('x', 141), 'body')

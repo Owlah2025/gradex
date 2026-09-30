@@ -62,7 +62,7 @@ type learningMedia interface {
 }
 
 type learningAnnouncementReader interface {
-	ListPublishedCourseAnnouncements(context.Context, string) ([]catalog.Announcement, error)
+	ListPublishedCourseAnnouncements(context.Context, string, int) (catalog.AnnouncementPage, error)
 }
 
 // reportContextIssuer mints and verifies the encrypted report context that binds a report to the

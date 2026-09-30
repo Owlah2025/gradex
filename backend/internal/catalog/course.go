@@ -31,11 +31,12 @@ func (l CourseLifecycle) Valid() bool {
 }
 
 var (
-	ErrAccountSuspended = errors.New("instructor account is suspended")
-	ErrOwnerIneligible  = errors.New("course owner is not an active instructor")
-	ErrInvalidLifecycle = errors.New("invalid course lifecycle transition")
-	ErrCourseHasAccess  = errors.New("course has existing access records; archive it instead")
-	ErrPendingCandidate = errors.New("course has an active candidate revision; resolve it before owner reassignment")
+	ErrAccountSuspended       = errors.New("instructor account is suspended")
+	ErrOwnerIneligible        = errors.New("course owner is not an active instructor")
+	ErrInvalidLifecycle       = errors.New("invalid course lifecycle transition")
+	ErrCourseHasAccess        = errors.New("course has existing access records; archive it instead")
+	ErrCourseHasAnnouncements = errors.New("course has announcements; archive it instead")
+	ErrPendingCandidate       = errors.New("course has an active candidate revision; resolve it before owner reassignment")
 )
 
 type Course struct {
@@ -321,6 +322,17 @@ func (r *Repository) DeleteCourse(ctx context.Context, req LifecycleMutation) er
 		}
 		if hasAccess {
 			return ErrCourseHasAccess
+		}
+		var hasAnnouncements bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM course_announcements WHERE course_id = $1::uuid
+			)
+		`, req.CourseID).Scan(&hasAnnouncements); err != nil {
+			return fmt.Errorf("checking course announcements: %w", err)
+		}
+		if hasAnnouncements {
+			return ErrCourseHasAnnouncements
 		}
 
 		if _, err := tx.Exec(ctx, `DELETE FROM course_price_changes WHERE course_id = $1::uuid`, req.CourseID); err != nil {

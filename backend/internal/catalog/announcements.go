@@ -14,6 +14,8 @@ import (
 const (
 	maxAnnouncementTitleRunes = 140
 	maxAnnouncementBodyRunes  = 4000
+	announcementPageSize      = 20
+	maxAnnouncementPage       = 1000
 )
 
 // Announcement is the public, immutable read model for a Course announcement.
@@ -28,6 +30,13 @@ type Announcement struct {
 	PublishedAt time.Time `json:"published_at"`
 }
 
+type AnnouncementPage struct {
+	Items    []Announcement `json:"items"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
+	HasMore  bool           `json:"has_more"`
+}
+
 type CreateAnnouncementRequest struct {
 	CourseID        string
 	AuthorAccountID string
@@ -38,7 +47,7 @@ type CreateAnnouncementRequest struct {
 
 // AnnouncementReader is the narrow read seam consumed by protected learning.
 type AnnouncementReader interface {
-	ListPublishedCourseAnnouncements(context.Context, string) ([]Announcement, error)
+	ListPublishedCourseAnnouncements(context.Context, string, int) (AnnouncementPage, error)
 }
 
 func (r *Repository) CreateCourseAnnouncement(ctx context.Context, request CreateAnnouncementRequest) (Announcement, error) {
@@ -107,86 +116,41 @@ func (r *Repository) CreateCourseAnnouncement(ctx context.Context, request Creat
 	return announcement, nil
 }
 
-// ListOwnedCourseAnnouncements keeps both ownership and publication state in
-// the SQL read. A non-owner gets ErrCourseNotFound, while an owner of a draft
-// gets the explicit unpublished state required by the composer.
-func (r *Repository) ListOwnedCourseAnnouncements(ctx context.Context, courseID, ownerAccountID string) ([]Announcement, error) {
+// ListOwnedCourseAnnouncements keeps ownership in the SQL read. A non-owner
+// gets ErrCourseNotFound; an owner of a never-published course gets an empty
+// history because owner reads are historical, not publication-gated.
+func (r *Repository) ListOwnedCourseAnnouncements(ctx context.Context, courseID, ownerAccountID string, page int) (AnnouncementPage, error) {
 	if r == nil || r.pool == nil {
-		return nil, ErrRepositoryNil
+		return AnnouncementPage{}, ErrRepositoryNil
 	}
 	if courseID == "" || ownerAccountID == "" {
-		return nil, ErrCourseNotFound
+		return AnnouncementPage{}, ErrCourseNotFound
+	}
+	page = normalizeAnnouncementPage(page)
+	var owned bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM courses WHERE id = $1::uuid AND owner_account_id = $2::uuid
+		)
+	`, courseID, ownerAccountID).Scan(&owned); err != nil {
+		return AnnouncementPage{}, fmt.Errorf("checking owned course announcements: %w", err)
+	}
+	if !owned {
+		return AnnouncementPage{}, ErrCourseNotFound
 	}
 	rows, err := r.pool.Query(ctx, `
-		WITH authorized_course AS (
-			SELECT id, lifecycle::text AS lifecycle
-			FROM courses
-			WHERE id = $1::uuid AND owner_account_id = $2::uuid
-		)
-		SELECT authorized_course.lifecycle,
-		       announcement.id::text,
+		SELECT announcement.id::text,
 		       announcement.title,
 		       announcement.body,
 		       announcement.created_at,
 		       announcement.published_at
-		FROM authorized_course
-		LEFT JOIN course_announcements announcement
-		  ON announcement.course_id = authorized_course.id
-		 AND authorized_course.lifecycle = 'PUBLISHED'
+		FROM course_announcements announcement
+		WHERE announcement.course_id = $1::uuid
 		ORDER BY announcement.published_at DESC NULLS LAST, announcement.id DESC
-		LIMIT 100
-	`, courseID, ownerAccountID)
+		LIMIT $2 OFFSET $3
+	`, courseID, announcementPageSize+1, announcementOffset(page))
 	if err != nil {
-		return nil, fmt.Errorf("listing owned course announcements: %w", err)
-	}
-	defer rows.Close()
-
-	items := make([]Announcement, 0)
-	seenCourse := false
-	for rows.Next() {
-		seenCourse = true
-		var lifecycle string
-		var itemID, title, body *string
-		var createdAt, publishedAt *time.Time
-		if err := rows.Scan(&lifecycle, &itemID, &title, &body, &createdAt, &publishedAt); err != nil {
-			return nil, fmt.Errorf("scanning owned course announcement: %w", err)
-		}
-		if lifecycle != string(LifecyclePublished) {
-			return nil, ErrCourseNotPublished
-		}
-		if itemID == nil || title == nil || body == nil || createdAt == nil || publishedAt == nil {
-			continue
-		}
-		items = append(items, Announcement{
-			ID: *itemID, Title: *title, Body: *body,
-			CreatedAt: createdAt.UTC(), PublishedAt: publishedAt.UTC(),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating owned course announcements: %w", err)
-	}
-	if !seenCourse {
-		return nil, ErrCourseNotFound
-	}
-	return items, nil
-}
-
-func (r *Repository) ListPublishedCourseAnnouncements(ctx context.Context, courseID string) ([]Announcement, error) {
-	if r == nil || r.pool == nil {
-		return nil, ErrRepositoryNil
-	}
-	if courseID == "" {
-		return nil, ErrCourseNotFound
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, title, body, created_at, published_at
-		FROM course_announcements
-		WHERE course_id = $1::uuid AND published_at IS NOT NULL
-		ORDER BY published_at DESC, id DESC
-		LIMIT 100
-	`, courseID)
-	if err != nil {
-		return nil, fmt.Errorf("listing published course announcements: %w", err)
+		return AnnouncementPage{}, fmt.Errorf("listing owned course announcements: %w", err)
 	}
 	defer rows.Close()
 
@@ -194,14 +158,72 @@ func (r *Repository) ListPublishedCourseAnnouncements(ctx context.Context, cours
 	for rows.Next() {
 		var item Announcement
 		if err := rows.Scan(&item.ID, &item.Title, &item.Body, &item.CreatedAt, &item.PublishedAt); err != nil {
-			return nil, fmt.Errorf("scanning published course announcement: %w", err)
+			return AnnouncementPage{}, fmt.Errorf("scanning owned course announcement: %w", err)
 		}
 		item.CreatedAt = item.CreatedAt.UTC()
 		item.PublishedAt = item.PublishedAt.UTC()
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating published course announcements: %w", err)
+		return AnnouncementPage{}, fmt.Errorf("iterating owned course announcements: %w", err)
 	}
-	return items, nil
+	hasMore := len(items) > announcementPageSize
+	if hasMore {
+		items = items[:announcementPageSize]
+	}
+	return AnnouncementPage{Items: items, Page: page, PageSize: announcementPageSize, HasMore: hasMore}, nil
+}
+
+func (r *Repository) ListPublishedCourseAnnouncements(ctx context.Context, courseID string, page int) (AnnouncementPage, error) {
+	if r == nil || r.pool == nil {
+		return AnnouncementPage{}, ErrRepositoryNil
+	}
+	if courseID == "" {
+		return AnnouncementPage{}, ErrCourseNotFound
+	}
+	page = normalizeAnnouncementPage(page)
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, title, body, created_at, published_at
+		FROM course_announcements
+		WHERE course_id = $1::uuid AND published_at IS NOT NULL
+		ORDER BY published_at DESC, id DESC
+		LIMIT $2 OFFSET $3
+	`, courseID, announcementPageSize+1, announcementOffset(page))
+	if err != nil {
+		return AnnouncementPage{}, fmt.Errorf("listing published course announcements: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Announcement, 0)
+	for rows.Next() {
+		var item Announcement
+		if err := rows.Scan(&item.ID, &item.Title, &item.Body, &item.CreatedAt, &item.PublishedAt); err != nil {
+			return AnnouncementPage{}, fmt.Errorf("scanning published course announcement: %w", err)
+		}
+		item.CreatedAt = item.CreatedAt.UTC()
+		item.PublishedAt = item.PublishedAt.UTC()
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return AnnouncementPage{}, fmt.Errorf("iterating published course announcements: %w", err)
+	}
+	hasMore := len(items) > announcementPageSize
+	if hasMore {
+		items = items[:announcementPageSize]
+	}
+	return AnnouncementPage{Items: items, Page: page, PageSize: announcementPageSize, HasMore: hasMore}, nil
+}
+
+func normalizeAnnouncementPage(page int) int {
+	if page < 1 {
+		return 1
+	}
+	if page > maxAnnouncementPage {
+		return maxAnnouncementPage
+	}
+	return page
+}
+
+func announcementOffset(page int) int {
+	return (page - 1) * announcementPageSize
 }

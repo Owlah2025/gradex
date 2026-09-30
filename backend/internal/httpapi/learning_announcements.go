@@ -10,6 +10,13 @@ import (
 )
 
 type learningAnnouncementResponse struct {
+	Items    []learningAnnouncementItem `json:"items"`
+	Page     int                        `json:"page"`
+	PageSize int                        `json:"page_size"`
+	HasMore  bool                       `json:"has_more"`
+}
+
+type learningAnnouncementItem struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	Body        string `json:"body"`
@@ -32,20 +39,22 @@ func (h *learningHandlers) courseAnnouncements(c *gin.Context) {
 		writeProtectedUnavailable(c)
 		return
 	}
-	items, err := h.foundation.announcementReader.ListPublishedCourseAnnouncements(c.Request.Context(), courseID)
+	page, err := h.foundation.announcementReader.ListPublishedCourseAnnouncements(c.Request.Context(), courseID, announcementPage(c))
 	if err != nil {
 		h.logDenial(c, entitlement.ReasonDependency)
 		writeProtectedUnavailable(c)
 		return
 	}
-	response := make([]learningAnnouncementResponse, 0, len(items))
-	for _, item := range items {
-		response = append(response, learningAnnouncementResponse{
+	response := make([]learningAnnouncementItem, 0, len(page.Items))
+	for _, item := range page.Items {
+		response = append(response, learningAnnouncementItem{
 			ID: item.ID, Title: item.Title, Body: item.Body,
 			CreatedAt:   item.CreatedAt.UTC().Format(time.RFC3339),
 			PublishedAt: item.PublishedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, learningAnnouncementResponse{
+		Items: response, Page: page.Page, PageSize: page.PageSize, HasMore: page.HasMore,
+	})
 }

@@ -7,7 +7,10 @@
 
 CREATE TABLE course_announcements (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    course_id          UUID NOT NULL REFERENCES courses (id) ON DELETE CASCADE,
+    -- Course deletion checks this relation explicitly and returns a lifecycle
+    -- conflict while announcements exist; cascade would fire the immutable
+    -- announcement trigger and turn the same request into a 500.
+    course_id          UUID NOT NULL REFERENCES courses (id) ON DELETE RESTRICT,
     author_account_id  UUID NOT NULL REFERENCES accounts (id),
     title              TEXT NOT NULL,
     body               TEXT NOT NULL,
