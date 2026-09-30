@@ -632,9 +632,11 @@ test.describe("UX-H academic context across the join", () => {
     for (const code of RAW_ENUMS) {
       expect(text, `${code} reached the Student`).not.toContain(code);
     }
-    // Changing a password is reachable from the account surface.
+    // The account summary and password action live on My Profile; the academic
+    // editor above is a separate focused workflow.
+    await page.goto("/en/learn/profile");
     await expect(page.getByTestId("account-summary")).toBeVisible();
-    await expect(page.getByRole("link", { name: /change password/i })).toBeVisible();
+    await expect(page.getByTestId("account-summary").getByRole("link", { name: "Change password" })).toBeVisible();
     await context.close();
   });
 

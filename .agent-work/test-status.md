@@ -33,3 +33,31 @@
 - Isolated T3 rerun: 1 failed, 5 did not run; the same launch-catalog import HTTP 409 reproduced before any browser journey.
 - Isolated UX-J phone-task rerun: 1 failed because no actionable access request was present.
 - Isolated `s2-taxonomy-viewport`: PASS, 12 passed.
+
+## FINAL4 repair continuation (2026-09-30)
+
+### Backend gates
+
+- `gofmt -l . && git diff --check`: PASS; no output.
+- `go build ./...`: PASS.
+- `go vet ./...`: PASS.
+- `go test ./...`: PASS.
+- `go test -tags=integration ./...`: PASS; all integration packages completed successfully.
+
+### Frontend gates
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS; no ESLint warnings or errors.
+- `npm test`: PASS; 847 tests, 847 pass, 0 fail, 0 skipped.
+- `npm run build`: PASS; production build completed with the existing edge-runtime static-generation warning.
+
+### Playwright
+
+Each command used a fresh disposable database and one worker; no required test was skipped or did not run.
+
+- V2 Admin + Student + Instructor: 21 passed, 0 failed, 0 skipped.
+- `s2-taxonomy-viewport`: 12 passed, 0 failed, 0 skipped.
+- `t3-student-academic-profile`: 6 passed, 0 failed, 0 skipped.
+- `uxh-public-auth-account`: 79 passed, 0 failed, 0 skipped.
+- `uxj-release-acceptance`: 16 passed, 0 failed, 0 skipped.
+- Required Playwright total across the five fresh runs: 134 passed, 0 failed, 0 skipped, 0 did not run.

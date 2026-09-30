@@ -755,6 +755,12 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		method string
 		path   string
 	}{}, requiredD5Routes...), requiredDeviceMutationRoutes...)
+	// Media processing retries are Admin mutations too; keep the production
+	// Origin/CSRF sweep coupled to the route that the Admin failures screen calls.
+	mutationSecurityRoutes = append(mutationSecurityRoutes, struct {
+		method string
+		path   string
+	}{http.MethodPost, "/api/v1/media/assets/:id/retries"})
 	for _, route := range requiredOperationsRoutes {
 		if route.method != http.MethodGet {
 			mutationSecurityRoutes = append(mutationSecurityRoutes, route)

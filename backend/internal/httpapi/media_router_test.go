@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -269,10 +271,17 @@ func TestD7ProductionMediaRoutesRequireCapabilitiesBeforeHandlers(t *testing.T) 
 	}
 	retryRouter, retryStore := mediaRouterUnderTest(t, restrictedAdmin)
 	retry := httptest.NewRequest(http.MethodPost, "/api/v1/media/assets/33333333-3333-3333-3333-333333333333/retries", nil)
+	validToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x41}, 32))
+	retry.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: validToken})
+	retry.Header.Set("Origin", "https://gradex.example")
+	retry.Header.Set("X-CSRF-Token", validToken)
 	retryResponse := httptest.NewRecorder()
 	retryRouter.ServeHTTP(retryResponse, retry)
 	if retryResponse.Code != http.StatusForbidden {
 		t.Fatalf("restricted Admin retry status=%d, want capability denial 403: %s", retryResponse.Code, retryResponse.Body.String())
+	}
+	if problem := assertProblemEnvelope(t, retryResponse); problem.Code != "NOT_AUTHORIZED" {
+		t.Fatalf("restricted Admin retry problem code=%q, want NOT_AUTHORIZED", problem.Code)
 	}
 	if retryStore.presignCallCount() != 0 {
 		t.Fatal("retry handler reached media storage before the admin capability decision")

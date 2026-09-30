@@ -1207,6 +1207,9 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := seedLandingStudyPlanFixtures(ctx, tx, instructorID, adminAccountID); err != nil {
 		return err
 	}
+	if err := seedV2Fixtures(ctx, tx, adminAccountID, passwordHash.Expose(), now, activeExpiry); err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
 }
@@ -1339,6 +1342,8 @@ func seedLandingStudyPlanFixtures(
 		institutionID = "91000000-0000-0000-0000-000000000001"
 		programID     = "91000000-0000-0000-0000-000000000002"
 		curriculumID  = "91000000-0000-0000-0000-000000000003"
+		scienceUnitID = "91000000-0000-0000-0000-000000000004"
+		csUnitID      = "91000000-0000-0000-0000-000000000005"
 		courseID      = "c0000000-0000-0000-0000-000000000004"
 		revisionID    = "f0000000-0000-0000-0000-000000000004"
 	)
@@ -1349,9 +1354,22 @@ func seedLandingStudyPlanFixtures(
 		return fmt.Errorf("seed landing Kuwait University: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO programs (id, institution_id, slug, name_ar, name_en, degree_kind)
-		VALUES ($1::uuid, $2::uuid, 'computer-science', 'علوم الحاسوب', 'Computer Science', 'BSC')`,
-		programID, institutionID); err != nil {
+		INSERT INTO academic_units (id, institution_id, kind, slug, name_ar, name_en)
+		VALUES ($1::uuid, $2::uuid, 'COLLEGE', 'science', 'كلية العلوم', 'College of Science')`,
+		scienceUnitID, institutionID); err != nil {
+		return fmt.Errorf("seed landing Science college: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO academic_units (id, institution_id, parent_unit_id, kind, slug, name_ar, name_en)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'DEPARTMENT', 'computer-science', 'قسم علوم الحاسوب', 'Computer Science')`,
+		csUnitID, institutionID, scienceUnitID); err != nil {
+		return fmt.Errorf("seed landing Computer Science department: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO programs (id, institution_id, owning_unit_id, slug, name_ar, name_en, degree_kind)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'computer-science', 'علوم الحاسوب', 'Computer Science', 'BSC')
+		ON CONFLICT (id) DO UPDATE SET owning_unit_id = EXCLUDED.owning_unit_id`,
+		programID, institutionID, csUnitID); err != nil {
 		return fmt.Errorf("seed landing Computer Science Program: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1380,9 +1398,9 @@ func seedLandingStudyPlanFixtures(
 	for index, subject := range subjects {
 		subjectID := fmt.Sprintf("92000000-0000-0000-0000-%012d", index+1)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO subjects (id, institution_id, official_code, title_ar, title_en)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
-			subjectID, institutionID, subject.code, subject.titleAr, subject.titleEn); err != nil {
+			INSERT INTO subjects (id, institution_id, owning_unit_id, official_code, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6)`,
+			subjectID, institutionID, csUnitID, subject.code, subject.titleAr, subject.titleEn); err != nil {
 			return fmt.Errorf("seed landing Subject %s: %w", subject.code, err)
 		}
 		if _, err := tx.Exec(ctx, `
