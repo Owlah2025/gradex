@@ -64,6 +64,86 @@ func TestLearningHistoryClassifiesOwnCompletedInProgressExpiredAndRevokedAccess(
 	}
 }
 
+func TestLearningHistoryNewContentBannerClearsAfterCatchUp(t *testing.T) {
+	f := newLearningIntegrationFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE entitlements
+		SET access_ends_at = $1
+		WHERE student_account_id = $2::uuid AND course_id = $3::uuid`, f.clock.Now().Add(time.Hour), f.studentID, f.courseID); err != nil {
+		t.Fatalf("activating fixture entitlement: %v", err)
+	}
+	progressPath := "/api/v1/learn/lessons/" + f.lessonID + "/progress"
+	if response := f.requestWithHeaders(http.MethodPut, progressPath, `{"position_seconds":54,"asset_version_id":"`+f.versionID+`"}`, map[string]string{"Accept-Language": "en"}); response.Code != http.StatusOK {
+		t.Fatalf("completing initial lesson: %d %s", response.Code, response.Body.String())
+	}
+
+	newLessonID := addLearningSectionLesson(t, f, 1, "new")
+	if _, err := f.pool.Exec(ctx, `UPDATE course_lessons SET video_asset_version_id = $1::uuid WHERE lesson_identity_id = $2::uuid`, f.versionID, newLessonID); err != nil {
+		t.Fatalf("binding video to added lesson: %v", err)
+	}
+	withNewContent := historyByID(fetchLearningHistory(t, f).Completed)[f.courseID]
+	if withNewContent.Completion == nil || !withNewContent.Completion.NewContentAdded {
+		t.Fatalf("history completion after lesson addition = %+v, want new_content_added=true", withNewContent.Completion)
+	}
+
+	newLessonProgressPath := "/api/v1/learn/lessons/" + newLessonID + "/progress"
+	if response := f.requestWithHeaders(http.MethodPut, newLessonProgressPath, `{"position_seconds":54,"asset_version_id":"`+f.versionID+`"}`, map[string]string{"Accept-Language": "en"}); response.Code != http.StatusOK {
+		t.Fatalf("completing added lesson: %d %s", response.Code, response.Body.String())
+	}
+	withoutNewContent := historyByID(fetchLearningHistory(t, f).Completed)[f.courseID]
+	if withoutNewContent.Completion == nil || withoutNewContent.Completion.NewContentAdded {
+		t.Fatalf("history completion after catch-up = %+v, want new_content_added=false", withoutNewContent.Completion)
+	}
+}
+
+func TestLearningHistoryKeepsDurableCompletionVisibleAcrossCourseStateChanges(t *testing.T) {
+	f := newLearningIntegrationFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE entitlements
+		SET access_ends_at = $1, retirement_eligibility_at = $2
+		WHERE student_account_id = $3::uuid AND course_id = $4::uuid`, f.clock.Now().Add(time.Hour), f.clock.Now().Add(time.Hour), f.studentID, f.courseID); err != nil {
+		t.Fatalf("activating fixture entitlement: %v", err)
+	}
+	if err := f.repository.SaveProgress(ctx, learning.ProgressWrite{
+		EnrollmentID: f.enrollmentID(t), CourseLessonIdentityID: f.lessonID,
+		PositionSeconds: 90, Completed: true, CompletingAssetVersionID: f.versionID,
+	}); err != nil {
+		t.Fatalf("recording durable completion: %v", err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE courses SET access_suspended_at = $1, access_suspension_reason = 'history-test' WHERE id = $2::uuid`, f.clock.Now(), f.courseID); err != nil {
+		t.Fatalf("suspending course access: %v", err)
+	}
+	if history := fetchLearningHistory(t, f); !hasHistoryCourse(history.Completed, f.courseID) {
+		t.Fatalf("suspended course disappeared from completed history: %+v", history)
+	}
+
+	retiredAt := f.clock.Now().Add(-time.Hour)
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE courses SET access_suspended_at = NULL, access_suspension_reason = NULL, retired_at = $1 WHERE id = $2::uuid`, retiredAt, f.courseID); err != nil {
+		t.Fatalf("retiring course access: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE entitlements SET retirement_eligibility_at = $1 WHERE student_account_id = $2::uuid AND course_id = $3::uuid`, f.clock.Now(), f.studentID, f.courseID); err != nil {
+		t.Fatalf("removing retirement eligibility: %v", err)
+	}
+	if history := fetchLearningHistory(t, f); !hasHistoryCourse(history.Completed, f.courseID) {
+		t.Fatalf("retired course disappeared from completed history: %+v", history)
+	}
+}
+
+func fetchLearningHistory(t *testing.T, f learningIntegrationFixture) learningHistoryResponse {
+	t.Helper()
+	response := f.requestWithHeaders(http.MethodGet, "/api/v1/learn/history", "", map[string]string{"Accept-Language": "en"})
+	assertReadSuccess(t, response)
+	var history learningHistoryResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decoding learning history: %v; body=%s", err, response.Body.String())
+	}
+	return history
+}
+
 func (f learningIntegrationFixture) enrollmentID(t *testing.T) string {
 	t.Helper()
 	var enrollmentID string

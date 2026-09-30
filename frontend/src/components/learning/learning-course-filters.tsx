@@ -2,10 +2,15 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-
-type Filter = "in-progress" | "completed" | "all";
+import {
+  initialLearningCourseFilter,
+  matchesLearningCourseFilter,
+  type LearningCourseFilter,
+  type LearningCourseFilterCard,
+} from "./learning-course-filter-model";
 
 export type LearningCourseFilterLabels = {
+  filterLabel: string;
   inProgress: string;
   completed: string;
   all: string;
@@ -16,31 +21,36 @@ export function LearningCourseFilters({
   cards,
   labels,
 }: {
-  cards: Array<{ key: string; completed: boolean; content: React.ReactNode }>;
+  cards: Array<LearningCourseFilterCard & { key: string; content: React.ReactNode }>;
   labels: LearningCourseFilterLabels;
 }) {
-  const [filter, setFilter] = React.useState<Filter>("in-progress");
-  const tabs: Array<{ value: Filter; label: string }> = [
+  const [filter, setFilter] = React.useState<LearningCourseFilter>(() =>
+    initialLearningCourseFilter(cards),
+  );
+  const filters: Array<{ value: LearningCourseFilter; label: string }> = [
     { value: "in-progress", label: labels.inProgress },
     { value: "completed", label: labels.completed },
     { value: "all", label: labels.all },
   ];
-  const visible = cards.filter((card) => filter === "all" || card.completed === (filter === "completed"));
+  const visible = cards.filter((card) => matchesLearningCourseFilter(card, filter));
 
   return (
     <div>
-      <div className="flex max-w-full gap-1 overflow-x-auto border-b border-border" role="tablist">
-        {tabs.map((tab) => (
+      <div
+        className="flex max-w-full gap-1 overflow-x-auto border-b border-border"
+        role="group"
+        aria-label={labels.filterLabel}
+      >
+        {filters.map((filterOption) => (
           <Button
-            key={tab.value}
+            key={filterOption.value}
             type="button"
-            role="tab"
-            aria-selected={filter === tab.value}
-            variant={filter === tab.value ? "secondary" : "ghost"}
+            aria-pressed={filter === filterOption.value}
+            variant={filter === filterOption.value ? "secondary" : "ghost"}
             className="min-h-11 shrink-0 rounded-b-none"
-            onClick={() => setFilter(tab.value)}
+            onClick={() => setFilter(filterOption.value)}
           >
-            {tab.label}
+            {filterOption.label}
           </Button>
         ))}
       </div>

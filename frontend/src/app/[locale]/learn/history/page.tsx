@@ -134,7 +134,7 @@ export default async function LearningHistoryPage({ params }: { params: Promise<
           <HistorySection
             sectionKey="in-progress"
             title={dictionary.learning.inProgressTab}
-            empty={dictionary.learning.noFilteredCourses}
+            empty={dictionary.learning.noInProgressHistory}
             courses={history.in_progress}
             locale={locale}
             dictionary={dictionary}

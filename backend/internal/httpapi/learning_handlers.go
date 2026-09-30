@@ -261,13 +261,25 @@ func (h *learningHandlers) history(c *gin.Context) {
 	}
 	for _, summary := range summaries {
 		classification, ok := decisions[summary.CourseID]
+		course := historyCourseReadModel(c, summary)
+		if summary.Progress.Completion != nil {
+			if ok && classification.CourseWide {
+				course.AccessEndedReason = historyAccessEndedReason(classification.EndedReason)
+				if course.AccessEndedReason != "" {
+					course.AccessEndedAt = utcTimePtr(classification.EndedAt)
+					response.EndedAccess = append(response.EndedAccess, course)
+					continue
+				}
+			}
+			// A durable completion is a historical fact, so current suspension or retirement
+			// eligibility cannot make it disappear from the Student's own history.
+			response.Completed = append(response.Completed, course)
+			continue
+		}
 		if !ok || !classification.CourseWide {
 			continue
 		}
-		course := historyCourseReadModel(c, summary)
 		switch {
-		case classification.Decision.State == entitlement.ReadActive && summary.Progress.Completion != nil:
-			response.Completed = append(response.Completed, course)
 		case classification.Decision.State == entitlement.ReadActive:
 			response.InProgress = append(response.InProgress, course)
 		case classification.EndedReason == entitlement.ReasonExpired || classification.EndedReason == entitlement.ReasonRevoked:
@@ -376,7 +388,7 @@ func courseCompletionResponse(summary learning.CourseProgressSummary) *learningC
 		CompletedAt:          summary.Completion.CompletedAt.UTC(),
 		RequiredLessonCount:  summary.Completion.RequiredLessonCount,
 		CompletedLessonCount: summary.Completion.CompletedLessonCount,
-		NewContentAdded:      summary.Completion.CompletedLessonCount < summary.TotalLessons,
+		NewContentAdded:      summary.CompletedLessons < summary.TotalLessons,
 	}
 }
 

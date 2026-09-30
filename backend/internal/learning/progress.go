@@ -128,17 +128,34 @@ func saveProgress(ctx context.Context, executor progressExecutor, write Progress
 	return nil
 }
 
-// recordCourseCompletion locks the Enrollment before checking the live graph.
-// Two concurrent final Lesson writes therefore serialize: the writer that sees
-// the other writer's committed Progress row records the one durable fact, and
-// the unique enrollment constraint makes retries harmless.
+// recordCourseCompletion avoids work after the append-only completion fact exists,
+// then serializes first-time completion checks on the Enrollment row. NO KEY UPDATE
+// is compatible with the foreign key's KEY SHARE lock held by a first Progress
+// insert, while still allowing only one completion check to aggregate at a time.
+// Course publication does not call this function; accepting completion only on a
+// subsequent Progress write is accepted behavior that avoids coupling authoring
+// mutations to Student state.
 func recordCourseCompletion(ctx context.Context, tx pgx.Tx, enrollmentID string) error {
+	var alreadyCompleted bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM course_completions
+			WHERE enrollment_id = $1::uuid
+		)
+	`, enrollmentID).Scan(&alreadyCompleted); err != nil {
+		return fmt.Errorf("checking existing course completion: %w", err)
+	}
+	if alreadyCompleted {
+		return nil
+	}
+
 	var lockedEnrollmentID string
 	if err := tx.QueryRow(ctx, `
 		SELECT id::text
 		FROM enrollments
 		WHERE id = $1::uuid
-		FOR UPDATE
+		FOR NO KEY UPDATE
 	`, enrollmentID).Scan(&lockedEnrollmentID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("locking learning enrollment: %w", ErrProgressUnavailable)

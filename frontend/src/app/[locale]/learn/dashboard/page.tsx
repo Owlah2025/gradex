@@ -176,6 +176,7 @@ export default async function LearningDashboardPage({ params }: { params: Promis
             ) : (
               <LearningCourseFilters
                 labels={{
+                  filterLabel: dictionary.learning.courseFilterLabel,
                   inProgress: dictionary.learning.inProgressTab,
                   completed: dictionary.learning.completedTab,
                   all: dictionary.learning.allTab,
@@ -189,6 +190,7 @@ export default async function LearningDashboardPage({ params }: { params: Promis
                   return {
                     key: course.course_id,
                     completed,
+                    learningStatus: course.learning_status,
                     content: (
                       <Card asChild interactive>
                         <article className="flex h-full flex-col p-5">

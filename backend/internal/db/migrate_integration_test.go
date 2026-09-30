@@ -1029,6 +1029,29 @@ func TestCourseCompletionsMigrationBackfillsPopulatedCompletionAndIsAppendOnly(t
 	assetID := "10000000-0000-0000-0000-000000000959"
 	versionID := "10000000-0000-0000-0000-000000000960"
 	enrollmentID := "10000000-0000-0000-0000-000000000961"
+	partialCourseID := "10000000-0000-0000-0000-000000000962"
+	partialRevisionID := "10000000-0000-0000-0000-000000000963"
+	partialSectionIdentityID := "10000000-0000-0000-0000-000000000964"
+	partialFirstLessonIdentityID := "10000000-0000-0000-0000-000000000965"
+	partialSecondLessonIdentityID := "10000000-0000-0000-0000-000000000966"
+	partialSectionID := "10000000-0000-0000-0000-000000000967"
+	partialFirstLessonID := "10000000-0000-0000-0000-000000000968"
+	partialSecondLessonID := "10000000-0000-0000-0000-000000000969"
+	partialEnrollmentID := "10000000-0000-0000-0000-000000000970"
+	noLiveCourseID := "10000000-0000-0000-0000-000000000971"
+	noLiveEnrollmentID := "10000000-0000-0000-0000-000000000972"
+	staleCourseID := "10000000-0000-0000-0000-000000000973"
+	staleLiveRevisionID := "10000000-0000-0000-0000-000000000974"
+	staleHistoryRevisionID := "10000000-0000-0000-0000-000000000975"
+	staleLiveSectionIdentityID := "10000000-0000-0000-0000-000000000976"
+	staleHistorySectionIdentityID := "10000000-0000-0000-0000-000000000977"
+	staleLiveLessonIdentityID := "10000000-0000-0000-0000-000000000978"
+	staleHistoryLessonIdentityID := "10000000-0000-0000-0000-000000000979"
+	staleLiveSectionID := "10000000-0000-0000-0000-000000000980"
+	staleHistorySectionID := "10000000-0000-0000-0000-000000000981"
+	staleLiveLessonID := "10000000-0000-0000-0000-000000000982"
+	staleHistoryLessonID := "10000000-0000-0000-0000-000000000983"
+	staleEnrollmentID := "10000000-0000-0000-0000-000000000984"
 	completedAt := time.Date(2026, 9, 30, 10, 11, 12, 0, time.UTC)
 
 	statements := []struct {
@@ -1054,6 +1077,39 @@ func TestCourseCompletionsMigrationBackfillsPopulatedCompletionAndIsAppendOnly(t
 		{`INSERT INTO enrollments (id, student_account_id, course_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{enrollmentID, studentID, courseID}},
 		{`INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, completed_at, completing_asset_version_id, last_watched_at)
 			VALUES ($1::uuid, $2::uuid, 90, 90, $3, $4::uuid, $3)`, []any{enrollmentID, lessonIdentityID, completedAt, versionID}},
+		{`INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, []any{partialCourseID, instructorID}},
+		{`INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, 'APPROVED', 1, 'مقرر جزئي', 'Partial Course')`, []any{partialRevisionID, partialCourseID}},
+		{`UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $1::uuid WHERE id = $2::uuid`, []any{partialRevisionID, partialCourseID}},
+		{`INSERT INTO course_section_identities (id, course_id) VALUES ($1::uuid, $2::uuid)`, []any{partialSectionIdentityID, partialCourseID}},
+		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id)
+			VALUES ($1::uuid, $2::uuid, $3::uuid), ($4::uuid, $2::uuid, $3::uuid)`, []any{partialFirstLessonIdentityID, partialCourseID, partialSectionIdentityID, partialSecondLessonIdentityID}},
+		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم جزئي', 'Partial Section', 0)`, []any{partialSectionID, partialRevisionID, partialCourseID, partialSectionIdentityID}},
+		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس أول', 'First Lesson', 0),
+			       ($6::uuid, $2::uuid, $3::uuid, $4::uuid, $7::uuid, 'درس ثان', 'Second Lesson', 1)`, []any{partialFirstLessonID, partialSectionID, partialCourseID, partialSectionIdentityID, partialFirstLessonIdentityID, partialSecondLessonID, partialSecondLessonIdentityID}},
+		{`INSERT INTO enrollments (id, student_account_id, course_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{partialEnrollmentID, studentID, partialCourseID}},
+		{`INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, completed_at, completing_asset_version_id, last_watched_at)
+			VALUES ($1::uuid, $2::uuid, 90, 90, $3, $4::uuid, $3)`, []any{partialEnrollmentID, partialFirstLessonIdentityID, completedAt, versionID}},
+		{`INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, []any{noLiveCourseID, instructorID}},
+		{`INSERT INTO enrollments (id, student_account_id, course_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{noLiveEnrollmentID, studentID, noLiveCourseID}},
+		{`INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, []any{staleCourseID, instructorID}},
+		{`INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, 'SUPERSEDED', 1, 'مقرر قديم', 'Historical Course'),
+			       ($3::uuid, $2::uuid, 'APPROVED', 2, 'مقرر حي', 'Live Course')`, []any{staleHistoryRevisionID, staleCourseID, staleLiveRevisionID}},
+		{`UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $1::uuid WHERE id = $2::uuid`, []any{staleLiveRevisionID, staleCourseID}},
+		{`INSERT INTO course_section_identities (id, course_id) VALUES ($1::uuid, $2::uuid), ($3::uuid, $2::uuid)`, []any{staleLiveSectionIdentityID, staleCourseID, staleHistorySectionIdentityID}},
+		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id) VALUES ($1::uuid, $2::uuid, $3::uuid), ($4::uuid, $2::uuid, $5::uuid)`, []any{staleLiveLessonIdentityID, staleCourseID, staleLiveSectionIdentityID, staleHistoryLessonIdentityID, staleHistorySectionIdentityID}},
+		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم حي', 'Live Section', 0),
+			       ($5::uuid, $6::uuid, $3::uuid, $7::uuid, 'قسم قديم', 'Historical Section', 0)`, []any{staleLiveSectionID, staleLiveRevisionID, staleCourseID, staleLiveSectionIdentityID, staleHistorySectionID, staleHistoryRevisionID, staleHistorySectionIdentityID}},
+		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس حي', 'Live Lesson', 0),
+			       ($6::uuid, $7::uuid, $3::uuid, $8::uuid, $9::uuid, 'درس قديم', 'Historical Lesson', 0)`, []any{staleLiveLessonID, staleLiveSectionID, staleCourseID, staleLiveSectionIdentityID, staleLiveLessonIdentityID, staleHistoryLessonID, staleHistorySectionID, staleHistorySectionIdentityID, staleHistoryLessonIdentityID}},
+		{`INSERT INTO enrollments (id, student_account_id, course_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{staleEnrollmentID, studentID, staleCourseID}},
+		{`INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds, completed_at, completing_asset_version_id, last_watched_at)
+			VALUES ($1::uuid, $2::uuid, 90, 90, $3, $4::uuid, $3)`, []any{staleEnrollmentID, staleHistoryLessonIdentityID, completedAt, versionID}},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
@@ -1062,6 +1118,65 @@ func TestCourseCompletionsMigrationBackfillsPopulatedCompletionAndIsAppendOnly(t
 	}
 	if err := m.Steps(1); err != nil {
 		t.Fatalf("applying course completion migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		WITH current_course_lessons AS (
+			SELECT e.id AS enrollment_id,
+			       e.student_account_id,
+			       e.course_id,
+			       cr.id AS course_revision_id,
+			       cr.revision_number,
+			       cli.id AS lesson_identity_id
+			FROM enrollments e
+			JOIN courses c ON c.id = e.course_id
+			JOIN course_revisions cr
+			  ON cr.id = c.live_revision_id
+			 AND cr.course_id = c.id
+			 AND cr.state = 'APPROVED'
+			JOIN course_sections cs
+			  ON cs.revision_id = cr.id
+			 AND cs.course_id = c.id
+			JOIN course_lessons cl
+			  ON cl.section_id = cs.id
+			 AND cl.course_id = c.id
+			JOIN course_lesson_identities cli
+			  ON cli.id = cl.lesson_identity_id
+			 AND cli.course_id = c.id
+			 AND cli.section_identity_id = cl.section_identity_id
+		), eligible AS (
+			SELECT current_course_lessons.enrollment_id,
+			       current_course_lessons.student_account_id,
+			       current_course_lessons.course_id,
+			       current_course_lessons.course_revision_id,
+			       current_course_lessons.revision_number,
+			       count(DISTINCT current_course_lessons.lesson_identity_id)::INTEGER AS required_lesson_count,
+			       count(DISTINCT progress.course_lesson_identity_id)
+			           FILTER (WHERE progress.completed_at IS NOT NULL)::INTEGER AS completed_lesson_count,
+			       max(progress.completed_at) AS completed_at
+			FROM current_course_lessons
+			LEFT JOIN progress
+			  ON progress.enrollment_id = current_course_lessons.enrollment_id
+			 AND progress.course_lesson_identity_id = current_course_lessons.lesson_identity_id
+			GROUP BY current_course_lessons.enrollment_id,
+			         current_course_lessons.student_account_id,
+			         current_course_lessons.course_id,
+			         current_course_lessons.course_revision_id,
+			         current_course_lessons.revision_number
+		)
+		INSERT INTO course_completions (
+			enrollment_id, student_account_id, course_id, completed_at, course_revision_id,
+			course_revision_number, required_lesson_count, completed_lesson_count, source
+		)
+		SELECT enrollment_id, student_account_id, course_id, completed_at, course_revision_id,
+		       revision_number, required_lesson_count, completed_lesson_count,
+		       'BACKFILL'::course_completion_source
+		FROM eligible
+		WHERE required_lesson_count > 0
+		  AND completed_lesson_count = required_lesson_count
+		  AND completed_at IS NOT NULL
+		ON CONFLICT (enrollment_id) DO NOTHING
+	`); err != nil {
+		t.Fatalf("re-running course completion backfill: %v", err)
 	}
 
 	var gotCompletedAt time.Time
@@ -1078,6 +1193,21 @@ func TestCourseCompletionsMigrationBackfillsPopulatedCompletionAndIsAppendOnly(t
 	if !gotCompletedAt.Equal(completedAt) || gotRevisionID != revisionID || gotRevisionNumber != 4 ||
 		gotRequired != 1 || gotCompleted != 1 || gotSource != "BACKFILL" {
 		t.Fatalf("backfilled completion = %s/%s/%d/%d/%d/%s, want %s/%s/4/1/1/BACKFILL", gotCompletedAt, gotRevisionID, gotRevisionNumber, gotRequired, gotCompleted, gotSource, completedAt, revisionID)
+	}
+	var completionRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM course_completions`).Scan(&completionRows); err != nil {
+		t.Fatalf("counting all backfilled completions: %v", err)
+	}
+	if completionRows != 1 {
+		t.Fatalf("course completion rows = %d, want exactly one eligible row", completionRows)
+	}
+	for _, enrollmentID := range []string{partialEnrollmentID, noLiveEnrollmentID, staleEnrollmentID} {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM course_completions WHERE enrollment_id = $1::uuid`, enrollmentID).Scan(&completionRows); err != nil {
+			t.Fatalf("checking excluded enrollment %s: %v", enrollmentID, err)
+		}
+		if completionRows != 0 {
+			t.Fatalf("excluded enrollment %s received %d completion rows", enrollmentID, completionRows)
+		}
 	}
 	if _, err := pool.Exec(ctx, `UPDATE course_completions SET completed_lesson_count = 2 WHERE enrollment_id = $1::uuid`, enrollmentID); err == nil {
 		t.Fatal("course completion update unexpectedly succeeded")

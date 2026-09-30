@@ -216,6 +216,92 @@ func TestEvaluateCourseReadsUsesOneBulkClassificationBoundary(t *testing.T) {
 	}
 }
 
+func TestEvaluateCourseHistoryClassifiesEndingAndRuntimeStates(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	student := "student"
+	baseLesson := Lesson{ID: "lesson", CourseID: "course", SectionID: "section", AccountStatus: "ACTIVE"}
+	active := testRecord("active", student, ScopeCourse, "course", "course", now)
+	expiredAt := now.Add(-2 * time.Hour)
+	expired := active
+	expired.AccessEndsAt = expiredAt
+	expired.OriginalAccessEndsAt = expiredAt
+	revokedAt := now.Add(-time.Hour)
+	revoked := active
+	revoked.State = StateRevoked
+	revoked.RevokedAt = &revokedAt
+	retiredAt := now.Add(-time.Minute)
+	retired := active
+	retired.RetirementEligibilityAt = now
+
+	for _, tc := range []struct {
+		name          string
+		lesson        Lesson
+		entitlements  []Record
+		wantState     ReadState
+		wantReason    Reason
+		wantEnded     Reason
+		wantEndedAt   *time.Time
+		wantCourse    bool
+		wantInResults bool
+	}{
+		{name: "active", lesson: baseLesson, entitlements: []Record{active}, wantState: ReadActive, wantReason: ReasonAllowed, wantCourse: true, wantInResults: true},
+		{name: "expired", lesson: baseLesson, entitlements: []Record{expired}, wantState: ReadExpired, wantReason: ReasonExpired, wantEnded: ReasonExpired, wantEndedAt: &expiredAt, wantCourse: true, wantInResults: true},
+		{name: "revoked", lesson: baseLesson, entitlements: []Record{revoked}, wantState: ReadDenied, wantReason: ReasonNoApplicableGrant, wantEnded: ReasonRevoked, wantEndedAt: &revokedAt, wantCourse: true, wantInResults: true},
+		{name: "newer revocation wins over older expiry", lesson: baseLesson, entitlements: []Record{expired, revoked}, wantState: ReadExpired, wantReason: ReasonExpired, wantEnded: ReasonRevoked, wantEndedAt: &revokedAt, wantCourse: true, wantInResults: true},
+		{name: "newer expiry wins over older revocation", lesson: baseLesson, entitlements: []Record{func() Record {
+			candidate := expired
+			candidate.AccessEndsAt = now.Add(-30 * time.Minute)
+			candidate.OriginalAccessEndsAt = candidate.AccessEndsAt
+			return candidate
+		}(), func() Record {
+			candidate := revoked
+			at := now.Add(-2 * time.Hour)
+			candidate.RevokedAt = &at
+			return candidate
+		}()}, wantState: ReadExpired, wantReason: ReasonExpired, wantEnded: ReasonExpired, wantEndedAt: func() *time.Time {
+			at := now.Add(-30 * time.Minute)
+			return &at
+		}(), wantCourse: true, wantInResults: true},
+		{name: "course suspension is checked before entitlement expiry", lesson: Lesson{ID: baseLesson.ID, CourseID: baseLesson.CourseID, SectionID: baseLesson.SectionID, AccountStatus: "ACTIVE", CourseSuspended: true}, entitlements: []Record{active}, wantState: ReadDenied, wantReason: ReasonCourseSuspended, wantCourse: true, wantInResults: true},
+		{name: "retired content remains classified but is not active", lesson: Lesson{ID: baseLesson.ID, CourseID: baseLesson.CourseID, SectionID: baseLesson.SectionID, AccountStatus: "ACTIVE", RetiredAt: &retiredAt}, entitlements: []Record{retired}, wantState: ReadDenied, wantReason: ReasonRetired, wantCourse: true, wantInResults: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evaluator, err := NewEvaluator(courseReadReaderFunc{snapshots: []CourseReadSnapshot{{
+				CourseID: "course", Lesson: tc.lesson, Entitlements: tc.entitlements,
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := evaluator.EvaluateCourseHistory(context.Background(), student, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			classification, present := got["course"]
+			if present != tc.wantInResults {
+				t.Fatalf("history presence = %v, want %v; decisions=%+v", present, tc.wantInResults, got)
+			}
+			if !present {
+				return
+			}
+			if classification.Decision.State != tc.wantState || classification.Decision.Reason != tc.wantReason || classification.CourseWide != tc.wantCourse {
+				t.Fatalf("history classification = %+v, want state=%s reason=%s course-wide=%v", classification, tc.wantState, tc.wantReason, tc.wantCourse)
+			}
+			if classification.EndedReason != tc.wantEnded {
+				t.Fatalf("history ended reason = %s, want %s", classification.EndedReason, tc.wantEnded)
+			}
+			if tc.wantEndedAt == nil {
+				if classification.EndedAt != nil {
+					t.Fatalf("history ended at = %v, want nil", classification.EndedAt)
+				}
+				return
+			}
+			if classification.EndedAt == nil || !classification.EndedAt.Equal(*tc.wantEndedAt) {
+				t.Fatalf("history ended at = %v, want %v", classification.EndedAt, *tc.wantEndedAt)
+			}
+		})
+	}
+}
+
 func testRecord(id, student string, scope ScopeKind, scopeID, courseID string, now time.Time) Record {
 	return Record{ID: id, StudentAccountID: student, ScopeKind: scope, ScopeID: scopeID, CourseID: courseID,
 		GrantSource: GrantSourceManualInvitation, OriginalAccessEndsAt: now.Add(2 * time.Hour), AccessEndsAt: now.Add(time.Hour),

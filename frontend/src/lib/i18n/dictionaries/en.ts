@@ -2026,6 +2026,7 @@ export const en = {
     resumeAction: "Continue",
     resumeStartAction: "Start",
     resumeLesson: "Lesson",
+    courseFilterLabel: "Course view",
     inProgressTab: "In progress",
     completedTab: "Completed",
     allTab: "All courses",
@@ -2038,6 +2039,7 @@ export const en = {
     endedAccessExpired: "Access expired",
     endedAccessRevoked: "Access revoked",
     noCompletedHistory: "Completed courses will appear here.",
+    noInProgressHistory: "Courses you are still working through will appear here.",
     noEndedHistory: "Courses with ended access will appear here.",
     noFilteredCourses: "No courses match this view.",
     pendingAccessTitle: "Course access",
@@ -2100,9 +2102,6 @@ export const en = {
     expiredDetail: "These lessons can no longer be opened.",
     completionAutomatic:
       "A lesson completes on its own once you have watched almost all of it.",
-    courseCompleteTitle: "You have finished this course",
-    courseCompleteBody:
-      "Every lesson here is complete. You can go back to any of them while your access lasts.",
     loadingCourses: "Loading your courses…",
     loadingCourse: "Loading the course…",
     loadingLesson: "Loading the lesson…",

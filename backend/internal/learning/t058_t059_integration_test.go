@@ -175,6 +175,7 @@ func TestDurableCourseCompletionSurvivesPublishedRevisionAddingLesson(t *testing
 	}
 }
 
+// Regression: two first-time final-lesson writes must not deadlock on the enrollment FK lock.
 func TestConcurrentFinalLessonWritesRecordOneCourseCompletion(t *testing.T) {
 	fixture := newLearningFixture(t)
 	ctx := context.Background()
@@ -185,21 +186,50 @@ func TestConcurrentFinalLessonWritesRecordOneCourseCompletion(t *testing.T) {
 		t.Fatalf("resolving enrollment: %v", err)
 	}
 	versionID := seedProgressAssetVersion(t, ctx, fixture, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb7")
-	start := make(chan struct{})
+	txs := make([]pgx.Tx, 2)
+	for index := range txs {
+		txs[index], err = fixture.repository.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatalf("opening completion transaction %d: %v", index, err)
+		}
+	}
+	progressSaved := make(chan struct{}, len(txs))
+	startCompletion := make(chan struct{})
 	errs := make(chan error, 2)
 	var writers sync.WaitGroup
-	for _, lessonID := range []string{fixture.lessonID, secondLessonID} {
+	for index, lessonID := range []string{fixture.lessonID, secondLessonID} {
+		tx := txs[index]
 		writers.Add(1)
-		go func(lessonID string) {
+		go func(tx pgx.Tx, lessonID string) {
 			defer writers.Done()
-			<-start
-			errs <- fixture.repository.SaveProgressGuarded(ctx, ProgressWrite{
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			write := ProgressWrite{
 				EnrollmentID: enrollment.ID, CourseLessonIdentityID: lessonID,
 				PositionSeconds: 90, Completed: true, CompletingAssetVersionID: versionID,
-			}, func(context.Context, pgx.Tx) error { return nil })
-		}(lessonID)
+			}
+			if err := saveProgress(ctx, tx, write); err != nil {
+				progressSaved <- struct{}{}
+				errs <- fmt.Errorf("saving progress in transaction %d: %w", index, err)
+				return
+			}
+			progressSaved <- struct{}{}
+			<-startCompletion
+			if err := recordCourseCompletion(ctx, tx, write.EnrollmentID); err != nil {
+				errs <- fmt.Errorf("recording completion in transaction %d: %w", index, err)
+				return
+			}
+			errs <- tx.Commit(ctx)
+		}(tx, lessonID)
 	}
-	close(start)
+	for range txs {
+		select {
+		case <-progressSaved:
+		case <-time.After(5 * time.Second):
+			close(startCompletion)
+			t.Fatal("concurrent transactions did not both reach the completion barrier")
+		}
+	}
+	close(startCompletion)
 	writers.Wait()
 	close(errs)
 	for err := range errs {

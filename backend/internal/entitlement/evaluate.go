@@ -99,6 +99,9 @@ func (e *Evaluator) EvaluateCourseReads(ctx context.Context, studentID string, n
 		if snapshot.CourseID == "" || !validSnapshot(Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}, studentID) {
 			continue
 		}
+		// Match EvaluateCourseReads: runtime suspension denies current access before grant
+		// expiry or revocation can classify it as ended history. Durable completions remain
+		// visible through the history handler because they are historical facts.
 		if snapshot.Lesson.AccountStatus != "ACTIVE" || snapshot.Lesson.CourseSuspended {
 			decisions[snapshot.CourseID] = ReadDecision{State: ReadDenied, Reason: readRuntimeReason(snapshot.Lesson)}
 			continue
@@ -127,18 +130,29 @@ func (e *Evaluator) EvaluateCourseHistory(ctx context.Context, studentID string,
 	}
 	decisions := make(map[string]CourseHistoryDecision, len(snapshots))
 	for _, snapshot := range snapshots {
-		if snapshot.CourseID == "" || !validSnapshot(Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}, studentID) {
+		courseSnapshot := Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}
+		if snapshot.CourseID == "" || !validSnapshot(courseSnapshot, studentID) {
 			continue
 		}
-		decision, expiresAt, courseWide := classifySnapshot(
-			Snapshot{Lesson: snapshot.Lesson, Entitlements: snapshot.Entitlements}, studentID, nil, now,
-		)
+		if snapshot.Lesson.AccountStatus != "ACTIVE" || snapshot.Lesson.CourseSuspended {
+			decisions[snapshot.CourseID] = CourseHistoryDecision{
+				Decision:   ReadDecision{State: ReadDenied, Reason: readRuntimeReason(snapshot.Lesson)},
+				CourseWide: historyCourseWide(snapshot, studentID),
+			}
+			continue
+		}
+		decision, expiresAt, courseWide := classifySnapshot(courseSnapshot, studentID, nil, now)
 		read := readDecision(decision, expiresAt, courseWide)
 		classification := CourseHistoryDecision{Decision: read, CourseWide: courseWide}
 		switch {
 		case read.State == ReadExpired:
 			classification.EndedAt = expiresAt
 			classification.EndedReason = ReasonExpired
+			if revokedAt := latestRevokedAt(snapshot, studentID); revokedAt != nil &&
+				(expiresAt == nil || revokedAt.After(*expiresAt)) {
+				classification.EndedAt = revokedAt
+				classification.EndedReason = ReasonRevoked
+			}
 		case read.State == ReadDenied && decision.Reason == ReasonNoApplicableGrant:
 			classification.CourseWide = historyCourseWide(snapshot, studentID)
 			if revokedAt := latestRevokedAt(snapshot, studentID); revokedAt != nil {
@@ -146,7 +160,7 @@ func (e *Evaluator) EvaluateCourseHistory(ctx context.Context, studentID string,
 				classification.EndedReason = ReasonRevoked
 			}
 		}
-		if classification.EndedReason != "" || classification.Decision.State == ReadActive {
+		if classification.EndedReason != "" || classification.Decision.State == ReadActive || classification.CourseWide {
 			decisions[snapshot.CourseID] = classification
 		}
 	}

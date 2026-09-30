@@ -166,6 +166,14 @@ test("every Student screen sits in the learning frame and sets its own direction
   }
 });
 
+test("course filters expose a named pressed toggle group, not incomplete tabs", () => {
+  const source = code(FILTERS);
+  assert.match(source, /role="group"/);
+  assert.match(source, /aria-label=\{labels\.filterLabel\}/);
+  assert.match(source, /aria-pressed=\{filter === filterOption\.value\}/);
+  assert.doesNotMatch(source, /role="tab(list)?"|aria-selected/);
+});
+
 // --- Both languages say the same things -----------------------------------
 
 test("every new Student string exists in both languages and is real copy", () => {
@@ -183,8 +191,10 @@ test("every new Student string exists in both languages and is real copy", () =>
     "endedAccessExpired",
     "endedAccessRevoked",
     "noCompletedHistory",
+    "noInProgressHistory",
     "noEndedHistory",
     "noFilteredCourses",
+    "courseFilterLabel",
     "learningNavigation",
     "courseContents",
     "closeCourseContents",
@@ -196,8 +206,6 @@ test("every new Student string exists in both languages and is real copy", () =>
     "activeDetail",
     "expiredDetail",
     "completionAutomatic",
-    "courseCompleteTitle",
-    "courseCompleteBody",
     "loadingCourses",
     "loadingCourse",
     "loadingLesson",
