@@ -36,7 +36,6 @@ export type InstructorProfile = {
   expertise: InstructorExpertise[];
   submitted_at?: string | null;
   decided_at?: string | null;
-  decided_by?: string | null;
   decision_note?: string | null;
   revision: number;
   created_at?: string;
@@ -141,8 +140,14 @@ export async function submitInstructorProfile(
 export async function listAdminInstructorProfiles(
   locale: "ar" | "en",
   state = "",
+  page = 1,
+  limit = 25,
 ): Promise<{ items: InstructorProfileQueueItem[]; page: number; limit: number; has_more: boolean }> {
-  const suffix = state === "" ? "" : "?state=" + encodeURIComponent(state);
+  const params = new URLSearchParams();
+  if (state !== "") params.set("state", state);
+  params.set("page", String(page));
+  params.set("limit", String(limit));
+  const suffix = "?" + params.toString();
   return requireResult(
     await authenticatedRequest<{ items: InstructorProfileQueueItem[]; page: number; limit: number; has_more: boolean }>(
       "/admin/instructor-profiles" + suffix,
@@ -171,6 +176,7 @@ export async function moderateInstructorProfile(
   input: ProfileInput & {
     accountID: string;
     action: "approve" | "request-changes" | "hide";
+    revision: number;
     reason: string;
   },
 ): Promise<InstructorProfile> {
@@ -181,7 +187,7 @@ export async function moderateInstructorProfile(
       "POST",
       input.locale,
       input.csrf,
-      { reason: input.reason },
+      { revision: input.revision, reason: input.reason },
     ),
     input.locale,
   );

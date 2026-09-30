@@ -33,11 +33,12 @@ import (
 // and calls that a proof.
 
 type academicTestEnv struct {
-	server          *httptest.Server
-	pool            *pgxpool.Pool
-	adminToken      string
-	instructorToken string
-	studentToken    string
+	server           *httptest.Server
+	pool             *pgxpool.Pool
+	adminToken       string
+	instructorToken  string
+	instructorBToken string
+	studentToken     string
 }
 
 func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
@@ -48,13 +49,15 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 	adminID := "20000000-0000-0000-0000-000000000001"
 	instructorID := "20000000-0000-0000-0000-000000000002"
 	studentID := "20000000-0000-0000-0000-000000000003"
+	instructorBID := "20000000-0000-0000-0000-000000000004"
 
 	if _, err := p.Exec(ctx, `
 		INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES
 		($1, 'cat-admin@example.com', 'cat-admin@example.com', 'ADMIN', 'ACTIVE', 'Catalog Admin'),
 		($2, 'cat-inst@example.com', 'cat-inst@example.com', 'INSTRUCTOR', 'ACTIVE', 'Catalog Instructor'),
-		($3, 'cat-student@example.com', 'cat-student@example.com', 'STUDENT', 'ACTIVE', 'Catalog Student')
-	`, adminID, instructorID, studentID); err != nil {
+		($3, 'cat-student@example.com', 'cat-student@example.com', 'STUDENT', 'ACTIVE', 'Catalog Student'),
+		($4, 'cat-inst-b@example.com', 'cat-inst-b@example.com', 'INSTRUCTOR', 'ACTIVE', 'Second Catalog Instructor')
+	`, adminID, instructorID, studentID, instructorBID); err != nil {
 		t.Fatalf("seeding accounts: %v", err)
 	}
 
@@ -102,14 +105,17 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 	adminToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x51}, 32))
 	instructorToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x52}, 32))
 	studentToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x53}, 32))
+	instructorBToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x54}, 32))
 
 	adminView := view(adminID, identity.RoleAdmin)
 	instructorView := view(instructorID, identity.RoleInstructor)
 	studentView := view(studentID, identity.RoleStudent)
+	instructorBView := view(instructorBID, identity.RoleInstructor)
 	sessionRepo := &tokenSessionRepo{sessions: map[string]identity.SessionView{
 		adminToken: adminView, identity.DigestToken(adminToken): adminView,
 		instructorToken: instructorView, identity.DigestToken(instructorToken): instructorView,
 		studentToken: studentView, identity.DigestToken(studentToken): studentView,
+		instructorBToken: instructorBView, identity.DigestToken(instructorBToken): instructorBView,
 	}}
 
 	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
@@ -186,7 +192,7 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 
 	return &academicTestEnv{
 		server: ts, pool: p, adminToken: adminToken,
-		instructorToken: instructorToken, studentToken: studentToken,
+		instructorToken: instructorToken, instructorBToken: instructorBToken, studentToken: studentToken,
 	}
 }
 

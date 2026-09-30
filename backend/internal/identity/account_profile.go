@@ -73,13 +73,13 @@ func (s *AccountProfileService) Update(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var role string
+	var role, currentDisplayName, currentLocale string
 	if err := tx.QueryRow(ctx, `
-		SELECT role::text
+		SELECT role::text, display_name, locale::text
 		FROM accounts
 		WHERE id = $1::uuid AND role = 'STUDENT'
 		FOR UPDATE
-	`, request.AccountID).Scan(&role); err != nil {
+	`, request.AccountID).Scan(&role, &currentDisplayName, &currentLocale); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrAccountProfileNotFound
 		}
@@ -89,13 +89,22 @@ func (s *AccountProfileService) Update(
 	changedFields := make([]string, 0, 2)
 	var displayName any
 	if request.DisplayName != nil {
-		displayName = *request.DisplayName
-		changedFields = append(changedFields, "display_name")
+		normalized, err := ValidateDisplayName(*request.DisplayName)
+		if err != nil {
+			return nil, err
+		}
+		displayName = normalized
+		if normalized != currentDisplayName {
+			changedFields = append(changedFields, "display_name")
+		}
 	}
 	var locale any
 	if request.Locale != nil {
-		locale = string(*request.Locale)
-		changedFields = append(changedFields, "locale")
+		normalized := string(*request.Locale)
+		locale = normalized
+		if normalized != currentLocale {
+			changedFields = append(changedFields, "locale")
+		}
 	}
 
 	var revision int

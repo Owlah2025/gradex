@@ -37,7 +37,8 @@ type instructorProfileSubmissionBody struct {
 }
 
 type moderationReasonBody struct {
-	Reason string `json:"reason"`
+	Revision int    `json:"revision"`
+	Reason   string `json:"reason"`
 }
 
 type accountProfileBody struct {
@@ -131,25 +132,28 @@ func (h *profileHandlers) getAdminInstructorProfile(c *gin.Context) {
 
 func (h *profileHandlers) approveInstructorProfile(c *gin.Context) {
 	h.decideInstructorProfile(c, instructorprofile.DecisionRequest{
-		AccountID:      c.Param("accountId"),
-		AdminAccountID: c.GetString(ctxUserIDKey),
-		Reason:         c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
+		AccountID:        c.Param("accountId"),
+		AdminAccountID:   c.GetString(ctxUserIDKey),
+		ExpectedRevision: c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Revision,
+		Reason:           c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
 	}, h.foundation.instructor.Approve)
 }
 
 func (h *profileHandlers) requestInstructorChanges(c *gin.Context) {
 	h.decideInstructorProfile(c, instructorprofile.DecisionRequest{
-		AccountID:      c.Param("accountId"),
-		AdminAccountID: c.GetString(ctxUserIDKey),
-		Reason:         c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
+		AccountID:        c.Param("accountId"),
+		AdminAccountID:   c.GetString(ctxUserIDKey),
+		ExpectedRevision: c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Revision,
+		Reason:           c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
 	}, h.foundation.instructor.RequestChanges)
 }
 
 func (h *profileHandlers) hideInstructorProfile(c *gin.Context) {
 	h.decideInstructorProfile(c, instructorprofile.DecisionRequest{
-		AccountID:      c.Param("accountId"),
-		AdminAccountID: c.GetString(ctxUserIDKey),
-		Reason:         c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
+		AccountID:        c.Param("accountId"),
+		AdminAccountID:   c.GetString(ctxUserIDKey),
+		ExpectedRevision: c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Revision,
+		Reason:           c.MustGet(strictJSONBodyContextKey).(*moderationReasonBody).Reason,
 	}, h.foundation.instructor.Hide)
 }
 

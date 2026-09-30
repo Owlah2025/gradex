@@ -52,7 +52,7 @@ export function MyProfile() {
   const save = async () => {
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(locale === "ar" ? "انتهت الجلسة. سجّل الدخول مرة أخرى." : "Your session ended. Sign in again.");
+      setError(copy.sessionEnded);
       return;
     }
     setSaving(true);
@@ -128,7 +128,7 @@ export function MyProfile() {
               {academic.level ? <div><dt className="text-xs font-semibold text-muted-foreground">{copy.level}</dt><dd className="mt-1 font-semibold text-foreground">{academic.level}</dd></div> : null}
             </dl>
           ) : <p className="text-sm text-muted-foreground">{copy.academicEmpty}</p>}
-          <Button className="mt-5" asChild variant="outline"><Link href={"/" + locale + "/learn/academic-profile"}>{copy.editAcademic}</Link></Button>
+          <Button className="mt-5" asChild variant="outline"><Link href={"/" + locale + "/learn/academic-profile/edit"}>{copy.editAcademic}</Link></Button>
         </CardContent>
       </Card>
 

@@ -89,19 +89,33 @@ func (r *Repository) SaveDraft(ctx context.Context, request SaveDraftRequest) (*
 		return nil, err
 	}
 	current, err := loadProfile(ctx, tx, request.AccountID)
-	if errors.Is(err, ErrProfileNotFound) {
+	isNew := errors.Is(err, ErrProfileNotFound)
+	if isNew {
 		if request.ExpectedRevision != 0 {
 			return nil, ErrRevisionConflict
-		}
-		if err := insertProfile(ctx, tx, request.AccountID, normalized); err != nil {
-			return nil, mapWriteError(err)
 		}
 	} else if err != nil {
 		return nil, err
 	} else {
+		if current.PublicationState == StatePendingReview {
+			return nil, ErrInvalidTransition
+		}
 		if current.Revision != request.ExpectedRevision {
 			return nil, ErrRevisionConflict
 		}
+	}
+
+	if normalized.PublicSlug != "" {
+		if err := ensureSlugAvailable(ctx, tx, request.AccountID, normalized.PublicSlug); err != nil {
+			return nil, err
+		}
+	}
+
+	if isNew {
+		if err := insertProfile(ctx, tx, request.AccountID, normalized); err != nil {
+			return nil, mapWriteError(err)
+		}
+	} else {
 		if err := updateDraft(ctx, tx, request.AccountID, normalized, current.Revision); err != nil {
 			return nil, mapWriteError(err)
 		}
@@ -143,6 +157,11 @@ func (r *Repository) Submit(ctx context.Context, request SubmitRequest) (*Profil
 	}
 	if profile.Revision != request.ExpectedRevision {
 		return nil, ErrRevisionConflict
+	}
+	switch profile.PublicationState {
+	case StateDraft, StateChangesRequested, StatePublished, StateHidden:
+	default:
+		return nil, ErrInvalidTransition
 	}
 	if err := validateSubmission(profile); err != nil {
 		return nil, err
@@ -192,7 +211,7 @@ func (r *Repository) List(ctx context.Context, request ListRequest) (ListResult,
 		  AND ($1 = '' OR p.publication_state::text = $1)
 		ORDER BY p.submitted_at DESC NULLS LAST, p.updated_at DESC, p.account_id
 		LIMIT $2 OFFSET $3
-	`, state, limit, (page-1)*limit)
+	`, state, limit+1, (page-1)*limit)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("listing instructor profiles: %w", err)
 	}
@@ -214,7 +233,11 @@ func (r *Repository) List(ctx context.Context, request ListRequest) (ListResult,
 	if err := rows.Err(); err != nil {
 		return ListResult{}, fmt.Errorf("reading instructor profile queue: %w", err)
 	}
-	return ListResult{Items: items, Page: page, Limit: limit, HasMore: len(items) == limit}, nil
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	return ListResult{Items: items, Page: page, Limit: limit, HasMore: hasMore}, nil
 }
 
 func (r *Repository) Approve(ctx context.Context, request DecisionRequest) (*Profile, error) {
@@ -240,7 +263,8 @@ func (r *Repository) Published(ctx context.Context, slug string) (*PublicSnapsho
 		FROM instructor_profiles p
 		JOIN accounts a ON a.id = p.account_id
 		WHERE p.published_snapshot->>'public_slug' = $1
-		  AND p.publication_state = 'PUBLISHED'
+		  AND p.published_slug = $1
+		  AND p.public_visible
 		  AND a.role = 'INSTRUCTOR'
 		  AND p.published_snapshot IS NOT NULL
 	`, slug).Scan(&raw, &accountID)
@@ -262,7 +286,7 @@ func (r *Repository) decide(
 	request DecisionRequest,
 	kind decisionKind,
 ) (*Profile, error) {
-	if strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.AdminAccountID) == "" {
+	if strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.AdminAccountID) == "" || request.ExpectedRevision < 1 {
 		return nil, ErrInvalidInput
 	}
 	reason := strings.TrimSpace(request.Reason)
@@ -283,6 +307,9 @@ func (r *Repository) decide(
 	if err != nil {
 		return nil, err
 	}
+	if profile.Revision != request.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
 
 	action, nextState, snapshot, err := prepareDecision(profile, reason, kind)
 	if err != nil {
@@ -293,33 +320,45 @@ func (r *Repository) decide(
 		if err != nil {
 			return nil, fmt.Errorf("encoding instructor profile snapshot: %w", err)
 		}
-		_, err = tx.Exec(ctx, `
+		if err := ensureSlugAvailable(ctx, tx, request.AccountID, snapshot.PublicSlug); err != nil {
+			return nil, err
+		}
+		tag, err := tx.Exec(ctx, `
 			UPDATE instructor_profiles
 			SET publication_state = $2::instructor_profile_publication_state,
 				published_snapshot = $3::jsonb,
+				published_slug = $4,
+				public_visible = TRUE,
 				decided_at = now(),
-				decided_by = $4::uuid,
-				decision_note = $5,
+				decided_by = $5::uuid,
+				decision_note = $6,
 				revision = revision + 1,
 				updated_at = now()
-			WHERE account_id = $1::uuid
-		`, request.AccountID, string(nextState), encoded, request.AdminAccountID, reason)
+			WHERE account_id = $1::uuid AND revision = $7
+		`, request.AccountID, string(nextState), encoded, snapshot.PublicSlug, request.AdminAccountID, reason, request.ExpectedRevision)
 		if err != nil {
 			return nil, mapWriteError(err)
 		}
+		if tag.RowsAffected() != 1 {
+			return nil, ErrRevisionConflict
+		}
 	} else {
-		_, err = tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			UPDATE instructor_profiles
 			SET publication_state = $2::instructor_profile_publication_state,
+				public_visible = CASE WHEN $2::instructor_profile_publication_state = 'HIDDEN' THEN FALSE ELSE public_visible END,
 				decided_at = now(),
 				decided_by = $3::uuid,
 				decision_note = $4,
 				revision = revision + 1,
 				updated_at = now()
-			WHERE account_id = $1::uuid
-		`, request.AccountID, string(nextState), request.AdminAccountID, reason)
+			WHERE account_id = $1::uuid AND revision = $5
+		`, request.AccountID, string(nextState), request.AdminAccountID, reason, request.ExpectedRevision)
 		if err != nil {
 			return nil, mapWriteError(err)
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, ErrRevisionConflict
 		}
 	}
 
@@ -650,11 +689,40 @@ func requireAdmin(ctx context.Context, tx pgx.Tx, accountID string) error {
 	return nil
 }
 
+func ensureSlugAvailable(ctx context.Context, tx pgx.Tx, accountID, slug string) error {
+	if slug == "" {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, slug); err != nil {
+		return fmt.Errorf("locking instructor profile slug: %w", err)
+	}
+	var taken bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM instructor_profiles
+			WHERE (public_slug = $1 OR published_slug = $1)
+			  AND account_id <> $2::uuid
+		)
+	`, slug, accountID).Scan(&taken); err != nil {
+		return fmt.Errorf("checking instructor profile slug: %w", err)
+	}
+	if taken {
+		return ErrSlugTaken
+	}
+	return nil
+}
+
 func mapWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
-		if pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "public_slug") {
-			return ErrSlugTaken
+		if pgErr.Code == "23505" {
+			switch {
+			case strings.Contains(pgErr.ConstraintName, "slug"):
+				return ErrSlugTaken
+			case pgErr.ConstraintName == "instructor_profiles_pkey":
+				return ErrRevisionConflict
+			}
 		}
 	}
 	return err

@@ -61,7 +61,7 @@ type Profile struct {
 	Expertise         []ExpertiseItem  `json:"expertise"`
 	SubmittedAt       *time.Time       `json:"submitted_at,omitempty"`
 	DecidedAt         *time.Time       `json:"decided_at,omitempty"`
-	DecidedBy         *string          `json:"decided_by,omitempty"`
+	DecidedBy         *string          `json:"-"`
 	DecisionNote      *string          `json:"decision_note,omitempty"`
 	Revision          int              `json:"revision"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -95,9 +95,10 @@ type SubmitRequest struct {
 }
 
 type DecisionRequest struct {
-	AccountID      string
-	AdminAccountID string
-	Reason         string
+	AccountID        string
+	AdminAccountID   string
+	ExpectedRevision int
+	Reason           string
 }
 
 type ListRequest struct {

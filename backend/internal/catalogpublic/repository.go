@@ -264,7 +264,7 @@ func (r *Repository) countQuery(visibility, conditions string) string {
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
-			AND ip.publication_state = 'PUBLISHED'
+			AND ip.public_visible
 			AND ip.published_snapshot IS NOT NULL
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
@@ -461,7 +461,7 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN instructor_profiles ip ON ip.account_id = c.owner_account_id
-			AND ip.publication_state = 'PUBLISHED'
+			AND ip.public_visible
 			AND ip.published_snapshot IS NOT NULL
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id

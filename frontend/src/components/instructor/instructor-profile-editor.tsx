@@ -120,6 +120,7 @@ export function InstructorProfileEditor() {
     const bio = draft.bioAr.trim() !== "" || draft.bioEn.trim() !== "";
     return { slug, headline, bio, ready: slug && headline && bio };
   }, [draft]);
+  const editingLocked = profile?.publication_state === "PENDING_REVIEW";
 
   const updateDraft = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -146,10 +147,10 @@ export function InstructorProfileEditor() {
   };
 
   const persist = async (): Promise<InstructorProfile | null> => {
-    if (!profile || !draft) return null;
+    if (!profile || !draft || editingLocked) return null;
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(locale === "ar" ? "انتهت جلستك. سجّل الدخول مرة أخرى." : "Your session ended. Sign in again.");
+      setError(copy.sessionEnded);
       return null;
     }
     setBusy(true);
@@ -180,7 +181,7 @@ export function InstructorProfileEditor() {
   };
 
   const submit = async () => {
-    if (!readiness.ready || !profile || busy) return;
+    if (!readiness.ready || !profile || busy || editingLocked) return;
     const saved = await persist();
     if (!saved) return;
     const csrf = currentCSRFToken();
@@ -224,7 +225,7 @@ export function InstructorProfileEditor() {
           />
         }
         actions={
-          <Button type="button" onClick={() => void persist()} disabled={busy}>
+          <Button type="button" onClick={() => void persist()} disabled={busy || editingLocked}>
             {busy ? copy.saving : copy.save}
           </Button>
         }
@@ -232,6 +233,7 @@ export function InstructorProfileEditor() {
 
       {error ? <div className="mt-6"><Alert tone="error" title={copy.loadFailed}>{error}</Alert></div> : null}
       {statusMessage ? <div className="mt-6"><Alert tone="success" title={statusMessage} /></div> : null}
+      {editingLocked ? <div className="mt-6"><Alert tone="info" title={copy.pendingReviewTitle}>{copy.pendingReviewBody}</Alert></div> : null}
       {profile.decision_note && profile.publication_state === "CHANGES_REQUESTED" ? (
         <div className="mt-6"><Alert tone="info" title={copy.feedbackTitle}>{profile.decision_note}</Alert></div>
       ) : null}
@@ -246,6 +248,7 @@ export function InstructorProfileEditor() {
                 onChange={(event) => updateDraft("publicSlug", event.target.value)}
                 placeholder="your-name"
                 maxLength={60}
+                disabled={busy || editingLocked}
               />
             </Field>
             <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -257,24 +260,24 @@ export function InstructorProfileEditor() {
           </div>
         </WorkspaceSection>
 
-        <WorkspaceSection title={copy.headlineEn}>
+        <WorkspaceSection title={copy.headlineTitle}>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label={copy.headlineAr} htmlFor="instructor-profile-headline-ar">
-              <Input id="instructor-profile-headline-ar" value={draft.headlineAr} maxLength={120} onChange={(event) => updateDraft("headlineAr", event.target.value)} dir="rtl" />
+              <Input id="instructor-profile-headline-ar" value={draft.headlineAr} maxLength={120} onChange={(event) => updateDraft("headlineAr", event.target.value)} dir="rtl" disabled={busy || editingLocked} />
             </Field>
             <Field label={copy.headlineEn} htmlFor="instructor-profile-headline-en">
-              <Input id="instructor-profile-headline-en" value={draft.headlineEn} maxLength={120} onChange={(event) => updateDraft("headlineEn", event.target.value)} dir="ltr" />
+              <Input id="instructor-profile-headline-en" value={draft.headlineEn} maxLength={120} onChange={(event) => updateDraft("headlineEn", event.target.value)} dir="ltr" disabled={busy || editingLocked} />
             </Field>
           </div>
         </WorkspaceSection>
 
-        <WorkspaceSection title={copy.bioEn}>
+        <WorkspaceSection title={copy.bioTitle}>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label={copy.bioAr} htmlFor="instructor-profile-bio-ar">
-              <Textarea id="instructor-profile-bio-ar" value={draft.bioAr} maxLength={4000} onChange={(event) => updateDraft("bioAr", event.target.value)} dir="rtl" rows={8} />
+              <Textarea id="instructor-profile-bio-ar" value={draft.bioAr} maxLength={4000} onChange={(event) => updateDraft("bioAr", event.target.value)} dir="rtl" rows={8} disabled={busy || editingLocked} />
             </Field>
             <Field label={copy.bioEn} htmlFor="instructor-profile-bio-en">
-              <Textarea id="instructor-profile-bio-en" value={draft.bioEn} maxLength={4000} onChange={(event) => updateDraft("bioEn", event.target.value)} dir="ltr" rows={8} />
+              <Textarea id="instructor-profile-bio-en" value={draft.bioEn} maxLength={4000} onChange={(event) => updateDraft("bioEn", event.target.value)} dir="ltr" rows={8} disabled={busy || editingLocked} />
             </Field>
           </div>
         </WorkspaceSection>
@@ -288,6 +291,7 @@ export function InstructorProfileEditor() {
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={institutionID}
                   onChange={(event) => { setInstitutionID(event.target.value); setSubjectQuery(""); }}
+                  disabled={busy || editingLocked}
                 >
                   <option value="">{copy.expertiseInstitution}</option>
                   {institutions.map((institution) => (
@@ -298,13 +302,13 @@ export function InstructorProfileEditor() {
                 </select>
               </Field>
               <Field className="mt-4" label={copy.expertiseSearch} htmlFor="instructor-profile-expertise-search">
-                <Input id="instructor-profile-expertise-search" value={subjectQuery} onChange={(event) => setSubjectQuery(event.target.value)} disabled={!institutionID} />
+                <Input id="instructor-profile-expertise-search" value={subjectQuery} onChange={(event) => setSubjectQuery(event.target.value)} disabled={!institutionID || busy || editingLocked} />
               </Field>
               {subjectResults.length > 0 ? (
                 <ul className="mt-3 space-y-2" aria-label={copy.expertiseSearch}>
                   {subjectResults.map((subject) => (
                     <li key={subject.id}>
-                      <button type="button" className="flex min-h-11 w-full items-center justify-between rounded-md border border-border px-3 text-start text-sm hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleExpertise(subject)}>
+                      <button type="button" disabled={busy || editingLocked} className="flex min-h-11 w-full items-center justify-between rounded-md border border-border px-3 text-start text-sm hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleExpertise(subject)}>
                         <span><bdi>{subjectLabel(subject, locale)}</bdi></span>
                         <span className="text-xs font-semibold text-primary">{draft.expertise.some((item) => item.id === subject.id) ? copy.removeExpertise : copy.addExpertise}</span>
                       </button>
@@ -322,7 +326,7 @@ export function InstructorProfileEditor() {
                   {draft.expertise.map((item) => (
                     <li key={item.id} className="inline-flex items-center gap-2 rounded-pill bg-muted px-3 py-1.5 text-sm">
                       <bdi>{locale === "ar" ? item.title_ar : item.title_en}</bdi>
-                      <button type="button" className="font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => updateDraft("expertise", draft.expertise.filter((candidate) => candidate.id !== item.id))} aria-label={copy.removeExpertise}>×</button>
+                      <button type="button" disabled={busy || editingLocked} className="font-bold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => updateDraft("expertise", draft.expertise.filter((candidate) => candidate.id !== item.id))} aria-label={copy.removeExpertise}>×</button>
                     </li>
                   ))}
                 </ul>
@@ -347,7 +351,7 @@ export function InstructorProfileEditor() {
           <p className="mt-3 text-sm font-semibold text-muted-foreground">
             {readiness.ready ? copy.checks.ready : copy.checks.needsWork}
           </p>
-          <Button className="mt-4" type="submit" disabled={!readiness.ready || busy}>
+          <Button className="mt-4" type="submit" disabled={!readiness.ready || busy || editingLocked}>
             {busy ? copy.submitting : copy.submit}
           </Button>
         </WorkspaceSection>

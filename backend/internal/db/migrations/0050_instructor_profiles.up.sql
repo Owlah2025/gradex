@@ -13,6 +13,7 @@ CREATE TYPE instructor_profile_publication_state AS ENUM (
 CREATE TABLE instructor_profiles (
     account_id                    UUID PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
     public_slug                   TEXT UNIQUE,
+    published_slug                TEXT UNIQUE,
     headline_ar                  TEXT NOT NULL DEFAULT '',
     headline_en                  TEXT NOT NULL DEFAULT '',
     bio_ar                       TEXT NOT NULL DEFAULT '',
@@ -21,6 +22,7 @@ CREATE TABLE instructor_profiles (
     -- no profile-avatar upload command is opened in T4; the UI uses initials
     -- until that command can prove the same readiness and ownership invariants.
     avatar_asset_version_id      UUID REFERENCES media_asset_versions (id),
+    public_visible                BOOLEAN NOT NULL DEFAULT FALSE,
     publication_state            instructor_profile_publication_state NOT NULL DEFAULT 'DRAFT',
     published_snapshot           JSONB,
     submitted_at                 TIMESTAMPTZ,
@@ -38,6 +40,13 @@ CREATE TABLE instructor_profiles (
             AND public_slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
         )
     ),
+    CONSTRAINT instructor_profiles_published_slug_shape CHECK (
+        published_slug IS NULL OR (
+            char_length(published_slug) BETWEEN 3 AND 60
+            AND published_slug = lower(published_slug)
+            AND published_slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
+        )
+    ),
     CONSTRAINT instructor_profiles_headline_ar_length CHECK (char_length(headline_ar) <= 120),
     CONSTRAINT instructor_profiles_headline_en_length CHECK (char_length(headline_en) <= 120),
     CONSTRAINT instructor_profiles_bio_ar_length CHECK (char_length(bio_ar) <= 4000),
@@ -51,6 +60,9 @@ CREATE TABLE instructor_profiles (
     ),
     CONSTRAINT instructor_profiles_published_has_snapshot CHECK (
         publication_state <> 'PUBLISHED' OR published_snapshot IS NOT NULL
+    ),
+    CONSTRAINT instructor_profiles_public_visible_requires_snapshot CHECK (
+        NOT public_visible OR (published_slug IS NOT NULL AND published_snapshot IS NOT NULL)
     )
 );
 
