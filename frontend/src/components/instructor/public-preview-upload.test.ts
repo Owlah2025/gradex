@@ -29,7 +29,7 @@ test("public preview authoring exposes selected, replace, remove, and localized 
 });
 
 test("public preview authoring binds upload and commands to the revision", () => {
-  assert.match(source, /beginPublicPreviewUpload\(\{[\s\S]{0,160}courseID,[\s\S]{0,160}revisionID,/);
+  assert.match(source, /uploadResumable\(file, \{[\s\S]{0,160}courseID,[\s\S]{0,160}revisionID,/);
   assert.match(
     source,
     /completeAndSelectPublicPreview\(\{[\s\S]{0,160}courseID,[\s\S]{0,160}revisionID,/,

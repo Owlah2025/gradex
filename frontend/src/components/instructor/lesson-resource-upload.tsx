@@ -1,5 +1,6 @@
 "use client";
 
+import { uploadResumable } from "@/lib/api/media-multipart";
 import React, { useRef, useState } from "react";
 import { addLessonFile, deleteLessonFile, type LessonFileWire } from "@/lib/api/authoring";
 import {
@@ -84,46 +85,21 @@ export function LessonResourceUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const ticket = await beginResourceUpload({
+      const completion = await uploadResumable(file, {
         courseID,
         lessonID,
-        contentType: checked.contentType,
-        sizeBytes: file.size,
+        kind: "RESOURCE",
+        storageKeyId: "resource-" + lessonID,
         locale,
         csrf,
-      });
-
-      // The digest is computed before the PUT so the completion evidence
-      // describes the bytes this browser actually sent.
-      const digest = await sha256Hex(file);
-
-      setPhase("UPLOADING");
-      const uploaded = await uploadFileToStorage(
-        ticket.upload_url,
-        file,
-        checked.contentType,
-        setProgress,
-      );
-
-      setPhase("CHECKING");
-      const completion = await completeUpload({
-        assetVersionID: ticket.asset_version_id,
-        providerEventID: newProviderEventID(),
-        storageObjectKey: ticket.storage_object_key,
-        storageObjectVersion: uploaded.storageObjectVersion,
-        contentType: checked.contentType,
-        sizeBytes: file.size,
-        sha256: digest,
-        locale,
-        csrf,
-      });
+      }, setProgress);
 
       // A validated Lesson Resource is READY the moment completion returns; a
       // scanner-gated deployment needs the poll. Both are handled without the
       // Instructor needing to know which one this deployment is.
       const state = isReadyState(completion.state)
         ? completion
-        : await waitForProcessing(ticket.asset_version_id, locale);
+        : await waitForProcessing(completion.asset_version_id, locale);
       if (!isReadyState(state.state)) {
         fail(describeAssetState(state.state, locale));
         return;
@@ -139,7 +115,7 @@ export function LessonResourceUpload({
         revisionID,
         lessonID,
         kind: "RESOURCE",
-        assetVersionID: ticket.asset_version_id,
+        assetVersionID: completion.asset_version_id,
         displayNameAr: displayName,
         displayNameEn: displayName,
         locale,

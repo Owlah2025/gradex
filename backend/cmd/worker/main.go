@@ -256,6 +256,11 @@ func main() {
 		defer close(mediaRecoveryDone)
 		runMediaRecovery(ctx, worker, logger)
 	}()
+	multipartCleanupDone := make(chan struct{})
+	go func() {
+		defer close(multipartCleanupDone)
+		runMultipartCleanup(ctx, pool, storageClient, logger)
+	}()
 	// Sibling of the stale-media recovery loop above, and started ONLY when the
 	// flag and the schema both permit it. When it is not started nothing about
 	// automatic recovery runs: no candidate query, no scheduler write, no outbox
@@ -287,6 +292,7 @@ func main() {
 	server.Shutdown()
 	<-dispatcherDone
 	<-mediaRecoveryDone
+	<-multipartCleanupDone
 	<-autoRecoveryDone
 	<-emailDispatcherDone
 	<-catalogSearchCleanupDone
@@ -436,6 +442,23 @@ func runMediaAutoEnhancementRecovery(ctx context.Context, worker *media.Worker, 
 			logger.WorkerFailed(logging.WorkerFailureEvent{
 				Operation: "media_auto_enhancement_recovery", ErrorClass: logging.ErrorClassOf(err),
 				RetryCount: -1, MaxRetry: -1,
+			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runMultipartCleanup(ctx context.Context, pool *pgxpool.Pool, store media.ObjectStore, logger *logging.Logger) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		if _, err := media.CleanupAbandonedMultipartUploads(ctx, pool, store, 100); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "multipart_abandonment_cleanup", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
 			})
 		}
 		select {

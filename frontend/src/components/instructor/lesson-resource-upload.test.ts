@@ -13,10 +13,11 @@ const status = read("src/components/instructor/upload-status.tsx");
 test("Lesson Resource authoring keeps the D-088 upload lifecycle and supports removal without identifier entry", () => {
   for (const required of [
     "validateSelectedResource(file, locale)",
-    "beginResourceUpload({",
-    "sha256Hex(file)",
-    "completeUpload({",
-    "waitForProcessing(ticket.asset_version_id, locale)",
+    "uploadResumable(file, {",
+    
+    
+    
+    "waitForProcessing(completion.asset_version_id, locale)",
     "addLessonFile({",
     "deleteLessonFile({",
     "ACCEPTED_RESOURCE_CONTENT_TYPES",

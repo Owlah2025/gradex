@@ -1,5 +1,6 @@
 import { authenticatedRequest } from "./http";
 import type { CourseRevisionWire } from "./catalog";
+import { uploadResumable } from "./media-multipart";
 import { beginUpload, completeUpload, newProviderEventID, sha256Hex, uploadFileToStorage } from "./media-upload";
 import type { LocalisedInput } from "./media-upload";
 import { ProblemError } from "./problem";
@@ -36,17 +37,17 @@ export async function setCourseThumbnail(input: SelectionInput): Promise<CourseR
 export async function uploadCourseThumbnail(input: Omit<SelectionInput, "assetID"> & {
   file: File; onProgress: (progress: number) => void; onProcessing: () => void;
 }): Promise<void> {
-  const ticket = await beginUpload({ ...input, kind: "THUMBNAIL", contentType: input.file.type, sizeBytes: input.file.size });
-  const sha256 = await sha256Hex(input.file);
-  const stored = await uploadFileToStorage(ticket.upload_url, input.file, input.file.type, input.onProgress);
+  const completionResult = await uploadResumable(input.file, {
+    courseID: input.courseID,
+    revisionID: input.revisionID,
+    kind: "THUMBNAIL",
+    storageKeyId: "thumbnail-" + input.courseID,
+    locale: input.locale,
+    csrf: input.csrf,
+  }, input.onProgress);
   input.onProcessing();
-  const completion = { ...input, assetVersionID: ticket.asset_version_id, providerEventID: newProviderEventID(),
-    storageObjectKey: ticket.storage_object_key, storageObjectVersion: stored.storageObjectVersion,
-    contentType: input.file.type, sizeBytes: input.file.size, sha256 };
-  // The same receipt and compare-and-set are safe after an ambiguous response.
   const finish = async () => {
-    await completeUpload(completion);
-    await setCourseThumbnail({ ...input, assetID: ticket.asset_version_id });
+    await setCourseThumbnail({ ...input, assetID: completionResult.asset_version_id });
   };
   try { await finish(); } catch (error) {
     if (error instanceof ProblemError && error.problem.status < 500) throw error;

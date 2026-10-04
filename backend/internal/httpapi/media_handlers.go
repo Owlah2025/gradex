@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -341,16 +342,69 @@ func (h *mediaHandlers) beginMultipartUpload(c *gin.Context) {
 }
 
 func (h *mediaHandlers) presignUploadPart(c *gin.Context) {
-	// Left unimplemented in this stub, requires extracting upload_id/partNumber from params.
-	c.JSON(http.StatusNotImplemented, gin.H{})
+	uploadID := c.Query("upload_id")
+	storageKey := c.Query("storage_key")
+	if uploadID == "" || storageKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "upload_id and storage_key are required"})
+		return
+	}
+	partStr := c.Param("partNumber")
+	partNumber, err := strconv.ParseInt(partStr, 10, 32)
+	if err != nil || partNumber < 1 || partNumber > 10000 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid part number"})
+		return
+	}
+
+	url, err := h.service.PresignUploadPart(c.Request.Context(), storageKey, uploadID, int32(partNumber))
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"url": url})
 }
 
 func (h *mediaHandlers) completeMultipartUpload(c *gin.Context) {
-	// Left unimplemented in this stub.
-	c.JSON(http.StatusNotImplemented, gin.H{})
+	body := c.MustGet(strictJSONBodyContextKey).(*mediaMultipartCompletionBody)
+	parts := make([]media.MultipartCompletedPart, len(body.Parts))
+	for i, p := range body.Parts {
+		parts[i] = media.MultipartCompletedPart{
+			PartNumber: p.PartNumber,
+			ETag:       p.ETag,
+		}
+	}
+	result, err := h.service.CompleteMultipartUpload(c.Request.Context(), media.CompleteMultipartRequest{
+		OwnerAccountID:   c.GetString(ctxUserIDKey),
+		AssetVersionID:   c.Param("id"),
+		ProviderEventID:  body.ProviderEventID,
+		StorageObjectKey: body.StorageObjectKey,
+		ContentType:      body.ContentType,
+		SizeBytes:        body.SizeBytes,
+		SHA256Hex:        body.SHA256Hex,
+		UploadID:         body.UploadID,
+		Parts:            parts,
+	})
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"asset_version_id":       result.AssetVersionID,
+		"state":                  result.State,
+		"duplicate":              result.Duplicate,
+		"storage_object_version": result.StorageObjectVersion,
+	})
 }
-
 func (h *mediaHandlers) abortMultipartUpload(c *gin.Context) {
-	// Left unimplemented in this stub.
-	c.JSON(http.StatusNotImplemented, gin.H{})
+	uploadID := c.Query("upload_id")
+	storageKey := c.Query("storage_key")
+	if uploadID == "" || storageKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "upload_id and storage_key are required"})
+		return
+	}
+	if err := h.service.AbortMultipartUpload(c.Request.Context(), storageKey, uploadID); err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "aborted"})
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { uploadResumable } from "@/lib/api/media-multipart";
 import { clearPublicPreview } from "@/lib/api/authoring";
 import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -151,31 +152,26 @@ export function PublicPreviewUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const ticket = await beginPublicPreviewUpload({
+      const completionResult = await uploadResumable(file, {
         courseID,
         revisionID,
-        contentType: file.type,
-        sizeBytes: file.size,
+        kind: "PREVIEW",
+        storageKeyId: "preview-" + courseID,
         locale,
         csrf,
-      });
-      activeAssetVersionID.current = ticket.asset_version_id;
+      }, setProgress);
+      activeAssetVersionID.current = completionResult.asset_version_id;
 
-      // Hashed before the PUT, so the completion evidence describes the bytes
-      // this browser actually sent.
       const sha256 = await sha256Hex(file);
-
-      setPhase("UPLOADING");
-      const stored = await uploadFileToStorage(ticket.upload_url, file, file.type, setProgress);
 
       setPhase("ATTACHING");
       const completion = await completeAndSelectPublicPreview({
         courseID,
         revisionID,
-        assetVersionID: ticket.asset_version_id,
+        assetVersionID: completionResult.asset_version_id,
         providerEventID: newProviderEventID(),
-        storageObjectKey: ticket.storage_object_key,
-        storageObjectVersion: stored.storageObjectVersion,
+        storageObjectKey: completionResult.storage_object_key,
+        storageObjectVersion: completionResult.storage_object_version,
         contentType: file.type,
         sizeBytes: file.size,
         sha256,

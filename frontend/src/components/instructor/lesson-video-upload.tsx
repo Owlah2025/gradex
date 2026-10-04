@@ -1,5 +1,6 @@
 "use client";
 
+import { uploadResumable } from "@/lib/api/media-multipart";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
@@ -136,32 +137,27 @@ export function LessonVideoUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const ticket = await beginVideoUpload({
+      const completionResult = await uploadResumable(file, {
         courseID,
         lessonID,
-        contentType: file.type,
-        sizeBytes: file.size,
+        kind: "VIDEO",
+        storageKeyId: "video-" + lessonID,
         locale,
         csrf,
-      });
-      activeAssetVersionID.current = ticket.asset_version_id;
+      }, setProgress);
+      activeAssetVersionID.current = completionResult.asset_version_id;
 
-      // The digest is computed before the PUT so the completion evidence
-      // describes the bytes this browser actually sent.
       const digest = await sha256Hex(file);
-
-      setPhase("UPLOADING");
-      const uploaded = await uploadFileToStorage(ticket.upload_url, file, file.type, setProgress);
 
       setPhase("ATTACHING");
       const completion = await completeAndSelectLessonVideo({
         courseID,
         revisionID,
         lessonID,
-        assetVersionID: ticket.asset_version_id,
+        assetVersionID: completionResult.asset_version_id,
         providerEventID: newProviderEventID(),
-        storageObjectKey: ticket.storage_object_key,
-        storageObjectVersion: uploaded.storageObjectVersion,
+        storageObjectKey: completionResult.storage_object_key,
+        storageObjectVersion: completionResult.storage_object_version,
         contentType: file.type,
         sizeBytes: file.size,
         sha256: digest,

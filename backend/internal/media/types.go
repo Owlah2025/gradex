@@ -145,6 +145,23 @@ type UploadTicket struct {
 	ExpiresAt        time.Time `json:"expires_at"`
 }
 
+type MultipartCompletedPart struct {
+	PartNumber int32
+	ETag       string
+}
+
+type CompleteMultipartRequest struct {
+	OwnerAccountID       string
+	AssetVersionID       string
+	ProviderEventID      string
+	StorageObjectKey     string
+	ContentType          string
+	SizeBytes            int64
+	SHA256Hex            string
+	UploadID             string
+	Parts                []MultipartCompletedPart
+}
+
 type CompleteUploadRequest struct {
 	OwnerAccountID       string
 	AssetVersionID       string
