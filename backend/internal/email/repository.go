@@ -143,6 +143,7 @@ func discoverDeliveries(ctx context.Context, tx pgx.Tx, batch claimBatch) error 
 		    ON c.event_type=e.event_type AND c.template_contract=e.safe_payload->>'template_contract'
 		 WHERE e.safe_payload->>'locale' IN ('ar', 'en')
 		   AND e.occurred_at >= $4
+		   AND e.occurred_at >= now() - interval '14 days'
 		ON CONFLICT (event_id) DO NOTHING`, batch.provider, batch.now, contracts, activatedAt)
 	if err != nil {
 		return fmt.Errorf("discovering transactional email intents: %w", err)

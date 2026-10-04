@@ -43,71 +43,90 @@ CREATE TRIGGER course_completions_append_only
 
 -- Deterministic, idempotent backfill for already-complete current live graphs.
 -- Re-running this statement is safe because enrollment_id is the domain key.
-WITH current_course_lessons AS (
-    SELECT e.id AS enrollment_id,
-           e.student_account_id,
-           e.course_id,
-           cr.id AS course_revision_id,
-           cr.revision_number,
-           cli.id AS lesson_identity_id
-    FROM enrollments e
-    JOIN courses c ON c.id = e.course_id
-    JOIN course_revisions cr
-      ON cr.id = c.live_revision_id
-     AND cr.course_id = c.id
-     AND cr.state = 'APPROVED'
-    JOIN course_sections cs
-      ON cs.revision_id = cr.id
-     AND cs.course_id = c.id
-    JOIN course_lessons cl
-      ON cl.section_id = cs.id
-     AND cl.course_id = c.id
-    JOIN course_lesson_identities cli
-      ON cli.id = cl.lesson_identity_id
-     AND cli.course_id = c.id
-     AND cli.section_identity_id = cl.section_identity_id
-), eligible AS (
-    SELECT current_course_lessons.enrollment_id,
-           current_course_lessons.student_account_id,
-           current_course_lessons.course_id,
-           current_course_lessons.course_revision_id,
-           current_course_lessons.revision_number,
-           count(DISTINCT current_course_lessons.lesson_identity_id)::INTEGER AS required_lesson_count,
-           count(DISTINCT progress.course_lesson_identity_id)
-               FILTER (WHERE progress.completed_at IS NOT NULL)::INTEGER AS completed_lesson_count,
-           max(progress.completed_at) AS completed_at
-    FROM current_course_lessons
-    LEFT JOIN progress
-      ON progress.enrollment_id = current_course_lessons.enrollment_id
-     AND progress.course_lesson_identity_id = current_course_lessons.lesson_identity_id
-    GROUP BY current_course_lessons.enrollment_id,
-             current_course_lessons.student_account_id,
-             current_course_lessons.course_id,
-             current_course_lessons.course_revision_id,
-             current_course_lessons.revision_number
-)
-INSERT INTO course_completions (
-    enrollment_id,
-    student_account_id,
-    course_id,
-    completed_at,
-    course_revision_id,
-    course_revision_number,
-    required_lesson_count,
-    completed_lesson_count,
-    source
-)
-SELECT enrollment_id,
-       student_account_id,
-       course_id,
-       completed_at,
-       course_revision_id,
-       revision_number,
-       required_lesson_count,
-       completed_lesson_count,
-       'BACKFILL'::course_completion_source
-FROM eligible
-WHERE required_lesson_count > 0
-  AND completed_lesson_count = required_lesson_count
-  AND completed_at IS NOT NULL
-ON CONFLICT (enrollment_id) DO NOTHING;
+DO $$
+DECLARE
+    batch_size INT := 1000;
+    inserted INT := 1;
+BEGIN
+    WHILE inserted > 0 LOOP
+        WITH current_course_lessons AS (
+            SELECT e.id AS enrollment_id,
+                   e.student_account_id,
+                   e.course_id,
+                   cr.id AS course_revision_id,
+                   cr.revision_number,
+                   cli.id AS lesson_identity_id
+            FROM enrollments e
+            JOIN courses c ON c.id = e.course_id
+            JOIN course_revisions cr
+              ON cr.id = c.live_revision_id
+             AND cr.course_id = c.id
+             AND cr.state = 'APPROVED'
+            JOIN course_sections cs
+              ON cs.revision_id = cr.id
+             AND cs.course_id = c.id
+            JOIN course_lessons cl
+              ON cl.section_id = cs.id
+             AND cl.course_id = c.id
+            JOIN course_lesson_identities cli
+              ON cli.id = cl.lesson_identity_id
+             AND cli.course_id = c.id
+             AND cli.section_identity_id = cl.section_identity_id
+        ), eligible AS (
+            SELECT current_course_lessons.enrollment_id,
+                   current_course_lessons.student_account_id,
+                   current_course_lessons.course_id,
+                   current_course_lessons.course_revision_id,
+                   current_course_lessons.revision_number,
+                   count(DISTINCT current_course_lessons.lesson_identity_id)::INTEGER AS required_lesson_count,
+                   count(DISTINCT progress.course_lesson_identity_id)
+                       FILTER (WHERE progress.completed_at IS NOT NULL)::INTEGER AS completed_lesson_count,
+                   max(progress.completed_at) AS completed_at
+            FROM current_course_lessons
+            LEFT JOIN progress
+              ON progress.enrollment_id = current_course_lessons.enrollment_id
+             AND progress.course_lesson_identity_id = current_course_lessons.lesson_identity_id
+            GROUP BY current_course_lessons.enrollment_id,
+                     current_course_lessons.student_account_id,
+                     current_course_lessons.course_id,
+                     current_course_lessons.course_revision_id,
+                     current_course_lessons.revision_number
+        ), batch AS (
+            SELECT enrollment_id
+            FROM eligible
+            WHERE required_lesson_count > 0
+              AND completed_lesson_count = required_lesson_count
+              AND completed_at IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM course_completions cc
+                  WHERE cc.enrollment_id = eligible.enrollment_id
+              )
+            LIMIT batch_size
+        )
+        INSERT INTO course_completions (
+            enrollment_id,
+            student_account_id,
+            course_id,
+            completed_at,
+            course_revision_id,
+            course_revision_number,
+            required_lesson_count,
+            completed_lesson_count,
+            source
+        )
+        SELECT e.enrollment_id,
+               e.student_account_id,
+               e.course_id,
+               e.completed_at,
+               e.course_revision_id,
+               e.revision_number,
+               e.required_lesson_count,
+               e.completed_lesson_count,
+               'BACKFILL'::course_completion_source
+        FROM eligible e
+        JOIN batch b ON b.enrollment_id = e.enrollment_id;
+        
+        GET DIAGNOSTICS inserted = ROW_COUNT;
+    END LOOP;
+END;
+$$;

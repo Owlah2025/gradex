@@ -491,7 +491,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(adminPage.getByTestId("entitlement-state")).toContainText("Access was ended");
     await expect(adminPage.getByTestId("entitlement-state")).not.toContainText("REVOKED");
     await expect(adminPage.getByTestId("entitlement-terminal")).toBeVisible();
-    expect([401, 403, 404, 410]).toContain(await protectedProgressStatus(30));
+    const status = await protectedProgressStatus(30);
+    expect([403, 404]).toContain(status);
+    const finalState = queryLearningState(STUDENT_A_ID, COURSE_ID);
+    const finalProgress = finalState.progress.find((p) => p.lesson_identity_id === LESSON_ID);
+    expect(finalProgress?.max_position_seconds ?? 0).toBeLessThan(30);
 
     await adminContext.close();
     await studentContext.close();
@@ -534,11 +538,13 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(rejectTargetEmail);
     const invId = await invitationIdFromRow(adminPage, rejectTargetEmail);
 
-    // Invalid token returns 403, 404 or 410
+    // Invalid token returns 403 and creates no entitlement
     const badAccept = await request.post(`/api/v1/me/course-access-invitations/${invId}/accept`, {
       data: { acceptance_token: "invalid-token-secret" },
     });
-    expect([403, 404, 410]).toContain(badAccept.status());
+    expect(badAccept.status()).toBe(403);
+    const badState = queryLearningState(STUDENT_B_ID, COURSE_ID);
+    expect(badState.entitlement.found).toBe(false);
 
     await adminContext.close();
   });

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS transactional_email_deliveries_updated_event_idx;

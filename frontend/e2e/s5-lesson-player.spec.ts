@@ -409,32 +409,31 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
           // Lesson A selects a manual quality, so quality reset on Lesson B is observable
           // rather than vacuous.
           const qualitySelectA = page.getByRole("combobox", { name: /quality|الجودة/i });
-          const hasQualityLevels = await qualitySelectA.isVisible();
+          await expect(qualitySelectA).toBeVisible();
           let lessonAOptionCount = 0;
-          if (hasQualityLevels) {
-            // The player opens in Auto, which is the Student's selection and not merely whichever
-            // level HLS happens to be rendering.
-            await expect(qualitySelectA).toHaveAttribute("data-quality-mode", "auto");
-            await expect(qualitySelectA).toHaveValue("auto");
 
-            // Pin a real level on Lesson A, so a carry-over into Lesson B would be observable.
-            await qualitySelectA.selectOption("level-0");
-            await expect(qualitySelectA).toHaveAttribute("data-quality-mode", "manual");
-            await expect(qualitySelectA).toHaveValue("level-0");
+          // The player opens in Auto, which is the Student's selection and not merely whichever
+          // level HLS happens to be rendering.
+          await expect(qualitySelectA).toHaveAttribute("data-quality-mode", "auto");
+          await expect(qualitySelectA).toHaveValue("auto");
 
-            // The pin survives adaptive `LEVEL_SWITCHED` events. Before the fix this control was
-            // re-synced to whatever level HLS was rendering, which silently discarded the
-            // Student's choice — and reported Auto as manual whenever ABR switched.
-            await expect
-              .poll(() => qualitySelectA.evaluate((node) => (node as HTMLSelectElement).value), {
-                timeout: 3000,
-                intervals: [300, 300, 300],
-              })
-              .toBe("level-0");
+          // Pin a real level on Lesson A, so a carry-over into Lesson B would be observable.
+          await qualitySelectA.selectOption("level-0");
+          await expect(qualitySelectA).toHaveAttribute("data-quality-mode", "manual");
+          await expect(qualitySelectA).toHaveValue("level-0");
 
-            lessonAOptionCount = await qualitySelectA.evaluate((node) => (node as HTMLSelectElement).options.length);
-            expect(lessonAOptionCount).toBeGreaterThan(1);
-          }
+          // The pin survives adaptive `LEVEL_SWITCHED` events. Before the fix this control was
+          // re-synced to whatever level HLS was rendering, which silently discarded the
+          // Student's choice — and reported Auto as manual whenever ABR switched.
+          await expect
+            .poll(() => qualitySelectA.evaluate((node) => (node as HTMLSelectElement).value), {
+              timeout: 3000,
+              intervals: [300, 300, 300],
+            })
+            .toBe("level-0");
+
+          lessonAOptionCount = await qualitySelectA.evaluate((node) => (node as HTMLSelectElement).options.length);
+          expect(lessonAOptionCount).toBeGreaterThan(1);
 
           // Held so disposal of Lesson A's player is provable by detachment, not inferred.
           const playerElementA = await page.locator("[data-lesson-player]").elementHandle();
@@ -475,30 +474,28 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
           expect(await playerElementA!.evaluate((node) => node.isConnected).catch(() => false)).toBe(false);
 
           const qualitySelectB = page.getByRole("combobox", { name: /quality|الجودة/i });
-          if (hasQualityLevels) {
-            await expect(qualitySelectB).toBeVisible();
-            // Lesson B starts at Auto. Lesson A's manual pin belongs to Lesson A's media and must
-            // not carry across a source replacement.
-            await expect(qualitySelectB).toHaveAttribute("data-quality-mode", "auto");
-            await expect(qualitySelectB).toHaveValue("auto");
+          await expect(qualitySelectB).toBeVisible();
+          // Lesson B starts at Auto. Lesson A's manual pin belongs to Lesson A's media and must
+          // not carry across a source replacement.
+          await expect(qualitySelectB).toHaveAttribute("data-quality-mode", "auto");
+          await expect(qualitySelectB).toHaveValue("auto");
 
-            const rebuilt = await qualitySelectB.evaluate((node) => {
-              const select = node as HTMLSelectElement;
-              return {
-                optionCount: select.options.length,
-                autoPresent: Array.from(select.options).some((option) => option.value === "auto"),
-                valueIsOwnOption: Array.from(select.options).some((option) => option.value === select.value),
-                exposesHlsIndexes: Array.from(select.options).some((option) => /level|index/i.test(option.label)),
-              };
-            });
-            // Auto remains offered and the value is one of Lesson B's own options — never a
-            // stale index left over from Lesson A's manifest.
-            expect(rebuilt.autoPresent).toBe(true);
-            expect(rebuilt.optionCount).toBe(lessonAOptionCount);
-            expect(rebuilt.valueIsOwnOption).toBe(true);
-            // Accessible text names resolutions, never internal hls.js level indexes.
-            expect(rebuilt.exposesHlsIndexes).toBe(false);
-          }
+          const rebuilt = await qualitySelectB.evaluate((node) => {
+            const select = node as HTMLSelectElement;
+            return {
+              optionCount: select.options.length,
+              autoPresent: Array.from(select.options).some((option) => option.value === "auto"),
+              valueIsOwnOption: Array.from(select.options).some((option) => option.value === select.value),
+              exposesHlsIndexes: Array.from(select.options).some((option) => /level|index/i.test(option.label)),
+            };
+          });
+          // Auto remains offered and the value is one of Lesson B's own options — never a
+          // stale index left over from Lesson A's manifest.
+          expect(rebuilt.autoPresent).toBe(true);
+          expect(rebuilt.optionCount).toBe(lessonAOptionCount);
+          expect(rebuilt.valueIsOwnOption).toBe(true);
+          // Accessible text names resolutions, never internal hls.js level indexes.
+          expect(rebuilt.exposesHlsIndexes).toBe(false);
 
           // 5. Capture the settled Lesson A baseline. The reporter's `pagehide` write during
           // navigation is legitimate production behaviour, so the baseline is taken once the
@@ -539,19 +536,17 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
 
           // 14. No late Lesson A callback altered Lesson B's UI.
           await expect(page.getByRole("heading", { level: 1, name: "Lesson 2: Variables" })).toBeVisible();
-          if (hasQualityLevels) {
-            await expect(qualitySelectB).toBeVisible();
-            expect(
-              await qualitySelectB.evaluate((node) => {
-                const select = node as HTMLSelectElement;
-                return Array.from(select.options).some((option) => option.value === select.value);
-              })
-            ).toBe(true);
-            // 22. Lesson A's manual quality selection still has not carried into Lesson B, and no
-            // stale level event from the destroyed instance has changed the new player's mode.
-            await expect(qualitySelectB).toHaveAttribute("data-quality-mode", "auto");
-            await expect(qualitySelectB).toHaveValue("auto");
-          }
+          await expect(qualitySelectB).toBeVisible();
+          expect(
+            await qualitySelectB.evaluate((node) => {
+              const select = node as HTMLSelectElement;
+              return Array.from(select.options).some((option) => option.value === select.value);
+            })
+          ).toBe(true);
+          // 22. Lesson A's manual quality selection still has not carried into Lesson B, and no
+          // stale level event from the destroyed instance has changed the new player's mode.
+          await expect(qualitySelectB).toHaveAttribute("data-quality-mode", "auto");
+          await expect(qualitySelectB).toHaveValue("auto");
 
           // 15. Lesson A's HLS source is shut down: all manifest, variant, and segment activity
           // observed after the navigation belongs to Lesson B's freshly attached instance, and

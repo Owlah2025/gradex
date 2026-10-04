@@ -51,6 +51,7 @@ func (d *Dispatcher) DispatchPending(ctx context.Context, limit int) (int, error
 		LEFT JOIN media_outbox_dispatches md ON md.event_id = e.id
 		WHERE e.source_module = 'MEDIA_AND_ASSETS'
 		  AND e.available_at <= now()
+		  AND e.available_at >= now() - interval '14 days'
 		  AND md.event_id IS NULL
 		ORDER BY e.occurred_at, e.id
 		LIMIT $1
