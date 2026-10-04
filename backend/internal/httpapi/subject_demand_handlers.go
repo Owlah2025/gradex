@@ -61,8 +61,7 @@ type raiseSubjectDemandBody struct {
 
 func (h *subjectDemandHandlers) raise(c *gin.Context) {
 	var body raiseSubjectDemandBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.ValidationFailed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	if body.SubjectID == "" {

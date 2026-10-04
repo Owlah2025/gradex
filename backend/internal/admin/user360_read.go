@@ -176,7 +176,7 @@ func (r *Repository) queryStudentUser360(
 	if err != nil {
 		return StudentUser360{}, err
 	}
-	student.Courses, err = r.queryStudentCourses(ctx, locale, identityView.ID)
+	student.Courses, err = r.queryStudentCourses(ctx, tx, locale, identityView.ID)
 	if err != nil {
 		return StudentUser360{}, err
 	}
@@ -246,11 +246,11 @@ func queryAcademicProfile(ctx context.Context, tx pgx.Tx, locale identity.Locale
 	return &profile, nil
 }
 
-func (r *Repository) queryStudentCourses(ctx context.Context, locale identity.Locale, accountID string) ([]UserCourse, error) {
+func (r *Repository) queryStudentCourses(ctx context.Context, tx pgx.Tx, locale identity.Locale, accountID string) ([]UserCourse, error) {
 	if r.learning == nil {
 		return []UserCourse{}, nil
 	}
-	summaries, err := r.learning.ListStudentCourseSummaries(ctx, accountID)
+	summaries, err := r.learning.ListStudentCourseSummariesTx(ctx, tx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("querying student course progress: %w", err)
 	}
@@ -261,7 +261,7 @@ func (r *Repository) queryStudentCourses(ctx context.Context, locale identity.Lo
 	for _, summary := range summaries {
 		ids = append(ids, summary.CourseID)
 	}
-	metadata, err := r.courseMetadata(ctx, locale, ids)
+	metadata, err := r.courseMetadata(ctx, tx, locale, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -291,12 +291,12 @@ type courseMeta struct {
 	lifecycle, candidateState string
 }
 
-func (r *Repository) courseMetadata(ctx context.Context, locale identity.Locale, courseIDs []string) (map[string]courseMeta, error) {
+func (r *Repository) courseMetadata(ctx context.Context, tx pgx.Tx, locale identity.Locale, courseIDs []string) (map[string]courseMeta, error) {
 	metadata := make(map[string]courseMeta, len(courseIDs))
 	if len(courseIDs) == 0 {
 		return metadata, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT c.id::text, c.lifecycle::text, COALESCE(candidate.state::text, '')
 		  FROM courses c
 		  LEFT JOIN LATERAL (

@@ -1586,6 +1586,27 @@ func (r *Repository) SetLessonVideo(
 			return err
 		}
 
+		var validAsset bool
+		err = tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM media_asset_versions mav
+				JOIN media_assets ma ON ma.id = mav.logical_asset_id
+				WHERE mav.id = $1::uuid
+				  AND ma.kind = 'VIDEO'
+				  AND ma.course_id = $2::uuid
+				  AND ma.owner_account_id = $3::uuid
+				  AND ma.retired_at IS NULL
+				  AND (ma.lesson_id IS NULL OR ma.lesson_id = $4::uuid)
+			)
+		`, req.VideoAssetVersionID, req.CourseID, req.OwnerAccountID, req.LessonID).Scan(&validAsset)
+		if err != nil {
+			return fmt.Errorf("validating lesson video asset binding: %w", err)
+		}
+		if !validAsset {
+			return ErrAssetVersionInvalid
+		}
+
 		now := time.Now().UTC()
 		query := `
 			UPDATE course_lessons cl
@@ -1781,6 +1802,27 @@ func (r *Repository) AddLessonFile(
 		}
 		if err != nil {
 			return fmt.Errorf("querying lesson: %w", err)
+		}
+
+		var validAsset bool
+		err = tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM media_asset_versions mav
+				JOIN media_assets ma ON ma.id = mav.logical_asset_id
+				WHERE mav.id = $1::uuid
+				  AND ma.kind = $5::text::media_asset_kind
+				  AND ma.course_id = $2::uuid
+				  AND ma.owner_account_id = $3::uuid
+				  AND ma.retired_at IS NULL
+				  AND (ma.lesson_id IS NULL OR ma.lesson_id = $4::uuid)
+			)
+		`, req.AssetVersionID, req.CourseID, req.OwnerAccountID, req.LessonID, string(req.Kind)).Scan(&validAsset)
+		if err != nil {
+			return fmt.Errorf("validating lesson file asset binding: %w", err)
+		}
+		if !validAsset {
+			return ErrAssetVersionInvalid
 		}
 
 		var pos int

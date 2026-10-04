@@ -91,12 +91,19 @@ func SuspendAccount(
 
 	// M2: Last active Admin guard
 	if subjectRole == string(RoleAdmin) {
-		var activeAdminCount int
-		if err := tx.QueryRow(ctx,
-			`SELECT COUNT(*) FROM accounts WHERE role = 'ADMIN' AND status = 'ACTIVE'`,
-		).Scan(&activeAdminCount); err != nil {
-			return SuspendAccountResult{}, fmt.Errorf("counting active admin accounts: %w", err)
+		// Lock all active admin rows to serialize concurrent suspensions
+		rows, err := tx.Query(ctx,
+			`SELECT id FROM accounts WHERE role = 'ADMIN' AND status = 'ACTIVE' FOR UPDATE`,
+		)
+		if err != nil {
+			return SuspendAccountResult{}, fmt.Errorf("locking active admin accounts: %w", err)
 		}
+		var activeAdminCount int
+		for rows.Next() {
+			activeAdminCount++
+		}
+		rows.Close()
+		
 		if activeAdminCount <= 1 {
 			return SuspendAccountResult{}, fmt.Errorf("%w: cannot suspend the last active Admin", ErrUnauthorized)
 		}

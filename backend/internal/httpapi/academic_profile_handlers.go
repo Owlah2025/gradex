@@ -79,8 +79,7 @@ type saveProfileBody struct {
 
 func (h *academicProfileHandlers) saveProfile(c *gin.Context) {
 	var body saveProfileBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	saved, err := h.repo.SaveProfile(c.Request.Context(), academic.SaveProfileRequest{

@@ -1,12 +1,13 @@
 package httpapi
 
 import (
+	"net/http"
+
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"net/http"
 )
 
 type thumbnailBody struct {

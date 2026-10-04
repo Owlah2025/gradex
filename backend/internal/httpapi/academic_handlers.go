@@ -128,8 +128,7 @@ func (h *academicHandlers) listInstitutions(c *gin.Context) {
 
 func (h *academicHandlers) createInstitution(c *gin.Context) {
 	var body createInstitutionBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	created, err := h.repo.CreateInstitution(c.Request.Context(), academic.CreateInstitutionRequest{
@@ -153,8 +152,7 @@ type updateInstitutionBody struct {
 
 func (h *academicHandlers) updateInstitution(c *gin.Context) {
 	var body updateInstitutionBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	updated, err := h.repo.UpdateInstitution(c.Request.Context(), academic.UpdateInstitutionRequest{
@@ -201,8 +199,7 @@ func (h *academicHandlers) listUnits(c *gin.Context) {
 
 func (h *academicHandlers) createUnit(c *gin.Context) {
 	var body createUnitBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	created, err := h.repo.CreateAcademicUnit(c.Request.Context(), academic.CreateUnitRequest{
@@ -228,8 +225,7 @@ type updateUnitBody struct {
 
 func (h *academicHandlers) updateUnit(c *gin.Context) {
 	var body updateUnitBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	var kind *academic.UnitKind
@@ -280,8 +276,7 @@ func (h *academicHandlers) listPrograms(c *gin.Context) {
 
 func (h *academicHandlers) createProgram(c *gin.Context) {
 	var body createProgramBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	created, err := h.repo.CreateProgram(c.Request.Context(), academic.CreateProgramRequest{
@@ -305,8 +300,7 @@ type updateProgramBody struct {
 
 func (h *academicHandlers) updateProgram(c *gin.Context) {
 	var body updateProgramBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	updated, err := h.repo.UpdateProgram(c.Request.Context(), academic.UpdateProgramRequest{
@@ -351,8 +345,7 @@ func (h *academicHandlers) listCurricula(c *gin.Context) {
 
 func (h *academicHandlers) createCurriculum(c *gin.Context) {
 	var body createCurriculumBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	created, err := h.repo.CreateCurriculum(c.Request.Context(), academic.CreateCurriculumRequest{
@@ -375,8 +368,7 @@ type updateCurriculumBody struct {
 
 func (h *academicHandlers) updateCurriculum(c *gin.Context) {
 	var body updateCurriculumBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	updated, err := h.repo.UpdateCurriculum(c.Request.Context(), academic.UpdateCurriculumRequest{
@@ -423,8 +415,7 @@ func (h *academicHandlers) listCurriculumSubjects(c *gin.Context) {
 
 func (h *academicHandlers) mapSubject(c *gin.Context) {
 	var body mapSubjectBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	mapped, err := h.repo.MapSubjectToCurriculum(c.Request.Context(), academic.MapSubjectRequest{
@@ -475,8 +466,7 @@ func (h *academicHandlers) listSubjects(c *gin.Context) {
 
 func (h *academicHandlers) createSubject(c *gin.Context) {
 	var body createSubjectBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	created, err := h.repo.CreateSubject(c.Request.Context(), academic.CreateSubjectRequest{
@@ -501,8 +491,7 @@ type updateSubjectBody struct {
 
 func (h *academicHandlers) updateSubject(c *gin.Context) {
 	var body updateSubjectBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	updated, err := h.repo.UpdateSubject(c.Request.Context(), academic.UpdateSubjectRequest{

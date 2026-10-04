@@ -77,7 +77,10 @@ func (h *adminLifecycleHandlers) delete(c *gin.Context) {
 
 func (h *adminLifecycleHandlers) reassignOwner(c *gin.Context) {
 	var body reassignOwnerBody
-	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.OwnerAccountID) == "" {
+	if !bindStrictJSON(c, &body, 1<<16) {
+		return
+	}
+	if strings.TrimSpace(body.OwnerAccountID) == "" {
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{Code: "OWNER_REQUIRED", Detail: "New owner account ID is required", Location: problem.LocationBody, Parameter: "owner_account_id"}))
 		return
 	}
@@ -91,7 +94,10 @@ func (h *adminLifecycleHandlers) reassignOwner(c *gin.Context) {
 
 func (h *adminLifecycleHandlers) suspend(c *gin.Context) {
 	var body suspensionBody
-	if err := c.ShouldBindJSON(&body); err != nil || !body.Cause.Valid() || strings.TrimSpace(body.Reason) == "" {
+	if !bindStrictJSON(c, &body, 1<<16) {
+		return
+	}
+	if !body.Cause.Valid() || strings.TrimSpace(body.Reason) == "" {
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{Code: "SUSPENSION_CAUSE_AND_REASON_REQUIRED", Detail: "A valid cause and non-empty reason are required", Location: problem.LocationBody}))
 		return
 	}
@@ -105,7 +111,10 @@ func (h *adminLifecycleHandlers) suspend(c *gin.Context) {
 
 func (h *adminLifecycleHandlers) restoreAccess(c *gin.Context) {
 	var body restoreAccessBody
-	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Reason) == "" {
+	if !bindStrictJSON(c, &body, 1<<16) {
+		return
+	}
+	if strings.TrimSpace(body.Reason) == "" {
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{Code: "REASON_REQUIRED", Detail: "Reason is required", Location: problem.LocationBody, Parameter: "reason"}))
 		return
 	}

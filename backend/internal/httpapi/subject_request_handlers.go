@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Owlah2025/gradex/backend/internal/academic"
-	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
 type subjectRequestHandlers struct{ repo *academic.Repository }
@@ -41,8 +40,7 @@ func (h *subjectRequestHandlers) listOwn(c *gin.Context) {
 func (h *subjectRequestHandlers) create(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body createSubjectRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	request, err := h.repo.CreateSubjectRequest(c.Request.Context(), academic.CreateSubjectRequestWorkflow{
@@ -84,8 +82,7 @@ type linkSubjectRequestBody struct {
 
 func (h *subjectRequestHandlers) link(c *gin.Context) {
 	var body linkSubjectRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	request, err := h.repo.LinkSubjectRequest(c.Request.Context(), academic.LinkSubjectRequest{
@@ -116,8 +113,7 @@ type rejectSubjectRequestBody struct {
 
 func (h *subjectRequestHandlers) reject(c *gin.Context) {
 	var body rejectSubjectRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	request, err := h.repo.RejectSubjectRequest(c.Request.Context(), academic.RejectSubjectRequest{

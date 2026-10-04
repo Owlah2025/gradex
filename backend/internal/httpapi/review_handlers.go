@@ -107,8 +107,7 @@ func (h *reviewHandlers) requestChanges(c *gin.Context) {
 	actorDescriptor := adminAccountID
 
 	var body requestChangesBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	if strings.TrimSpace(body.Reason) == "" {

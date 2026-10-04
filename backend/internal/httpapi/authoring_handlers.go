@@ -233,8 +233,7 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 func (h *authoringHandlers) createCourse(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body createCourseBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -286,8 +285,7 @@ type setCourseSubjectBody struct {
 func (h *authoringHandlers) setCourseSubject(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body setCourseSubjectBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	course, err := h.repo.SetCourseSubject(c.Request.Context(), catalog.SetCourseSubjectRequest{
@@ -322,8 +320,7 @@ type setRevisionAudienceBody struct {
 func (h *authoringHandlers) setRevisionAudience(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body setRevisionAudienceBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	audience, err := h.repo.SetRevisionAudience(c.Request.Context(), catalog.SetRevisionAudienceRequest{
@@ -378,8 +375,7 @@ func (h *authoringHandlers) updateCourseRevision(c *gin.Context) {
 	revisionID := c.Param("revisionId")
 
 	var body updateCourseBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -409,8 +405,7 @@ func (h *authoringHandlers) addSection(c *gin.Context) {
 	revisionID := c.Param("revisionId")
 
 	var body sectionBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -433,8 +428,7 @@ func (h *authoringHandlers) addSection(c *gin.Context) {
 func (h *authoringHandlers) reorderSections(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body reorderSectionsBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	revision, err := h.repo.ReorderSections(c.Request.Context(), catalog.ReorderSectionsRequest{
@@ -455,8 +449,7 @@ func (h *authoringHandlers) updateSection(c *gin.Context) {
 	sectionID := c.Param("sectionId")
 
 	var body sectionBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -504,8 +497,7 @@ func (h *authoringHandlers) addLesson(c *gin.Context) {
 	sectionID := c.Param("sectionId")
 
 	var body lessonBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -529,8 +521,7 @@ func (h *authoringHandlers) addLesson(c *gin.Context) {
 func (h *authoringHandlers) reorderLessons(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	var body reorderLessonsBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	revision, err := h.repo.ReorderLessons(c.Request.Context(), catalog.ReorderLessonsRequest{
@@ -551,8 +542,7 @@ func (h *authoringHandlers) updateLesson(c *gin.Context) {
 	lessonID := c.Param("lessonId")
 
 	var body lessonBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -600,8 +590,7 @@ func (h *authoringHandlers) setLessonVideo(c *gin.Context) {
 	lessonID := c.Param("lessonId")
 
 	var body setVideoBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -754,8 +743,7 @@ func (h *authoringHandlers) addLessonFile(c *gin.Context) {
 	lessonID := c.Param("lessonId")
 
 	var body lessonFileBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 
@@ -786,7 +774,9 @@ func (h *authoringHandlers) deleteLessonFile(c *gin.Context) {
 	fileID := c.Query("file_id")
 	if fileID == "" {
 		var body lessonFileBody
-		_ = c.ShouldBindJSON(&body)
+		if !bindStrictJSON(c, &body, 1<<16) {
+			return
+		}
 		fileID = body.FileID
 	}
 	if fileID == "" {
@@ -815,8 +805,7 @@ func (h *authoringHandlers) setPreviewAsset(c *gin.Context) {
 	revisionID := c.Param("revisionId")
 
 	var body previewAssetBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 

@@ -1,0 +1,6 @@
+ALTER TABLE course_revisions DROP CONSTRAINT course_revisions_preview_asset_course_fk;
+ALTER TABLE lesson_files DROP CONSTRAINT lesson_files_asset_course_fk;
+ALTER TABLE lesson_files DROP COLUMN course_id;
+ALTER TABLE course_lessons DROP CONSTRAINT course_lessons_video_asset_course_fk;
+ALTER TABLE media_asset_versions DROP CONSTRAINT media_asset_versions_id_course_id_key;
+ALTER TABLE media_asset_versions DROP COLUMN course_id;

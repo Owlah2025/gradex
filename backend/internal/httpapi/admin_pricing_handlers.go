@@ -24,8 +24,7 @@ type setPriceBody struct {
 
 func parsePricingMutationBody(c *gin.Context) (*setPriceBody, bool) {
 	var body setPriceBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return nil, false
 	}
 	if body.PriceMinorUnits == nil || *body.PriceMinorUnits < 0 {

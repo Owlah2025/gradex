@@ -300,11 +300,19 @@ func (r *Repository) ReadLessonProgress(ctx context.Context, enrollmentID, lesso
 // live graph Lessons and the authenticated Student's Progress in one query,
 // ordered by Enrollment creation then stable Course ID, with no N+1 loops.
 func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID string) ([]StudentCourseSummary, error) {
+	return r.ListStudentCourseSummariesTx(ctx, r.pool, studentID)
+}
+
+type Queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func (r *Repository) ListStudentCourseSummariesTx(ctx context.Context, q Queryer, studentID string) ([]StudentCourseSummary, error) {
 	if r == nil || r.pool == nil || studentID == "" {
 		return nil, ErrEnrollmentNotFound
 	}
 	r.observeQuery("learning.dashboard")
-	rows, err := r.pool.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT e.course_id::text, e.created_at, cr.title_ar, cr.title_en,
 		       count(DISTINCT cli.id),
 		       count(DISTINCT p.course_lesson_identity_id) FILTER (WHERE p.completed_at IS NOT NULL),

@@ -65,8 +65,7 @@ func (h *academicImportHandlers) listManifests(c *gin.Context) {
 
 func (h *academicImportHandlers) runImport(c *gin.Context) {
 	var body importBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	selected := strings.TrimSpace(body.Manifest)

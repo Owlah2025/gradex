@@ -33,8 +33,7 @@ type renameTaxonomyTermBody struct {
 
 func (h *adminTaxonomyHandlers) createTerm(c *gin.Context) {
 	var body createTaxonomyTermBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	term, err := h.repo.CreateTaxonomyTerm(c.Request.Context(), catalog.CreateTaxonomyTermRequest{
@@ -50,8 +49,7 @@ func (h *adminTaxonomyHandlers) createTerm(c *gin.Context) {
 
 func (h *adminTaxonomyHandlers) renameTerm(c *gin.Context) {
 	var body renameTaxonomyTermBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	term, err := h.repo.RenameTaxonomyTerm(c.Request.Context(), catalog.RenameTaxonomyTermRequest{
@@ -89,8 +87,7 @@ func (h *adminTaxonomyHandlers) deleteTerm(c *gin.Context) {
 
 func (h *adminTaxonomyHandlers) assignTaxonomy(c *gin.Context) {
 	var body taxonomyAssignmentBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		writeProblem(c, problem.Malformed())
+	if !bindStrictJSON(c, &body, 1<<16) {
 		return
 	}
 	if strings.TrimSpace(body.RevisionID) == "" || strings.TrimSpace(body.MajorTermID) == "" || strings.TrimSpace(body.SubjectTermID) == "" {

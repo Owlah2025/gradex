@@ -60,20 +60,32 @@ func (d *Dispatcher) DispatchPending(ctx context.Context, limit int) (int, error
 	}
 	defer rows.Close()
 
-	dispatched := 0
+	type pendingEvent struct {
+		id      string
+		kind    string
+		payload []byte
+	}
+	var events []pendingEvent
+
 	for rows.Next() {
 		var eventID, eventType string
 		var payload []byte
 		if err := rows.Scan(&eventID, &eventType, &payload); err != nil {
-			return dispatched, fmt.Errorf("reading media outbox intent: %w", err)
+			return 0, fmt.Errorf("reading media outbox intent: %w", err)
 		}
-		if err := d.dispatchEvent(ctx, eventID, eventType, payload); err != nil {
+		events = append(events, pendingEvent{id: eventID, kind: eventType, payload: payload})
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterating media outbox intents: %w", err)
+	}
+	rows.Close() // Release connection before executing dispatches
+
+	dispatched := 0
+	for _, e := range events {
+		if err := d.dispatchEvent(ctx, e.id, e.kind, e.payload); err != nil {
 			return dispatched, err
 		}
 		dispatched++
-	}
-	if err := rows.Err(); err != nil {
-		return dispatched, fmt.Errorf("iterating media outbox intents: %w", err)
 	}
 	return dispatched, nil
 }
