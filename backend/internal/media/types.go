@@ -106,6 +106,10 @@ type ObjectStore interface {
 	HeadObjectVersion(context.Context, string, string) (sizeBytes int64, exists bool, err error)
 	DownloadPrefixVersion(context.Context, string, string, int64) ([]byte, error)
 	HashObjectVersion(context.Context, string, string) (string, error)
+	CreateMultipartUpload(context.Context, string, string) (string, error)
+	PresignUploadPartURL(context.Context, string, string, int32, time.Duration) (string, error)
+	CompleteMultipartUpload(context.Context, string, string, []int32, []string) (string, error)
+	AbortMultipartUpload(context.Context, string, string) error
 }
 
 // DeliveryStore is deliberately narrower than ObjectStore. Protected delivery

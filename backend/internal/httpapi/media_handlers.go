@@ -88,6 +88,10 @@ func mountMediaUploadRoutes(content *gin.RouterGroup, h *mediaHandlers, authenti
 	)
 	uploads.POST("", strictJSONMiddleware(func() any { return &mediaUploadBody{} }, mediaRequestBodyLimit), h.beginUpload)
 	uploads.POST("/:id/completions", strictJSONMiddleware(func() any { return &mediaCompletionBody{} }, mediaRequestBodyLimit), h.completeUpload)
+	uploads.POST("/multipart", strictJSONMiddleware(func() any { return &mediaUploadBody{} }, mediaRequestBodyLimit), h.beginMultipartUpload)
+	uploads.POST("/:id/multipart/parts/:partNumber", h.presignUploadPart)
+	uploads.POST("/:id/multipart/completions", strictJSONMiddleware(func() any { return &mediaMultipartCompletionBody{} }, mediaRequestBodyLimit), h.completeMultipartUpload)
+	uploads.DELETE("/:id/multipart", h.abortMultipartUpload)
 }
 
 func mountMediaStatusRoute(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
@@ -298,4 +302,55 @@ func mediaValidationProblem(err error) problem.Problem {
 		Pointer:   "/content_type",
 		Parameter: "content_type",
 	})
+}
+
+type mediaMultipartCompletionBody struct {
+	UploadID             string                        `json:"upload_id"`
+	ProviderEventID      string                        `json:"provider_event_id"`
+	StorageObjectKey     string                        `json:"storage_object_key"`
+	StorageObjectVersion string                        `json:"storage_object_version"`
+	ContentType          string                        `json:"content_type"`
+	SizeBytes            int64                         `json:"size_bytes"`
+	SHA256Hex            string                        `json:"sha256_hex"`
+	Parts                []mediaMultipartCompletedPart `json:"parts"`
+}
+
+type mediaMultipartCompletedPart struct {
+	PartNumber int32  `json:"part_number"`
+	ETag       string `json:"etag"`
+}
+
+func (h *mediaHandlers) beginMultipartUpload(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*mediaUploadBody)
+	ticket, err := h.service.BeginMultipartUpload(c.Request.Context(), media.UploadRequest{
+		OwnerAccountID: c.GetString(ctxUserIDKey), CourseID: body.CourseID, RevisionID: body.RevisionID, LessonID: body.LessonID,
+		LogicalAssetID: body.LogicalAssetID, Kind: body.Kind,
+		ContentType: body.ContentType, SizeBytes: body.SizeBytes,
+	})
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, gin.H{
+		"asset_version_id":   ticket.AssetVersionID,
+		"upload_id":          ticket.UploadID,
+		"storage_object_key": ticket.StorageObjectKey,
+		"expires_at":         ticket.ExpiresAt,
+	})
+}
+
+func (h *mediaHandlers) presignUploadPart(c *gin.Context) {
+	// Left unimplemented in this stub, requires extracting upload_id/partNumber from params.
+	c.JSON(http.StatusNotImplemented, gin.H{})
+}
+
+func (h *mediaHandlers) completeMultipartUpload(c *gin.Context) {
+	// Left unimplemented in this stub.
+	c.JSON(http.StatusNotImplemented, gin.H{})
+}
+
+func (h *mediaHandlers) abortMultipartUpload(c *gin.Context) {
+	// Left unimplemented in this stub.
+	c.JSON(http.StatusNotImplemented, gin.H{})
 }
