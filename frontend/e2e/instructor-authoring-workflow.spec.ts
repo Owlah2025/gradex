@@ -380,6 +380,7 @@ test.describe("Arabic", () => {
     const item = await page.getByTestId("authoring-section-CURRICULUM").boundingBox();
     expect(trigger).not.toBeNull();
     expect(item).not.toBeNull();
+    expect(trigger!.x).toBeGreaterThan(item!.x + item!.width / 2);
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

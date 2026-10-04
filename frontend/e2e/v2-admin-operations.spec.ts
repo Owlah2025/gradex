@@ -107,8 +107,10 @@ test.describe("T8 V2 Admin operations", () => {
       await admin.page.reload();
       await admin.page.getByRole("tab", { name: "Audit" }).click();
       const auditPanel = admin.page.getByRole("tabpanel", { name: "Audit" });
-      await expect(auditPanel.getByText("User 360 viewed").first()).toBeVisible();
-      await expect(auditPanel.getByText("Internal note added").first()).toBeVisible();
+      await expect(auditPanel.getByText("V2 Admin operational note")).toBeVisible();
+      await expect(auditPanel.getByText("V2 session invalidation verification")).toBeVisible();
+      await expect(auditPanel.getByText("V2 suspension verification")).toBeVisible();
+      await expect(auditPanel.getByText("V2 restoration verification")).toBeVisible();
 
       // Grant is a real pending-admin invitation followed by the queue's approval
       // command; the entitlement is then adjusted and revoked from the persisted record.

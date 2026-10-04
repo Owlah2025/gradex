@@ -110,6 +110,10 @@ prepare() {
       } >>"$S12_ENV_FILE"
       note "upgraded existing ignored environment state for authenticated TLS Redis"
     fi
+    if ! grep -q '^IDENTITY_OTP_PEPPER=' "$S12_ENV_FILE"; then
+      printf 'IDENTITY_OTP_PEPPER=%s\n' "$(openssl rand -hex 32)" >>"$S12_ENV_FILE"
+      note "upgraded existing ignored environment state for IDENTITY_OTP_PEPPER"
+    fi
     note "using existing ignored environment state"
     return
   fi
@@ -147,6 +151,7 @@ prepare() {
     printf 'ANONYMOUS_CSRF_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'ADMISSION_LIMITER_HMAC_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'OUTBOX_PROTECTED_PAYLOAD_KEY=%s\n' "$(openssl rand -hex 16)"
+    printf 'IDENTITY_OTP_PEPPER=%s\n' "$(openssl rand -hex 32)"
     # A placeholder sales contact: this environment is disposable and never
     # contacts anyone, but the Compose model requires the variable to interpolate.
     printf 'SALES_WHATSAPP_NUMBER=15550000000\n'

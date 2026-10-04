@@ -646,10 +646,23 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
       expect(subject.learning_status).toBe("expired");
       expect(subject.expires_at).toBe(baseline.entitlement.access_ends_at);
 
-      if (Array.isArray(body.resources)) expect(body.resources).toEqual([]); if (Array.isArray(body.lab_materials)) expect(body.lab_materials).toEqual([]);
-      if (Array.isArray(body.sections)) { for (const section of body.sections) {
+      if (path.includes("/lessons/")) {
+        expect(Array.isArray(subject.resources)).toBe(true);
+        expect(subject.resources).toEqual([]);
+        expect(Array.isArray(subject.lab_materials)).toBe(true);
+        expect(subject.lab_materials).toEqual([]);
+      } else if (path.endsWith(COURSE_ID)) {
+        expect(Array.isArray(subject.resources)).toBe(true);
+        expect(subject.resources).toEqual([]);
+        expect(Array.isArray(subject.lab_materials)).toBe(true);
+        expect(subject.lab_materials).toEqual([]);
+        expect(Array.isArray(subject.sections)).toBe(true);
+        for (const section of subject.sections) {
           for (const lesson of section.lessons) {
-            expect(lesson.resources).toEqual([]); expect(lesson.lab_materials).toEqual([]);
+            expect(Array.isArray(lesson.resources)).toBe(true);
+            expect(lesson.resources).toEqual([]);
+            expect(Array.isArray(lesson.lab_materials)).toBe(true);
+            expect(lesson.lab_materials).toEqual([]);
           }
         }
       }

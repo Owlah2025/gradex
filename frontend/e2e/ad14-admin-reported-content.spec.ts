@@ -66,5 +66,11 @@ test("AD-14 Student report reaches Admin queue and can be dismissed", async ({ b
   const body = await adminPage.locator("body").textContent();
   expect(body).not.toContain(student.accountID);
   expect(body).not.toContain(ADMIN.accountID);
+
+  await adminPage.goto(`/en/admin/users/${student.accountID}`);
+  await adminPage.getByRole("tab", { name: "Audit" }).click();
+  const auditPanel = adminPage.getByRole("tabpanel", { name: "Audit" });
+  await expect(auditPanel.getByText("Reviewed; no platform action required.")).toBeVisible();
+
   await adminContext.close();
 });
