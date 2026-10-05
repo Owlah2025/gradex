@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import fs from "fs";
 import type { PlaybackAuthorization } from "../src/lib/api/learning";
 import { queryProgress } from "../src/lib/api/e2e-progress";
 import { authenticateRotatingStudent, studentFor, PROGRESS_TEST_SLOT } from "./rotating-students";
@@ -68,25 +69,33 @@ test("paused playback crosses real capability expiry, resumes its position and p
   }).toBe("PLAYBACK_LEASE_LOST");
 });
 
-test("fatal manifest 403s exhaust recovery and an explicit retry can play", async ({ context, page }, testInfo) => {
+test("real storage segment 403s exhaust recovery and an explicit retry can play", async ({ context, page }, testInfo) => {
   await authenticateRotatingStudent(context, studentFor(testInfo, PROGRESS_TEST_SLOT));
   let authorizations = 0;
-  let refuse = true;
+  let refusedSegments = 0;
   page.on("response", (response) => {
     if (response.url().endsWith(`/lessons/${lessonID}/playback`) && response.request().method() === "POST" && response.status() === 200) authorizations += 1;
+    if (new URL(response.url()).pathname.endsWith(".ts") && response.status() === 403) refusedSegments += 1;
   });
-  await page.route("**/media/playback-manifests/**", (route) => refuse
-    ? route.fulfill({ status: 403, contentType: "application/problem+json", body: JSON.stringify({ code: "MEDIA_ACCESS_DENIED" }) })
-    : route.continue());
-  await page.goto(lessonPath);
-  await expect(page.getByTestId("lesson-media-unavailable")).toBeVisible();
-  expect(authorizations).toBe(3);
-  await page.waitForTimeout(1000);
-  expect(authorizations).toBe(3);
-  refuse = false;
-  await page.getByTestId("lesson-playback-retry").click();
-  await page.waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 2);
-  expect(authorizations).toBe(4);
+  const failureFile = process.env.GRADEX_E2E_SEGMENT_FAILURE_FILE;
+  expect(failureFile, "the recovery lane owns its local storage failure marker").toBeTruthy();
+  fs.writeFileSync(failureFile!, "deny", { flag: "wx" });
+  try {
+    await page.goto(lessonPath);
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await expect.poll(() => refusedSegments, { timeout: 20_000 }).toBeGreaterThan(0);
+    await expect(page.getByTestId("lesson-media-unavailable")).toBeVisible({ timeout: 90_000 });
+    expect(refusedSegments).toBeGreaterThanOrEqual(3);
+    expect(authorizations).toBe(3);
+    await page.waitForTimeout(1000);
+    expect(authorizations).toBe(3);
+    fs.unlinkSync(failureFile!);
+    await page.getByTestId("lesson-playback-retry").click();
+    await page.waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 2);
+    expect(authorizations).toBe(4);
+  } finally {
+    fs.rmSync(failureFile!, { force: true });
+  }
 });
 
 test("a terminal media element error refreshes and restores a paused position", async ({ context, page }, testInfo) => {

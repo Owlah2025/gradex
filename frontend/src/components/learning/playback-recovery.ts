@@ -2,14 +2,35 @@ export type ResumePlayback = { lessonID: string; position: number; playing: bool
 
 type HLSError = { fatal: boolean; type: string; response?: { code?: number } };
 
-// hls.js owns non-fatal retries. Only terminal authorization failures need a
-// new application authorization; other terminal errors reach the retry UI.
-export function isExpiredHLSError(error: HLSError, expiresAt: string, now = Date.now()): boolean {
+export function isAuthorizationHLSError(error: HLSError, expiresAt: string, now = Date.now()): boolean {
   const code = error.response?.code;
   // The API deliberately hides expired capabilities behind its uniform 404.
   // A 404 before known expiry remains a terminal media failure.
-  return error.fatal && error.type === "networkError" &&
+  return error.type === "networkError" &&
     (code === 401 || code === 403 || (code === 404 && Date.parse(expiresAt) <= now));
+}
+
+// Fatal authorization failures refresh immediately. Non-fatal retries get a
+// bounded chance to recover instead of leaving permanent segment refusals spinning.
+export function isExpiredHLSError(error: HLSError, expiresAt: string, now = Date.now()): boolean {
+  return error.fatal && isAuthorizationHLSError(error, expiresAt, now);
+}
+
+export function createAuthorizationFailureDeadline(refresh: () => void) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let active = true;
+  const clear = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  return {
+    denied() {
+      if (!active || timer !== null) return;
+      timer = setTimeout(() => { timer = null; if (active) refresh(); }, 5_000);
+    },
+    recovered: clear,
+    stop() { active = false; clear(); },
+  };
 }
 
 // A source can trigger only one refresh. The budget survives source replacement

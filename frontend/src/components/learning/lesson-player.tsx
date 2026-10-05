@@ -54,7 +54,7 @@ import {
 import { PlayerControls } from "./player-controls";
 import { useProgressReporter } from "./progress-reporter";
 import { VideoWatermark } from "./video-watermark";
-import { createPlaybackRecovery, isExpiredHLSError, type ResumePlayback } from "./playback-recovery";
+import { createAuthorizationFailureDeadline, createPlaybackRecovery, isAuthorizationHLSError, isExpiredHLSError, type ResumePlayback } from "./playback-recovery";
 import { createPlaybackRequest } from "./playback-request";
 
 type LessonPlayerProps = {
@@ -309,6 +309,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
       setPlayback(null);
       setAttempt((value) => value + 1);
     };
+    const authorizationDeadline = createAuthorizationFailureDeadline(refreshAuthorization);
 
     const syncMediaState = () => {
       if (!active) return;
@@ -387,7 +388,12 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     };
 
     const hlsFailed = (_event: unknown, error: ErrorData) => {
-      if (!active || !error.fatal) return;
+      if (!active) return;
+      if (!error.fatal) {
+        if (isAuthorizationHLSError(error, playback.expires_at)) authorizationDeadline.denied();
+        return;
+      }
+      authorizationDeadline.recovered();
       if (isExpiredHLSError(error, playback.expires_at)) refreshAuthorization();
       else {
         video.pause();
@@ -402,6 +408,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
       hls.on(Hls.Events.MANIFEST_PARSED, levelsParsed);
       hls.on(Hls.Events.LEVEL_SWITCHED, levelDidSwitch);
       hls.on(Hls.Events.ERROR, hlsFailed);
+      hls.on(Hls.Events.FRAG_LOADED, authorizationDeadline.recovered);
       hls.loadSource(playback.manifest_url);
       hls.attachMedia(video);
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -428,6 +435,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
 
     return () => {
       active = false;
+      authorizationDeadline.stop();
       recovery.unbind(sourceKey);
       video.pause();
       video.removeEventListener("loadedmetadata", seekToSavedPosition);
@@ -442,6 +450,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         hls.off(Hls.Events.MANIFEST_PARSED, levelsParsed);
         hls.off(Hls.Events.LEVEL_SWITCHED, levelDidSwitch);
         hls.off(Hls.Events.ERROR, hlsFailed);
+        hls.off(Hls.Events.FRAG_LOADED, authorizationDeadline.recovered);
         hls.destroy();
       }
       if (hlsRef.current === hls) hlsRef.current = null;

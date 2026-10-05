@@ -114,7 +114,7 @@ export type LocalMediaServer = {
   close: () => Promise<void>;
 };
 
-export async function startLocalMediaServer(): Promise<LocalMediaServer> {
+export async function startLocalMediaServer(options: { segmentFailureFile?: string } = {}): Promise<LocalMediaServer> {
   ensureMediaFixture();
 
   return new Promise((resolve, reject) => {
@@ -134,6 +134,15 @@ export async function startLocalMediaServer(): Promise<LocalMediaServer> {
       const urlPath = reqUrl.split("?")[0];
       const filename = path.basename(urlPath);
       const filePath = path.join(FIXTURE_DIR, filename);
+
+      // A recovery test can deny real storage segments without intercepting
+      // any application authorization, manifest, heartbeat, or progress route.
+      // The marker is unique to that local test run; playlists stay available.
+      if (filename.endsWith(".ts") && options.segmentFailureFile && fs.existsSync(options.segmentFailureFile)) {
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("Local fixture segment unavailable");
+        return;
+      }
 
       if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         res.writeHead(404, { "Content-Type": "text/plain" });

@@ -117,7 +117,7 @@ export default async function globalSetup(config?: { workers?: number }) {
     });
 
     console.log("[E2E Setup] Starting local media server for HLS test fixture...");
-    const mediaServer = await startLocalMediaServer();
+    const mediaServer = await startLocalMediaServer({ segmentFailureFile: process.env.GRADEX_E2E_SEGMENT_FAILURE_FILE });
     console.log(`[E2E Setup] Local media server running at ${mediaServer.origin}`);
 
     console.log(`[E2E Setup] Starting Go API server on port ${port}...`);
