@@ -20,7 +20,9 @@ const other = {
   email: "instructor-other@example.test",
   accountID: "a0000000-0000-0000-0000-000000000004",
 };
-const courseID = "c0000000-0000-0000-0000-000000000001";
+// seedLandingAcademicFixtures owns this institution and subject in every isolated run.
+const institutionID = "91000000-0000-0000-0000-000000000001";
+const subjectCode = "0418-101";
 
 function api(
   session: ReturnType<typeof issueRotatingSession>,
@@ -95,12 +97,17 @@ test("multipart interruption, reload recovery, ownership and cancellation use re
     const page = await context.newPage();
     await page.goto("/en/instructor/courses");
     
+    // Use seeded academic identities; no other spec needs to create a subject first.
     // Create a dedicated course so we don't pollute the shared fixture and break s15
     await page.getByTestId("toggle-new-course").click();
-    await page.getByTestId("new-course-institution").selectOption({ index: 1 });
-    await page.getByTestId("new-course-subject-search").fill("CS101");
-    await expect(page.getByTestId("new-course-subject-result")).toBeVisible();
-    await page.getByTestId("new-course-subject-result").click();
+    await page.getByTestId("new-course-institution").selectOption(institutionID);
+    await page.getByTestId("new-course-subject-search").fill(subjectCode);
+    const subject = page.getByTestId("new-course-subject-result").filter({
+      hasText: `${subjectCode} · Introduction to Computer Science`,
+    });
+    await expect(subject).toHaveCount(1);
+    await expect(subject).toBeVisible();
+    await subject.click();
     await page.getByTestId("new-course-title-ar").fill("دورة الرفع التجريبية");
     await page.getByTestId("new-course-title-en").fill(`Resumable Upload ${Date.now()}`);
     await page.getByTestId("new-course-description-ar").fill("وصف");
