@@ -54,7 +54,7 @@ const PRODUCTION_MODE_SPECS = ["**/s5-playback-performance.spec.ts"];
  * (`playwright.media-authoring.config.ts`), and the catalogue performance suite has its own
  * (`playwright.s3-performance.config.ts`).
  */
-const SEPARATE_CONFIG_SPECS = ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**"];
+const SEPARATE_CONFIG_SPECS = ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**", "**/s5-playback-recovery.spec.ts"];
 
 if (productionFrontend) {
   const buildManifest = path.join(__dirname, ".next", "BUILD_ID");

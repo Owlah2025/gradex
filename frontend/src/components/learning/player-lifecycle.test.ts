@@ -167,6 +167,10 @@ test("the player listens on itself, never on the document or the window", () => 
 test("the player still loads only the manifest the server authorised", () => {
   const player = code(PLAYER);
   assert.match(player, /requestPlayback\(lessonID, locale, currentCSRFToken\(\)\)/);
+  assert.match(player, /playbackRequestRef/);
+  assert.match(player, /cachedRequest\?\.key === requestKey/);
+  assert.match(player, /playbackRequestRef\.current = subscription/);
+  assert.match(player, /subscription\.retain\(\)/);
   assert.match(player, /hls\.loadSource\(playback\.manifest_url\)/);
   assert.match(player, /video\.src = playback\.manifest_url/);
   // Native HLS — Safari and iOS — is still reached, and still through the same authorised URL.
@@ -174,6 +178,12 @@ test("the player still loads only the manifest the server authorised", () => {
   // Nothing about storage is the client's business.
   assert.doesNotMatch(player, /https?:\/\//, "the player builds a URL of its own");
   assert.doesNotMatch(player, /\.m3u8|\.ts["'`]|bucket|r2\.|amazonaws|X-Amz/i);
+});
+
+test("playback authorization is keyed to the logical attempt", () => {
+  const player = code(PLAYER);
+  assert.match(player, /const requestKey = `\$\{lessonID\}:\$\{locale\}:\$\{attempt\}`/);
+  assert.match(player, /const \[attempt, setAttempt\] = useState\(0\)/);
 });
 
 test("progress reporting and the resume position survive the rebuild", () => {
@@ -189,10 +199,10 @@ test("progress reporting and the resume position survive the rebuild", () => {
 
 test("transient control failures stay recoverable while heartbeat authority fails closed", () => {
 	const player = code(PLAYER);
-	// `setFailed(true)` belongs to denied authorization, unsupported HLS, the media
-	// element's error event, and a heartbeat that can no longer establish authority.
+	// Terminal states include authorization denial, unsupported HLS, exhausted
+	// recovery, fatal non-expiry HLS errors, and lost heartbeat authority.
 	const failures = player.match(/setFailed\(true\)/g) ?? [];
-	assert.equal(failures.length, 4, "heartbeat authority loss must stop protected media");
+	assert.equal(failures.length, 5, "every terminal path must stop protected media");
 	assert.match(player, /heartbeatPlayback[\s\S]*videoElement\?\.pause\(\)[\s\S]*setPlayback\(null\)/);
   for (const control of ["toggleMediaPlayback", "toggleFullscreenBehavior"]) {
     assert.match(

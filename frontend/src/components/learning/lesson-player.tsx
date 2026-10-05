@@ -1,6 +1,6 @@
 "use client";
 
-import Hls from "hls.js";
+import Hls, { type ErrorData } from "hls.js";
 import { AlertCircle, Loader2, Play } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
@@ -54,6 +54,8 @@ import {
 import { PlayerControls } from "./player-controls";
 import { useProgressReporter } from "./progress-reporter";
 import { VideoWatermark } from "./video-watermark";
+import { createPlaybackRecovery, isExpiredHLSError, type ResumePlayback } from "./playback-recovery";
+import { createPlaybackRequest } from "./playback-request";
 
 type LessonPlayerProps = {
   lessonID: string;
@@ -97,6 +99,20 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
   }, []);
 
   const [playback, setPlayback] = useState<PlaybackAuthorization | null>(null);
+  const recoveryRef = useRef({ lessonID, budget: createPlaybackRecovery() });
+  if (recoveryRef.current.lessonID !== lessonID) {
+    recoveryRef.current = { lessonID, budget: createPlaybackRecovery() };
+  }
+  const resumeRef = useRef<ResumePlayback | null>(null);
+  const leaseSessionRef = useRef<string | null>(null);
+  // Playback authorization creates a server-side lease. React's development Strict Mode can replay
+  // an effect during a client navigation, so keep one in-flight/settled request per logical player
+  // attempt or the replay would mint a second lease and stop the first one.
+  const playbackRequestRef = useRef<{
+    key: string;
+    promise: Promise<PlaybackAuthorization>;
+    retain: () => () => void;
+  } | null>(null);
   const [failed, setFailed] = useState(false);
   /**
    * Why protected playback is stopped, when it is stopped for a reason the
@@ -160,9 +176,27 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     setPlayback(null);
     setFailed(false);
     setBlocked(null);
-    void requestPlayback(lessonID, locale, currentCSRFToken())
+    const requestKey = `${lessonID}:${locale}:${attempt}`;
+    const cachedRequest = playbackRequestRef.current;
+    const subscription = cachedRequest?.key === requestKey
+      ? cachedRequest
+      : { key: requestKey, ...createPlaybackRequest(
+          () => requestPlayback(lessonID, locale, currentCSRFToken()),
+          (authorization) => {
+            void releasePlayback(authorization.playback_session, locale, currentCSRFToken()).catch(() => {
+              // Lease TTL bounds a failed best-effort release.
+            });
+          },
+        ) };
+    const request = subscription.promise;
+    playbackRequestRef.current = subscription;
+    const unretain = subscription.retain();
+    void request
       .then((authorization) => {
-        if (active) setPlayback(authorization);
+        if (active) {
+          leaseSessionRef.current = authorization.playback_session;
+          setPlayback(authorization);
+        }
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -173,7 +207,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         if (block) setBlocked(block);
         else setFailed(true);
       });
-    return () => { active = false; };
+    return () => { active = false; unretain(); };
   }, [lessonID, locale, attempt]);
 
   /**
@@ -203,7 +237,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     const timer = window.setInterval(() => {
        void heartbeatPlayback(session, locale, currentCSRFToken()).catch(
          (error: unknown) => {
-           if (!active) return;
+           if (!active || leaseSessionRef.current !== session) return;
            const block = playbackBlockOf(error);
 	          // Every heartbeat failure means authority could not be established.
 	          // Stop before classifying the message: authentication, entitlement,
@@ -250,6 +284,31 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     // Read once, so the cleanup ends the gesture this mount owned rather than whatever the ref
     // happens to hold by the time it runs.
     const surfaceGesture = surfaceGestureRef.current;
+    const recovery = recoveryRef.current.budget;
+    sourceSequenceRef.current += 1;
+    const sourceKey = `${lessonID}#${sourceSequenceRef.current}`;
+    recovery.bind(sourceKey);
+    const resume = resumeRef.current?.lessonID === lessonID ? resumeRef.current : null;
+
+    const refreshAuthorization = () => {
+      if (!active) return;
+      const decision = recovery.begin(sourceKey);
+      if (decision === "ignore") return;
+      resumeRef.current = {
+        lessonID, position: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+        playing: !video.paused && !video.ended,
+      };
+      if (decision === "exhausted") {
+        video.pause();
+        setPlayback(null);
+        setFailed(true);
+        return;
+      }
+      leaseSessionRef.current = null;
+      video.pause();
+      setPlayback(null);
+      setAttempt((value) => value + 1);
+    };
 
     const syncMediaState = () => {
       if (!active) return;
@@ -287,16 +346,21 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     waitingEvents.forEach((eventName) => video.addEventListener(eventName, mediaWaiting));
     readyEvents.forEach((eventName) => video.addEventListener(eventName, mediaReady));
 
-    // The element's own `error` event is the authoritative signal that this Lesson has no
-    // playable media, so genuine media failure still reaches the unavailable state even though a
-    // rejected `play()` no longer does.
+    // Native HLS does not expose the failing segment's HTTP status. A terminal
+    // element error uses the same bounded authorization refresh as hls.js expiry.
     const mediaFailed = () => {
-      if (active) setFailed(true);
+      if (active) refreshAuthorization();
     };
     video.addEventListener("error", mediaFailed);
+    // Resume is an explicit opportunity to renew an expired capability. This
+    // also covers native HLS implementations that only report a stalled stream.
+    const resumeAfterExpiry = () => {
+      if (active && Date.parse(playback.expires_at) <= Date.now()) refreshAuthorization();
+    };
+    video.addEventListener("play", resumeAfterExpiry);
+    video.addEventListener("waiting", resumeAfterExpiry);
+    video.addEventListener("stalled", resumeAfterExpiry);
 
-    sourceSequenceRef.current += 1;
-    const sourceKey = `${lessonID}#${sourceSequenceRef.current}`;
     // A new source always returns the Student to Auto: a manual pin belongs to the media it was
     // chosen for and must not carry into the next Lesson.
     setQuality(sourceReplaced(sourceKey));
@@ -322,11 +386,22 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
       setQuality((current) => levelSwitched(current, data.level, sourceKey));
     };
 
+    const hlsFailed = (_event: unknown, error: ErrorData) => {
+      if (!active || !error.fatal) return;
+      if (isExpiredHLSError(error, playback.expires_at)) refreshAuthorization();
+      else {
+        video.pause();
+        setPlayback(null);
+        setFailed(true);
+      }
+    };
+
     if (Hls.isSupported()) {
       hls = new Hls();
       hlsRef.current = hls;
       hls.on(Hls.Events.MANIFEST_PARSED, levelsParsed);
       hls.on(Hls.Events.LEVEL_SWITCHED, levelDidSwitch);
+      hls.on(Hls.Events.ERROR, hlsFailed);
       hls.loadSource(playback.manifest_url);
       hls.attachMedia(video);
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -338,26 +413,35 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     }
 
     const seekToSavedPosition = () => {
-      const savedPosition = clampMediaValue(initialPositionSeconds, Number.isFinite(video.duration) ? video.duration : 0);
+      const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
+      const savedPosition = resume
+        ? clampMediaValue(resume.position, mediaDuration)
+        : clampMediaValue(initialPositionSeconds, mediaDuration);
       if (savedPosition > 0) video.currentTime = savedPosition;
       // The rate the Student was already watching at is re-applied to the new element rather than
       // reset, and `ratechange` reports back whatever it actually took.
       setMediaPlaybackRate(video, playbackRateRef.current);
       syncMediaState();
+      if (resume?.playing) void video.play().catch(() => {});
     };
     video.addEventListener("loadedmetadata", seekToSavedPosition, { once: true });
 
     return () => {
       active = false;
+      recovery.unbind(sourceKey);
       video.pause();
       video.removeEventListener("loadedmetadata", seekToSavedPosition);
       mediaEvents.forEach((eventName) => video.removeEventListener(eventName, syncMediaState));
       waitingEvents.forEach((eventName) => video.removeEventListener(eventName, mediaWaiting));
       readyEvents.forEach((eventName) => video.removeEventListener(eventName, mediaReady));
       video.removeEventListener("error", mediaFailed);
+      video.removeEventListener("play", resumeAfterExpiry);
+      video.removeEventListener("waiting", resumeAfterExpiry);
+      video.removeEventListener("stalled", resumeAfterExpiry);
       if (hls) {
         hls.off(Hls.Events.MANIFEST_PARSED, levelsParsed);
         hls.off(Hls.Events.LEVEL_SWITCHED, levelDidSwitch);
+        hls.off(Hls.Events.ERROR, hlsFailed);
         hls.destroy();
       }
       if (hlsRef.current === hls) hlsRef.current = null;
@@ -614,6 +698,11 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
       >
         <AlertCircle aria-hidden className="size-6 text-muted-foreground" />
         <p className="text-sm font-semibold text-foreground">{labels.unavailable}</p>
+        <button type="button" data-testid="lesson-playback-retry"
+          onClick={() => { recoveryRef.current.budget.reset(); setAttempt((value) => value + 1); }}
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background">
+          {labels.blockedRetry}
+        </button>
       </div>
     );
   }

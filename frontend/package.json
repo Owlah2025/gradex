@@ -11,13 +11,14 @@
     "typecheck": "tsc --noEmit",
     "legal:generate": "node scripts/generate-legal-content.mjs",
     "legal:check": "node scripts/generate-legal-content.mjs --check",
-    "test": "GRADEX_E2E_TMP_DIR=/tmp npm run legal:check && rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && GRADEX_E2E_TMP_DIR=/tmp NODE_PATH=./node_modules node --test ../.frontend-test-build/",
+    "test": "GRADEX_E2E_TMP_DIR=/tmp npm run legal:check && rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && GRADEX_E2E_TMP_DIR=/tmp NODE_PATH=./node_modules node --test $(find ../.frontend-test-build -type f -name '*.test.js' -print | sort)",
     "test:s2-ui": "node scripts/verify-s2-taxonomy-ui.mjs",
     "test:e2e": "playwright test",
     "test:e2e:canonical": "node scripts/e2e-canonical.mjs",
     "test:e2e:development": "playwright test",
     "test:e2e:production": "GRADEX_E2E_FRONTEND_MODE=production playwright test",
     "test:e2e:release": "playwright test e2e/s11-release-acceptance.spec.ts --workers=1",
+    "test:e2e:playback-recovery": "playwright test --config=playwright.playback-recovery.config.ts",
     "test:e2e:media-authoring": "playwright test --config=playwright.media-authoring.config.ts"
   },
   "dependencies": {
