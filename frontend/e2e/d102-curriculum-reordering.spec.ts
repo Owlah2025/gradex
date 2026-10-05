@@ -81,10 +81,21 @@ async function openCurriculum(page: Page, locale: "en" | "ar", viewport?: { widt
 
 async function keyboardMove(page: Page, testID: string, times: number, direction: "ArrowUp" | "ArrowDown") {
   const handle = page.getByTestId(testID);
+  const orderResponse = page.waitForResponse((response) =>
+    response.request().method() === "PATCH" && response.url().includes("/order"),
+  );
+  const announcements = page.locator('[id^="DndLiveRegion-"]');
   await handle.focus();
   await handle.press("Space");
-  for (let index = 0; index < times; index += 1) await handle.press(direction);
+  await expect(handle).toHaveAttribute("aria-pressed", "true");
+  for (let index = 0; index < times; index += 1) {
+    const beforeMove = await announcements.allTextContents();
+    await handle.press(direction);
+    await expect.poll(() => announcements.allTextContents()).not.toEqual(beforeMove);
+  }
   await handle.press("Space");
+  await expect(handle).not.toHaveAttribute("aria-pressed", "true");
+  expect((await orderResponse).ok()).toBe(true);
   await expect(handle).toBeFocused();
 }
 
@@ -123,9 +134,9 @@ test("D-102 keyboard section and same-section lesson order persists across reloa
   await openCurriculum(page, "en");
   await keyboardMove(page, `section-drag-handle-${sectionIDs[2]}`, 2, "ArrowUp");
   await expect(page.getByTestId("curriculum-order-state")).toContainText("Order saved");
-  expect(await visibleSectionOrder(page)).toEqual([`section-${sectionIDs[2]}`, `section-${sectionIDs[0]}`, `section-${sectionIDs[1]}`]);
+  await expect.poll(() => visibleSectionOrder(page)).toEqual([`section-${sectionIDs[2]}`, `section-${sectionIDs[0]}`, `section-${sectionIDs[1]}`]);
   await keyboardMove(page, `lesson-drag-handle-${lessonIDs[2]}`, 1, "ArrowUp");
-  expect(await visibleLessonOrder(page)).toEqual([`lesson-${lessonIDs[0]}`, `lesson-${lessonIDs[2]}`, `lesson-${lessonIDs[1]}`]);
+  await expect.poll(() => visibleLessonOrder(page)).toEqual([`lesson-${lessonIDs[0]}`, `lesson-${lessonIDs[2]}`, `lesson-${lessonIDs[1]}`]);
   await page.reload();
   await openCurriculum(page, "en");
   expect(await visibleSectionOrder(page)).toEqual([`section-${sectionIDs[2]}`, `section-${sectionIDs[0]}`, `section-${sectionIDs[1]}`]);

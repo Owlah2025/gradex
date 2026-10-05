@@ -440,6 +440,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     // 27. AD07: the Admin manages the resulting grant from its queue row.
     // No entitlement, enrollment, Course or Student identifier is typed.
     await adminPage.reload();
+    await expect(adminPage.locator("h1")).toContainText("Course access");
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(
+      STUDENT_A_EMAIL,
+      { timeout: 15_000 },
+    );
     const manageAccess = adminPage.locator(`tr:has-text("${STUDENT_A_EMAIL}") button:has-text("Manage access")`);
     await expect(manageAccess).toBeVisible();
     await manageAccess.click();
@@ -539,12 +544,16 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     const invId = await invitationIdFromRow(adminPage, rejectTargetEmail);
 
     // Invalid token returns 403 and creates no entitlement
+    // Student B owns a seeded expired record for this course. The invalid token must not
+    // mutate that pre-existing state; absence is not the invariant this journey can prove.
+    const beforeBadAccept = queryLearningState(STUDENT_B_ID, COURSE_ID);
+    expect(beforeBadAccept.entitlement.found).toBe(true);
     const badAccept = await request.post(`/api/v1/me/course-access-invitations/${invId}/accept`, {
       data: { acceptance_token: "invalid-token-secret" },
     });
     expect(badAccept.status()).toBe(403);
     const badState = queryLearningState(STUDENT_B_ID, COURSE_ID);
-    expect(badState.entitlement.found).toBe(false);
+    expect(badState).toEqual(beforeBadAccept);
 
     await adminContext.close();
   });
