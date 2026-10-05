@@ -45,7 +45,7 @@ func createRequestAPI(t *testing.T, e *t4bEnv, courseID, code string) map[string
 			"institution_id": e.institutionID, "course_id": courseID,
 			"proposed_official_code": code,
 			"proposed_title_ar":      "مادة مطلوبة", "proposed_title_en": "Requested Subject",
-			"note": "Needed for this Course",
+			
 		})
 	if status != http.StatusCreated {
 		t.Fatalf("request create status = %d; body %s", status, raw)
