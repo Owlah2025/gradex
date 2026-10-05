@@ -167,4 +167,7 @@ func TestLessonFileAttachmentRetryConvergesAndWrongKindDoesNotMutateVideo(t *tes
 	if got := selectedLessonVideo(t, f, candidate.ID); got != f.videoOld {
 		t.Fatalf("wrong-kind mutation changed selected video: %s", got)
 	}
+	if err := f.validator.ValidateLessonVideoForPublication(f.ctx, f.resourceNew); !errors.Is(err, ErrAssetVersionNotReady) {
+		t.Fatalf("publication admitted a READY resource as video: %v", err)
+	}
 }
