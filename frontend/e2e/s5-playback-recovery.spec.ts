@@ -51,7 +51,16 @@ test("paused playback crosses real capability expiry, resumes its position and p
   expect(refreshed.playback_session).not.toBe(first.playback_session);
   await expect.poll(() => page.evaluate(() => document.querySelector("video")?.currentTime ?? 0)).toBeGreaterThan(8.5);
   await expect(page.getByTestId("lesson-media-unavailable")).toHaveCount(0);
-  await expect.poll(() => queryProgress(progressQuery).max_position_seconds).toBeGreaterThanOrEqual(8);
+  await page.evaluate(() => {
+    const video = document.querySelector("video")!;
+    video.pause();
+    video.currentTime = 10;
+    video.dispatchEvent(new Event("seeked"));
+  });
+  // Prove the replacement player's reporter persists new progress, beyond
+  // the old source's checkpoint; retaining the old maximum alone is insufficient.
+  await expect.poll(() => queryProgress(progressQuery).position_seconds).toBeCloseTo(10, 0);
+  await expect.poll(() => queryProgress(progressQuery).max_position_seconds).toBeGreaterThanOrEqual(10);
 
   // A delayed release of the old lease cannot revoke the refreshed player.
   const oldRelease = await leaseRequest("/api/v1/media/playback-releases", first.playback_session);
@@ -67,6 +76,7 @@ test("paused playback crosses real capability expiry, resumes its position and p
   await expect.poll(async () => {
     return (await leaseRequest("/api/v1/media/playback-heartbeats", refreshed.playback_session)).code;
   }).toBe("PLAYBACK_LEASE_LOST");
+  expect(queryProgress(progressQuery).position_seconds).toBeCloseTo(10, 0);
 });
 
 test("real storage segment 403s exhaust recovery and an explicit retry can play", async ({ context, page }, testInfo) => {
@@ -79,10 +89,18 @@ test("real storage segment 403s exhaust recovery and an explicit retry can play"
   });
   const failureFile = process.env.GRADEX_E2E_SEGMENT_FAILURE_FILE;
   expect(failureFile, "the recovery lane owns its local storage failure marker").toBeTruthy();
+  await page.goto(lessonPath);
+  await page.waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 2);
+  await page.evaluate(() => {
+    const video = document.querySelector("video")!;
+    video.pause();
+    video.currentTime = 12;
+  });
   fs.writeFileSync(failureFile!, "deny", { flag: "wx" });
   try {
-    await page.goto(lessonPath);
-    await page.getByRole("button", { name: "Play", exact: true }).click();
+    // A failed source can have no metadata at all. Repeated failures must
+    // preserve the last watch position until a replacement can actually seek.
+    await page.evaluate(() => document.querySelector("video")!.dispatchEvent(new Event("error")));
     await expect.poll(() => refusedSegments, { timeout: 20_000 }).toBeGreaterThan(0);
     await expect(page.getByTestId("lesson-media-unavailable")).toBeVisible({ timeout: 90_000 });
     expect(refusedSegments).toBeGreaterThanOrEqual(3);
@@ -92,6 +110,8 @@ test("real storage segment 403s exhaust recovery and an explicit retry can play"
     fs.unlinkSync(failureFile!);
     await page.getByTestId("lesson-playback-retry").click();
     await page.waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 2);
+    await expect.poll(() => page.evaluate(() => document.querySelector("video")?.currentTime ?? 0)).toBeCloseTo(12, 0);
+    expect(await page.evaluate(() => document.querySelector("video")!.paused)).toBe(true);
     expect(authorizations).toBe(4);
   } finally {
     fs.rmSync(failureFile!, { force: true });

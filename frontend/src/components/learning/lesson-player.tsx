@@ -289,14 +289,17 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     const sourceKey = `${lessonID}#${sourceSequenceRef.current}`;
     recovery.bind(sourceKey);
     const resume = resumeRef.current?.lessonID === lessonID ? resumeRef.current : null;
+    let positionRestored = false;
 
     const refreshAuthorization = () => {
       if (!active) return;
       const decision = recovery.begin(sourceKey);
       if (decision === "ignore") return;
       resumeRef.current = {
-        lessonID, position: Number.isFinite(video.currentTime) ? video.currentTime : 0,
-        playing: !video.paused && !video.ended,
+        lessonID,
+        position: positionRestored && Number.isFinite(video.currentTime)
+          ? video.currentTime : resume?.position ?? initialPositionSeconds,
+        playing: !positionRestored && resume ? resume.playing : !video.paused && !video.ended,
       };
       if (decision === "exhausted") {
         video.pause();
@@ -425,6 +428,7 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         ? clampMediaValue(resume.position, mediaDuration)
         : clampMediaValue(initialPositionSeconds, mediaDuration);
       if (savedPosition > 0) video.currentTime = savedPosition;
+      positionRestored = true;
       // The rate the Student was already watching at is re-applied to the new element rather than
       // reset, and `ratechange` reports back whatever it actually took.
       setMediaPlaybackRate(video, playbackRateRef.current);
