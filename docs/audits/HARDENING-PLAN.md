@@ -3,39 +3,39 @@
 ## Reconciled status
 
 This plan is aligned with [TECHNICAL-AUDIT-2026-10.md](TECHNICAL-AUDIT-2026-10.md)
-at committed `HEAD` `7e0c3287faea17312c3e9ef2409df9dce8bfabd5`. The original
+after the 2026-10-06 independent rejection and blocking-finding repairs. The original
 audit base was `45e66f0550e3d0c6ec436bd2e9357f2de28ee33c`.
 
-The repository has unrelated uncommitted and untracked worktree changes. They
-remain preserved and are not closure evidence for this plan. This document is a
+Valid prior work was inspected and continued; unrelated run artifacts remain
+preserved. Exact checkout gates are in the
+[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md). This document is a
 prioritized plan, not authorization to start another implementation batch.
 
 Current decision:
 
 - No Sev1 was established.
-- Two P0 Sev2 findings remain open: **A4-001 residual User 360 nested pool
-  acquisition** and **A5-001 Student HLS expiry recovery**.
+- **A4-001**, **A5-001**, and **CAT-01** have committed repairs and targeted
+  regression evidence; the repaired tree needs a fresh independent review.
 - The cross-course media/lesson binding, Admin lockout, metadata admission, and
   the primary durable resumable-upload deliverable are repaired in committed
   history.
-- Local backend/frontend/integration/E2E gate results are recorded in
-  [`GATES-1.md`](../../.hardening-campaign/reports/GATES-1.md), but they are not
-  independent final approval. Production R2/scanner behavior, manual
+- The original `GATES-1.md` claim of a green committed SHA was rejected and is
+  withdrawn as closure evidence. Use the tracked repair record for new gates.
+  Local passes are not independent final approval. Production R2/scanner behavior, manual
   acceptance, and deployment authority remain separate.
 
 ## P0 — correctness and security blockers
 
-### P0.1 Close A4-001: User 360 connection ownership
+### P0.1 Repaired A4-001: User 360 connection ownership
 
 Invariant: work holding a PostgreSQL connection must not acquire another
 connection from the same pool before it can finish.
 
-Current state: `2403118` repaired Student course-summary/course-metadata reads
-and media-dispatch row retention, but `GetUser360` still calls
-`DeviceService.AdminOverview` through a pool-backed dependency while its User 360
-transaction is open (`backend/internal/admin/user360_read.go` and
-`backend/internal/identity/device_admin.go`). A one-connection pool can still
-block this path.
+Repair: `3ddcbf6` passes the User 360 transaction to
+`DeviceService.AdminOverviewInTransaction` for history and cooldown. Earlier
+course-query and media-dispatch repairs are preserved. The bounded saturated
+pool test uses the real device service and proves audit rollback as well as
+successful reads. The following requirements are retained as review criteria.
 
 Required repair:
 
@@ -54,17 +54,21 @@ Required regression evidence:
 - Device history, privileged-read audit, and failure rollback remain correct.
 - `go test -race` and the canonical backend integration gate pass.
 
-### P0.2 Close A5-001: Student signed-URL expiry recovery
+### P0.2 Repaired A5-001: Student signed-URL expiry recovery
 
 Invariant: an authorized Student who pauses longer than the segment-signature
 window either resumes playback after re-authorization or receives a bounded,
 recoverable error; the player must not spin indefinitely or bypass the API
 authorization decision.
 
-Current state: `frontend/src/components/learning/lesson-player.tsx` has no
-`Hls.Events.ERROR` handler or fresh playback-authorization path. The separate
-protected HLS player handles fatal errors, so this is a concrete Student-player
-gap rather than a provider assumption.
+Repair: `2edd386` handles fatal HLS authorization errors, expired delivery,
+and native media errors with at most two automatic authorizations per lesson.
+It fences stale callbacks, tears down listeners, restores position, and keeps
+session/device/entitlement/lease checks. Explicit retry resets the budget.
+Three short-expiry browser tests cover real expired delivery, persisted
+progress and lease release, exhaustion/retry, and media-element recovery.
+The following requirements are retained as review criteria; actual Safari
+and production-provider acceptance remain separate from Chromium evidence.
 
 Required repair:
 
@@ -95,6 +99,8 @@ new evidence:
 
 | Finding / deliverable | Committed repair and regression evidence |
 |---|---|
+| CAT-01 catalog fixtures, publication asset state, and CI omission | `a227226` creates owned media with trusted scan/processing evidence, locks logical asset and version during publication, and includes catalog/admin in CI. Exact regression proof is in the repair record. |
+| False committed-head gate evidence | The test runner enumerates compiled test files, formatting is corrected, strict JSON and real-media fixtures retain refusal/persistence assertions, and fresh gates use a detached committed checkout. |
 | A1-001 / A2-001 media attachment ownership and kind | `2403118`, migrations `0054` and `0057`, `backend/internal/catalog/media_binding_hardening_integration_test.go`, and the recorded integration gate. |
 | A1-002 / A2-002 lesson binding and upload quota isolation | `2403118`, `2ece442`, multipart initialization tests, and the real-MinIO ownership/recovery run. Legacy single-PUT reservation cleanup remains P1/P2 work. |
 | A3-001 / A2-008 last active Admin race | `2403118` and the identity suspension integration suite; active Admin rows are serialized with `FOR UPDATE`. |
@@ -103,7 +109,7 @@ new evidence:
 
 ## P1 — robustness required before serious paid usage
 
-P1 work must not displace the two P0 closures. Each item needs a source-backed
+P1 work must not displace final-review repair verification. Each item needs a source-backed
 regression and a clear failure/rollback path.
 
 ### P1.1 Complete the security boundary

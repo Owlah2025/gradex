@@ -4,19 +4,19 @@
 
 The A0–A7 audit was originally performed against campaign base
 `45e66f0550e3d0c6ec436bd2e9357f2de28ee33c`. This reconciliation covers the
-committed repair range through `7e0c3287faea17312c3e9ef2409df9dce8bfabd5`
-(`HEAD` on 2026-10-06).
+repair work after the independent rejection of `16aa3c2` on 2026-10-06.
+The exact frozen software revision and fresh checkout gates are recorded in
+[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md).
 
-The repository currently has additional uncommitted and untracked worktree
-changes. They are user-owned, were preserved, and are not counted as a repair,
-approval, or regression reference below. The status in this document is the
-status of committed `HEAD`; the exact worktree state must be inspected before
-any later implementation or release decision.
+Valid prior fixture and UI repairs were inspected and continued; unrelated run
+logs and temporary review artifacts remain preserved. Only committed changes
+and explicitly identified run artifacts count as repair evidence.
 
-Primary evidence is in the [A0–A7 campaign reports](../../.hardening-campaign/reports/),
-the [release-gate record](../../.hardening-campaign/reports/GATES-1.md), and the
+The A0–A7 runtime reports are under `.hardening-campaign/reports/`. Primary
+tracked evidence is the final-review repair record above and the
 [media-recovery repair evidence](evidence/2026-10-05-media-recovery-repair.md).
-The gate record is evidence of recorded local runs, not independent review.
+The original `GATES-1.md` claim of a green committed SHA was rejected: it mixed
+working-tree changes with committed code. It is withdrawn as closure evidence.
 No production deployment, production database mutation, external-provider
 acceptance, or manual production acceptance is claimed here.
 
@@ -25,18 +25,22 @@ acceptance, or manual production acceptance is claimed here.
 - No Sev1 was established by the source-backed A0–A7 audit.
 - The original P0 findings for media ownership, upload lesson binding, Admin
   lockout, and metadata body limits are repaired in the committed tree. The
-  connection-ownership repair is partial: course-summary/metadata reads and
-  media dispatch are corrected, but User 360 still reads device history through
-  a pool-backed dependency while its transaction is open.
+  User 360 device-history and cooldown reads now use its existing transaction;
+  one-connection and saturated-pool regressions preserve history and audit
+  rollback. Media dispatch retains its corrected connection ownership.
 - The resumable-upload deliverable is implemented for the Instructor video,
   resource, and public-preview workflows. It has durable server state, direct
   multipart storage transfer, retry/resume behavior, cancellation, cleanup,
   and recovery evidence. Small thumbnails and Admin catalogue loads still use
   the legacy single-object path; that path is not described as multipart.
-- Two launch-blocking Sev2 findings remain: **A4-001, a residual User 360
-  nested pool acquisition**, and **A5-001, Student HLS playback can stall
-  silently after a signed segment URL expires**. The current Student player has
-  no `Hls.Events.ERROR` recovery path or re-authorization loop.
+- **A4-001 and A5-001 are repaired.** The Student player handles fatal HLS
+  authorization failures and native media errors with bounded reauthorization,
+  restores position, and retains the normal session/device/entitlement/lease
+  authority. Short-expiry browser tests verify progress and lease persistence.
+- **CAT-01 is repaired.** Catalog fixtures use actual owned media versions and
+  trusted processing evidence. Publication validates and locks the logical
+  asset as well as its version, including retirement and kind. CI now includes
+  the catalog suite.
 - The independent final campaign review, production R2/scanner acceptance,
   and manual production acceptance remain separate gates and are not satisfied
   by this document.
@@ -119,25 +123,44 @@ R2 or production-scanner acceptance.
 
 | Finding | Severity / priority at base | Current status and evidence | Launch blocker | Scale blocker |
 |---|---|---|---|---|
-| A1-001 / A2-001 — cross-course or wrong-kind lesson media attachment | Sev2 / P0 | **Fixed.** `2403118` added transactional binding checks; migrations `0054` and `0057` add course-keyed relationship enforcement. Regression coverage is in `backend/internal/catalog/media_binding_hardening_integration_test.go`; the recorded integration gate is in `GATES-1.md`. | No, subject to the remaining gate authority | No for this defect; structural constraints are now the scale-safe guard |
+| A1-001 / A2-001 — cross-course or wrong-kind lesson media attachment | Sev2 / P0 | **Fixed.** `2403118` added transactional binding checks; migrations `0054` and `0057` add course-keyed relationship enforcement. `a227226` repairs fixture setup and proves wrong owner/course/lesson/kind denials, unchanged selection/audit, and direct SQL refusal. | No, subject to remaining review authority | No for this defect |
 | A1-002 / A2-002 — arbitrary lesson binding and quota interference | Sev2 / P0 | **Fixed for the committed upload paths.** The lesson/course relationship is checked before persistence and multipart initialization, and quota reservations are tied to the authorized binding. Multipart abandonment/cancellation releases the new path’s reservation. Evidence: `2403118`, `2ece442`, `multipart_initialization_integration_test.go`, and the real-MinIO recovery record. | No | No for the repaired path; legacy reservation cleanup remains a follow-up |
 | A3-001 / A2-008 — concurrent suspension can remove every Admin | Sev2 in A3 / Sev4 in A2; P0 hand-off | **Fixed in code.** `identity.SuspendAccount` locks all active Admin rows with `FOR UPDATE` before applying the threshold. The suspension integration suite and the recorded backend gate are the regression evidence. | No | No for this race |
-| A4-001 — nested pool acquisition / dispatcher connection retention | Sev2 / P0 | **Partially fixed; still open.** `2403118` changed Student course summaries/course metadata to use the User 360 transaction and changed the media dispatcher to drain discovery rows before receipts. `backend/internal/admin/user360_read.go:195,332` still calls `DeviceService.AdminOverview`, whose `backend/internal/identity/device_admin.go:43` queries the pool directly while User 360 holds its transaction. | **Yes, until the device read is transaction-safe or moved outside the transaction** | Yes |
+| A4-001 — nested pool acquisition / dispatcher connection retention | Sev2 / P0 | **Fixed.** `3ddcbf6` routes device history and cooldown through the User 360 transaction. The bounded `MaxConns=1/2` integration regression asserts concurrent completion, history, audits, and rollback. Earlier course-query and dispatcher fixes are retained. | No after repair; independent review pending | No for this defect |
+| A5-001 — Student playback expiry stall | Sev2 / P0 | **Fixed.** `2edd386` adds HLS/native recovery, two automatic refreshes, stale-callback fencing, teardown, and explicit retry. Runtime helper tests and short-expiry browser tests prove recovery, progress, exhaustion, and lease release. | No after repair; independent review pending | No for this defect |
+| CAT-01 — catalog fixture failures and publication asset race | Sev2 / P0 | **Fixed.** `a227226` replaces invalid legacy attachment fixtures with real media and trusted processing. Publication checks kind/retirement and locks both asset and version; catalog is in CI. See detailed proof below. | No after repair; independent review pending | No for this race |
 | A4-003 — unbounded authenticated metadata JSON | Sev2 / P0 | **Fixed in code.** `bindStrictJSON` applies bounded, single-document, unknown-field-rejecting decoding; the documented admission bound is 64 KiB on the critical metadata routes. `binding_test.go` covers malformed/ambiguous bodies and the backend gate passed. | No | No for the original body-amplification path |
 | A0-RESUMABLE / A4-005 / A5-008 — non-resumable large Instructor upload | P0 deliverable; Sev3 / P1 in A4/A5 | **Implemented and focused-tested.** Commits `d8f001d`, `2ece442`, `4b67773`, and `6f40d07` complete the durable multipart workflow and repair the recovery fixture. The remaining provider-lock and cleanup-fairness risks are listed below. | No separate upload blocker remains | Yes, for the follow-ups below |
 | A6-001 — `IDENTITY_OTP_PEPPER` local bootstrap | Sev3, local tooling only | **Fixed.** `3ee02d8` generates the pepper on fresh and upgrade paths in `deploy/scripts/environment.sh`. This never established a production defect. | No | No |
-| A6-002 / A6-003 — blocking/large migration work | Sev2 / launch and scale risk | **Fixed in the committed migration chain.** `b30abc1` batches the completion backfill and moves the email index to a standalone `CREATE INDEX CONCURRENTLY` migration. Migration safety scenarios are recorded as passing in `GATES-1.md`; live production data compatibility is still a release gate. | No local campaign blocker remains | No for the identified migration mechanisms |
+| A6-002 / A6-003 — blocking/large migration work | Sev2 / launch and scale risk | **Fixed in the committed migration chain.** `b30abc1` batches the completion backfill and moves the email index to a standalone `CREATE INDEX CONCURRENTLY` migration. Fresh migration gate evidence is in the repair record; live data compatibility remains a release gate. | No local campaign blocker remains | No for the identified migration mechanisms |
 | A6-004 and the corresponding A4-007 outbox scan risk | Sev2 in A6 / Sev3 P2 in A4 | **Bounded/mitigated.** `b30abc1` adds a 14-day discovery horizon and releases media discovery connections before dispatch. A durable per-consumer watermark and measured plan evidence remain useful scale work. | No | Yes for large retained histories |
 | A7-001 — false-green mutation and localization assertions | Sev3 / P1 | **Partially fixed.** `b30abc1`, `3ee02d8`, `6f40d07`, and `8a37d70` strengthen persistence proofs, Admin audit assertions, Arabic heading geometry, conditional schema assertions, and resumable fixture independence. The remaining coverage gaps are explicit below. | No | No direct runtime scale blocker |
 
 ### Open findings and residual risks
 
-#### P0 correctness/security blockers still open
+#### Final-review P0 repair proof
 
-| Finding | Contract and current proof | Required evidence |
-|---|---|---|
-| **A4-001 — residual User 360 pool exhaustion (Sev2)** | `GetUser360` holds a transaction while `queryStudentUser360` calls `readDevices`; `readDevices` delegates to `DeviceService.AdminOverview`, which acquires another pool connection. A one-connection pool can still block this path. The course-summary/metadata portion and media dispatcher row-retention portion were repaired by `2403118`, but the original invariant is broader. | Add a transaction-compatible device overview query or intentionally close the User 360 transaction before the device read while preserving the privileged-read audit contract. Run a one-connection regression and a barrier-controlled concurrent request test. |
-| **A5-001 — Student HLS playback expiry stall (Sev2)** | `frontend/src/components/learning/lesson-player.tsx` subscribes to manifest/level events but has no `Hls.Events.ERROR` handler that distinguishes an expired 401/403, requests a fresh playback authorization, reloads the application manifest, and seeks back to the prior position. The separate `protected-hls-player.tsx` has a fatal-error handler, so the inconsistency is concrete. The current failure mode is a drained buffer followed by a non-recoverable buffering state. | Add bounded re-authorization/reload for fatal network expiry, preserve lease and account authority, cover native Safari HLS, and add a short-expiry Playwright regression plus a unit state-machine test. Until that evidence exists, this remains a launch blocker. |
+The four blocking review findings have source-backed repairs and regression
+evidence in the linked repair record. Independent approval has not been granted
+by this implementation task.
+
+**CAT-01 supplement — logical asset publication integrity.** Severity Sev2;
+subsystem catalog/media; invariant: publication must validate current video
+kind and retirement and serialize conflicting changes. Replacing invalid
+fixtures exposed that the READY branch in `ValidateLessonVideoForPublication`
+ignored `media_assets.retired_at` and locked only `media_asset_versions`.
+An authorized retirement could therefore race publication; larger concurrent
+review/authoring workloads increase its reachability. This is an integrity
+failure, not an unauthenticated exploit. The existing
+`TestD5ApprovalRevalidatesEveryDependencyClass` and
+`TestD5ApprovalDependencyLocksSerializeConflictingWrites`, changed to mutate
+the actual logical asset, reproduced acceptance of a retired video and an
+escaping concurrent writer. `validateLessonVideoAsset` now checks both kinds,
+retirement, and uses `FOR SHARE OF mav, ma` inside publication transactions.
+Required regressions cover READY resources, retired assets, concurrent
+retirement, publication rollback, and supported legacy-only validation.
+Launch blocker before repair: yes; scale blocker before repair: yes. Both
+are repaired locally; frozen-range independent review remains required.
 
 #### P1 robustness required before serious paid usage
 
@@ -185,8 +208,8 @@ These remain source-backed findings from the A1–A5 reports; no later committed
 | A1 data integrity | The verified cross-course media/lesson-binding blockers are repaired structurally. Progress/completion, entitlement provenance/scope, deletion conflicts, and hierarchy concurrency remain. |
 | A2 security/privacy | Cross-Instructor media attachment and upload-binding IDORs are repaired and protected delivery already fails closed. CSRF consistency, route-sweep completeness, headers, ownership-reassignment media authority, and low-severity oracles remain. |
 | A3 transactions/concurrency | The Admin lockout race and major media retry/convergence paths are repaired. Cross-subsystem lock ordering, email claim/retry, purchase provenance, legacy upload reservations, and academic write skew remain. |
-| A4 scale/async | Media-dispatch row retention, most User 360 course reads, and metadata admission are repaired; the User 360 device read still has a nested pool path. Multipart reduces browser memory/retransmission risk. Request deadlines, legacy completion locks, worker queue fairness/resource isolation, projections/indexes, and cleanup fairness remain. |
-| A5 frontend/API | Resumable UI recovery is present for the primary Instructor flows. The Student signed-URL expiry stall remains P0; session, heartbeat, error, localization, and ordinary mutation recovery findings remain. |
+| A4 scale/async | Media-dispatch row retention, User 360 transaction ownership, and metadata admission are repaired. Multipart reduces browser memory/retransmission risk. Request deadlines, legacy completion locks, worker queue fairness/resource isolation, projections/indexes, and cleanup fairness remain. |
+| A5 frontend/API | Resumable Instructor recovery and bounded Student signed-URL reauthorization are present. Session, heartbeat retry, error localization, and ordinary mutation recovery findings remain. |
 | A6 infrastructure/recovery | Local OTP bootstrap, migration batching/concurrent index creation, and outbox scan bounds are repaired. Worker readiness, provider-specific production acceptance, backups/restore and release gates remain operational authorities outside this audit closure. |
 | A7 false greens | Key Admin, Arabic-heading, schema-shape, mutation-persistence, and multipart recovery assertions were strengthened. The authorization matrix omissions and explicit `test.fixme` remain. |
 
@@ -197,19 +220,18 @@ This is qualitative; the repository contains no benchmark proving capacity at
 
 | Workload | Evidence-backed expectation |
 |---|---|
-| ~1k accounts | Small reads may remain manageable, but the unresolved Student expiry path, request deadline gaps, legacy completion lock duration, and email/transcode behavior are already reachable under concurrency. |
+| ~1k accounts | Small reads may remain manageable, but request deadline gaps, legacy completion lock duration, and email/transcode behavior are already reachable under concurrency. |
 | ~10k accounts | Course-first indexes, roster/analytics aggregation, outbox history, progress completion checks, and account projections become measurement priorities. |
 | ~100k accounts | Global analytics, retained history discovery, deep pagination, connection budgets, rollups, and queue/resource isolation require measured plans and explicit backpressure. |
-| High simultaneous viewing | HLS segments bypass the API through signed storage URLs, but authorization/manifests, Redis playback leases, heartbeats, and progress writes remain API/Redis/database work. A5-001 means long pauses remain a correctness risk until repaired. |
+| High simultaneous viewing | HLS segments bypass the API through signed storage URLs; authorization/manifests, Redis playback leases, heartbeats, and progress writes remain API/Redis/database work. Expiry recovery is bounded and reuses these authorities. |
 
 ## Recorded verification and authority boundary
 
-`GATES-1.md` records passing backend build/vet/race/integration/migration
-scenarios, frontend lint/typecheck/unit/build checks, release/media-authoring
-E2E, the standalone resumable-upload spec, and canonical E2E (641 passed, 3
-declared skips). It also records dependency vulnerability output and the
-repository’s intermittent C1 item. This audit does not rerun or elevate that
-record into independent approval. The campaign remains open until A4-001 and
-A5-001 are repaired and independently reviewed; production R2/scanner/manual
-acceptance is explicitly separate. The committed campaign is not complete while
-the two P0 findings above remain open.
+Use the [repair evidence](evidence/2026-10-06-final-review-repairs.md) for exact
+checkout identity, commands, outcomes, disposable infrastructure, and declared
+skips. The rejected `GATES-1.md` committed-head assertion is not closure proof.
+Local repair completion is distinct from overall campaign completion: a fresh
+independent final review must inspect the frozen tree and return APPROVE.
+Production R2/scanner/manual acceptance, migration 0054 legacy-ID preflight,
+and deployment authority remain explicitly separate. No production operation
+is authorized or performed by this task.
