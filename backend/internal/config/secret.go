@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,6 +31,13 @@ func NewSecret(value string) Secret { return Secret{value: value} }
 // hand the value to something that needs it — a driver, a signer, a provider
 // client — and should hand it no further.
 func (s Secret) Expose() string { return s.value }
+
+// EqualString compares a candidate without handing the secret plaintext to
+// the caller. It is intended for protocol-token checks where the candidate is
+// already supplied as an untrusted string, such as a CSRF header.
+func (s Secret) EqualString(candidate string) bool {
+	return subtle.ConstantTimeCompare([]byte(s.value), []byte(candidate)) == 1
+}
 
 func (s Secret) IsEmpty() bool { return s.value == "" }
 

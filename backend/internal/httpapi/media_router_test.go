@@ -144,21 +144,20 @@ func (*mediaRouterStore) HashObjectVersion(context.Context, string, string) (str
 	return "", errors.New("handler reached test storage")
 }
 
-
 func (s *mediaRouterStore) CreateMultipartUpload(context.Context, string, string) (string, error) {
-    return "test-upload-id", nil
+	return "test-upload-id", nil
 }
 
 func (s *mediaRouterStore) PresignUploadPartURL(context.Context, string, string, int32, time.Duration) (string, error) {
-    return "https://test-bucket/part", nil
+	return "https://test-bucket/part", nil
 }
 
 func (s *mediaRouterStore) CompleteMultipartUpload(context.Context, string, string, []int32, []string) (string, error) {
-    return "test-etag", nil
+	return "test-etag", nil
 }
 
 func (s *mediaRouterStore) AbortMultipartUpload(context.Context, string, string) error {
-    return nil
+	return nil
 }
 func (s *mediaRouterStore) presignCallCount() int {
 	s.mu.Lock()

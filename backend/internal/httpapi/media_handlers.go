@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -111,7 +110,7 @@ func mountMediaUploadRoutes(content *gin.RouterGroup, h *mediaHandlers, sessions
 				writeProblem(c, problem.Unauthenticated())
 				return
 			}
-			if subtle.ConstantTimeCompare([]byte(view.CSRFToken.Expose()), []byte(c.GetHeader(csrfHeaderName))) != 1 {
+			if !view.CSRFToken.EqualString(c.GetHeader(csrfHeaderName)) {
 				writeProblem(c, problem.SessionCSRFFailed())
 				return
 			}

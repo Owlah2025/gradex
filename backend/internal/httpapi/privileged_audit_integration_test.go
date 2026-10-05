@@ -21,21 +21,21 @@ import (
 )
 
 type privilegedAuditFixture struct {
-	ctx                                    context.Context
-	client                                 *http.Client
-	engine                                 *gin.Engine
-	baseURL                                string
-	pool                                   *pgxpool.Pool
-	repo                                   *catalog.Repository
-	adminID, instructorID                  string
-	adminToken, instructorToken            string
-	courseID, revisionID                   string
-	sectionID, lessonID, fileID, termID    string
-	majorID, subjectID, videoID, previewID string
-	uploadVideoID                          string
-	uploadPreviewID                        string
-	thumbnailID                            string
-	bundleID                               string
+	ctx                                                 context.Context
+	client                                              *http.Client
+	engine                                              *gin.Engine
+	baseURL                                             string
+	pool                                                *pgxpool.Pool
+	repo                                                *catalog.Repository
+	adminID, instructorID                               string
+	adminToken, instructorToken                         string
+	courseID, revisionID                                string
+	sectionID, lessonID, fileID, termID                 string
+	majorID, subjectID, videoID, fileAssetID, previewID string
+	uploadVideoID                                       string
+	uploadPreviewID                                     string
+	thumbnailID                                         string
+	bundleID                                            string
 }
 
 type privilegedAuditExpectation struct {
@@ -284,7 +284,7 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 			)
 		}, status: http.StatusOK, action: "PREVIEW_UPLOAD_SELECTED", targetType: "COURSE_REVISION"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files": {prepare: prepareAuditLesson, body: func(f *privilegedAuditFixture) string {
-			return fmt.Sprintf(`{"kind":"RESOURCE","asset_version_id":%q,"display_name_ar":"ملف","display_name_en":"File"}`, f.videoID)
+			return fmt.Sprintf(`{"kind":"RESOURCE","asset_version_id":%q,"display_name_ar":"ملف","display_name_en":"File"}`, f.fileAssetID)
 		}, status: http.StatusCreated, action: "LESSON_FILE_ATTACHED", targetType: "LESSON_FILE"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files": {prepare: prepareAuditFile, body: func(f *privilegedAuditFixture) string { return `{"file_id":"` + f.fileID + `"}` }, status: http.StatusNoContent, action: "LESSON_FILE_DELETED", targetType: "LESSON_FILE"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/preview": {body: func(f *privilegedAuditFixture) string {
@@ -322,9 +322,8 @@ func newPrivilegedAuditFixture(t *testing.T) *privilegedAuditFixture {
 	if _, err := p.Exec(ctx, `INSERT INTO lessons (id, section_id, title, "order") VALUES ('10000000-0000-0000-0000-000000000011', '10000000-0000-0000-0000-000000000010', 'Asset source', 1)`); err != nil {
 		t.Fatalf("seeding ready video fixture: %v", err)
 	}
-	if _, err := p.Exec(ctx, `INSERT INTO videos (id, lesson_id, status) VALUES ('10000000-0000-0000-0000-000000000012', '10000000-0000-0000-0000-000000000011', 'READY')`); err != nil {
-		t.Fatalf("seeding ready video fixture: %v", err)
-	}
+	seedAuditVideoAsset(t, p, ctx, instructorID, courseID)
+	seedAuditResourceAsset(t, p, ctx, instructorID, courseID)
 	seedAuditPreviewAsset(t, p, ctx, instructorID, courseID, revisionID)
 	repo, err := catalog.NewRepository(p, testWriterForAuthoring(t))
 	if err != nil {
@@ -335,8 +334,92 @@ func newPrivilegedAuditFixture(t *testing.T) *privilegedAuditFixture {
 		adminID: adminID, instructorID: instructorID, adminToken: adminToken,
 		instructorToken: instToken,
 		courseID:        courseID, revisionID: revisionID, sectionID: sectionID,
-		videoID:   "10000000-0000-0000-0000-000000000012",
-		previewID: "10000000-0000-0000-0000-000000000014",
+		videoID:     "10000000-0000-0000-0000-000000000012",
+		fileAssetID: "10000000-0000-0000-0000-000000000020",
+		previewID:   "10000000-0000-0000-0000-000000000014",
+	}
+}
+
+func seedAuditVideoAsset(t *testing.T, p *pgxpool.Pool, ctx context.Context, ownerID, courseID string) {
+	t.Helper()
+	const (
+		assetID      = "10000000-0000-0000-0000-000000000016"
+		versionID    = "10000000-0000-0000-0000-000000000012"
+		scanID       = "10000000-0000-0000-0000-000000000017"
+		processingID = "10000000-0000-0000-0000-000000000018"
+	)
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, 'PROTECTED')
+	`, assetID, ownerID, courseID); err != nil {
+		t.Fatalf("seeding audit video asset: %v", err)
+	}
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'UPLOADED', $3, 'fixture-v1', 'video/mp4', 1024, repeat('a', 64))
+	`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding audit video version: %v", err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE media_asset_versions SET state = 'QUARANTINED' WHERE id = $1::uuid`, []any{versionID}},
+		{`UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, []any{versionID}},
+		{`INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity)
+		  VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'audit-fixture')`, []any{scanID, versionID, "scan:" + versionID}},
+		{`UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, []any{scanID, versionID}},
+		{`UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, []any{versionID}},
+		{`INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms)
+		  VALUES ($1::uuid, $2::uuid, $3, 'SUCCEEDED', 'audit/video', 1, 60000)`, []any{processingID, versionID, "process:" + versionID}},
+		{`INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		  VALUES ($1::uuid, '720p', 'audit/video/720p/playlist.m3u8', 1280, 720, 2800, 60000)`, []any{versionID}},
+		{`UPDATE media_asset_versions
+		  SET successful_processing_attempt_id = $1::uuid, trusted_duration_ms = 60000, state = 'READY'
+		  WHERE id = $2::uuid`, []any{processingID, versionID}},
+	} {
+		if _, err := p.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("advancing audit video fixture: %v", err)
+		}
+	}
+}
+
+func seedAuditResourceAsset(t *testing.T, p *pgxpool.Pool, ctx context.Context, ownerID, courseID string) {
+	t.Helper()
+	const (
+		assetID   = "10000000-0000-0000-0000-000000000019"
+		versionID = "10000000-0000-0000-0000-000000000020"
+		scanID    = "10000000-0000-0000-0000-000000000021"
+	)
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'RESOURCE', $2::uuid, $3::uuid, 'PROTECTED')
+	`, assetID, ownerID, courseID); err != nil {
+		t.Fatalf("seeding audit resource asset: %v", err)
+	}
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'RESOURCE', 'QUARANTINED', $3, 'fixture-v1', 'application/pdf', 12, repeat('a', 64))
+	`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding audit resource version: %v", err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, []any{versionID}},
+		{`INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity)
+		  VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'audit-fixture')`, []any{scanID, versionID, "scan:" + versionID}},
+		{`UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, []any{scanID, versionID}},
+		{`UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, []any{versionID}},
+	} {
+		if _, err := p.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("advancing audit resource fixture: %v", err)
+		}
 	}
 }
 
@@ -675,7 +758,7 @@ func auditCompletionFingerprint(assetVersionID, key, objectVersion, contentType 
 func prepareAuditFile(t *testing.T, f *privilegedAuditFixture) {
 	t.Helper()
 	prepareAuditLesson(t, f)
-	file, err := f.repo.AddLessonFile(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.LessonFileRequest{CourseID: f.courseID, RevisionID: f.revisionID, LessonID: f.lessonID, OwnerAccountID: f.instructorID, Kind: catalog.FileKindResource, AssetVersionID: f.videoID, DisplayNameAr: "ملف", DisplayNameEn: "File"}, f.instructorID)
+	file, err := f.repo.AddLessonFile(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.LessonFileRequest{CourseID: f.courseID, RevisionID: f.revisionID, LessonID: f.lessonID, OwnerAccountID: f.instructorID, Kind: catalog.FileKindResource, AssetVersionID: f.fileAssetID, DisplayNameAr: "ملف", DisplayNameEn: "File"}, f.instructorID)
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}

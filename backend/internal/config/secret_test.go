@@ -61,6 +61,23 @@ func TestSecretExposeReturnsPlaintext(t *testing.T) {
 	}
 }
 
+func TestSecretComparisonAcceptsOnlyExactCandidate(t *testing.T) {
+	s := NewSecret(plaintext)
+	for name, candidate := range map[string]string{
+		"matching":       plaintext,
+		"empty":          "",
+		"prefix-only":    plaintext[:len(plaintext)-1],
+		"suffix-changed": plaintext[:len(plaintext)-1] + "!",
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := name == "matching"
+			if got := s.EqualString(candidate); got != want {
+				t.Errorf("EqualString(%q) = %t, want %t", candidate, got, want)
+			}
+		})
+	}
+}
+
 // slog consults LogValuer before any other interface. A LogValue with the
 // wrong signature does not implement it — redaction then depends on slog
 // falling back to TextMarshaler, which works but is incidental rather than

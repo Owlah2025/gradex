@@ -143,22 +143,36 @@ func TestT4BCreationRefusesIncompleteOrInvalidAcademicContext(t *testing.T) {
 func TestT4BClassificationCannotBeForgedFromThePayload(t *testing.T) {
 	e := setupT4B(t)
 
-	// Naming a classification in the payload changes nothing: the field does not
-	// exist in the contract, so it is ignored and the server derives the model.
+	// Naming a classification in the payload cannot choose the domain model. The
+	// strict request boundary rejects the unknown field before persistence.
 	status, raw := e.createCourse(t, map[string]any{
 		"title_ar": "ك", "title_en": "Course",
 		"institution_id": e.institutionID, "subject_id": e.sharedSubjectID,
 		"classification_model": "LEGACY_TAXONOMY",
 	})
-	if status != http.StatusCreated {
-		t.Fatalf("creation status = %d; body %s", status, raw)
+	if status != http.StatusBadRequest {
+		t.Fatalf("forged classification status = %d; body %s", status, raw)
 	}
-	var course map[string]any
-	if err := json.Unmarshal(raw, &course); err != nil {
-		t.Fatalf("parsing course: %v", err)
+	var malformed map[string]any
+	if err := json.Unmarshal(raw, &malformed); err != nil {
+		t.Fatalf("parsing forged classification problem: %v", err)
 	}
+	if malformed["code"] != "MALFORMED_JSON" {
+		t.Fatalf("forged classification problem = %v, want MALFORMED_JSON", malformed)
+	}
+	var courseCount int
+	if err := e.env.pool.QueryRow(e.ctx, `SELECT count(*) FROM courses`).Scan(&courseCount); err != nil {
+		t.Fatalf("counting refused Courses: %v", err)
+	}
+	if courseCount != 0 {
+		t.Fatalf("forged classification created %d Courses", courseCount)
+	}
+
+	// A valid request still derives the academic model from the server-owned
+	// context, which keeps the route useful after the forged request is refused.
+	course := e.mustCreateAcademicCourse(t, e.sharedSubjectID)
 	if course["classification_model"] != "ACADEMIC_CATALOG" {
-		t.Fatalf("a payload flipped the classification to %v", course["classification_model"])
+		t.Fatalf("server-derived classification = %v, want ACADEMIC_CATALOG", course["classification_model"])
 	}
 	courseID := course["id"].(string)
 	revisionID := course["editable_revision"].(map[string]any)["id"].(string)

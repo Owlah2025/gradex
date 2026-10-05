@@ -117,7 +117,61 @@ func seedLegacyCourseFixture(
 		courseID, titleAr, titleEn).Scan(&revisionID); err != nil {
 		t.Fatalf("seeding legacy revision: %v", err)
 	}
+	seedReviewVideoAsset(t, p, ctx, instructorID, courseID)
 	return courseID, revisionID
+}
+
+func seedReviewVideoAsset(t *testing.T, p *pgxpool.Pool, ctx context.Context, ownerID, courseID string) {
+	t.Helper()
+	const (
+		assetID      = "22222222-2222-2222-2222-222222222222"
+		versionID    = "33333333-3333-3333-3333-333333333333"
+		scanID       = "33333333-3333-3333-3333-333333333334"
+		processingID = "33333333-3333-3333-3333-333333333335"
+	)
+	var exists bool
+	if err := p.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_asset_versions WHERE id = $1::uuid)`, versionID).Scan(&exists); err != nil {
+		t.Fatalf("checking review video fixture: %v", err)
+	}
+	if exists {
+		return
+	}
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, 'PROTECTED')
+	`, assetID, ownerID, courseID); err != nil {
+		t.Fatalf("seeding review video asset: %v", err)
+	}
+	if _, err := p.Exec(ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'UPLOADED', $3, 'fixture-v1', 'video/mp4', 1024, repeat('a', 64))
+	`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding review video version: %v", err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE media_asset_versions SET state = 'QUARANTINED' WHERE id = $1::uuid`, []any{versionID}},
+		{`UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, []any{versionID}},
+		{`INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity)
+		  VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'review-fixture')`, []any{scanID, versionID, "scan:" + versionID}},
+		{`UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, []any{scanID, versionID}},
+		{`UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, []any{versionID}},
+		{`INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms)
+		  VALUES ($1::uuid, $2::uuid, $3, 'SUCCEEDED', 'review/video', 1, 60000)`, []any{processingID, versionID, "process:" + versionID}},
+		{`INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		  VALUES ($1::uuid, '720p', 'review/video/720p/playlist.m3u8', 1280, 720, 2800, 60000)`, []any{versionID}},
+		{`UPDATE media_asset_versions
+		  SET successful_processing_attempt_id = $1::uuid, trusted_duration_ms = 60000, state = 'READY'
+		  WHERE id = $2::uuid`, []any{processingID, versionID}},
+	} {
+		if _, err := p.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("advancing review video fixture: %v", err)
+		}
+	}
 }
 
 func seedReviewDatabase(t *testing.T, pool interface{}, ctx context.Context) (adminID, instructorID, videoAssetID, majorTermID, subjectTermID string) {

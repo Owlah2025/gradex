@@ -798,9 +798,9 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("catalogue search analytics schema = %d, want one past course announcements %d",
 			CatalogSearchAnalyticsSchemaVersion, CourseAnnouncementsSchemaVersion)
 	}
-	if MaxSchemaVersion != CatalogSearchAnalyticsSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, CatalogSearchAnalyticsSchemaVersion)
+	if MaxSchemaVersion != DurableMultipartSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want durable multipart schema %d",
+			MaxSchemaVersion, DurableMultipartSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -950,13 +950,13 @@ func TestCatalogSearchEventsMigrationIsAnonymousBoundedAndReversible(t *testing.
 		}
 	}
 
-	if err := m.Steps(-1); err != nil {
+	if err := m.Migrate(uint(CatalogSearchAnalyticsSchemaVersion - 1)); err != nil {
 		t.Fatalf("rolling back catalogue search analytics migration: %v", err)
 	}
 	if tableExists(t, pool, "catalog_search_events") {
 		t.Fatal("catalog_search_events survived migration down")
 	}
-	if err := m.Steps(1); err != nil {
+	if err := m.Migrate(uint(CatalogSearchAnalyticsSchemaVersion)); err != nil {
 		t.Fatalf("reapplying catalogue search analytics migration: %v", err)
 	}
 	if !tableExists(t, pool, "catalog_search_events") {
@@ -1067,16 +1067,16 @@ func TestInstructorProfilesMigrationEnforcesProfileShape(t *testing.T) {
 		assertPostgresConstraint(t, err, "23505", "instructor_profiles_published_slug_key")
 	}
 
-	// Course completions, announcements, and catalogue search analytics are
-	// newer migrations, so step back four times to test the instructor-profile
-	// boundary itself rather than only the newest down file.
-	if err := m.Steps(-4); err != nil {
+	// Course completions, announcements, catalogue search analytics, and the
+	// subsequent hardening migrations are newer, so migrate to the boundary
+	// immediately before instructor profiles rather than counting down steps.
+	if err := m.Migrate(uint(InstructorProfilesSchemaVersion - 1)); err != nil {
 		t.Fatalf("rolling back instructor profile schema: %v", err)
 	}
 	if tableExists(t, pool, "instructor_profiles") {
 		t.Fatal("instructor_profiles survived the migration down")
 	}
-	if err := m.Steps(4); err != nil {
+	if err := m.Migrate(uint(InstructorProfilesSchemaVersion)); err != nil {
 		t.Fatalf("reapplying instructor profile schema: %v", err)
 	}
 	if !tableExists(t, pool, "instructor_profiles") {

@@ -142,7 +142,7 @@ func TestUnservedSubjectIsDiscoverableAndCarriesDemand(t *testing.T) {
 
 	t.Run("a Student registers demand with the discovered identifier", func(t *testing.T) {
 		status, raw := env.call(t, http.MethodPost, "/api/v1/me/subject-demand", env.studentToken,
-			map[string]any{"subject_id": discovered.SubjectID})
+			map[string]any{"subject_id": discovered.SubjectID, "note": "I take this in the fall"})
 		if status != http.StatusCreated {
 			t.Fatalf("raising demand status = %d, want 201; body %s", status, raw)
 		}

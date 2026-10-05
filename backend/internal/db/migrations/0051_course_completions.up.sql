@@ -125,7 +125,7 @@ BEGIN
                'BACKFILL'::course_completion_source
         FROM eligible e
         JOIN batch b ON b.enrollment_id = e.enrollment_id;
-        
+
         GET DIAGNOSTICS inserted = ROW_COUNT;
     END LOOP;
 END;
