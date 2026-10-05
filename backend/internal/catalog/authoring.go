@@ -164,7 +164,7 @@ func (v *DBAssetVersionValidator) ValidateLessonVideoForPublication(ctx context.
 	// depends on it see the same row. Without it the media worker could take
 	// this version from PLAYABLE to READY, or clear its claim on an enhancement
 	// failure, between this check and the pointer swap.
-	if err := v.lockLessonVideoRow(ctx, assetVersionID); err != nil {
+	if err := v.validateLessonVideoAsset(ctx, assetVersionID); err != nil {
 		return err
 	}
 
@@ -175,21 +175,23 @@ func (v *DBAssetVersionValidator) ValidateLessonVideoForPublication(ctx context.
 	return v.validateActivePlayableLessonVideo(ctx, assetVersionID)
 }
 
-// lockLessonVideoRow takes the share lock described on DBAssetVersionValidator.
-// A missing row is not an error here: the identifier may belong to a pre-S4
-// `videos` row, and refusing it would change the legacy acceptance the READY
-// branch still owns. Validation below decides; this only fixes what it reads.
-func (v *DBAssetVersionValidator) lockLessonVideoRow(ctx context.Context, assetVersionID string) error {
-	if !v.lockRows {
-		return nil
+// READY alone cannot authorize a retired or wrong-kind logical asset. During
+// publication both rows stay locked until the pointer swap commits. Missing
+// media rows still resolve through the legacy validator below.
+func (v *DBAssetVersionValidator) validateLessonVideoAsset(ctx context.Context, assetVersionID string) error {
+	query := `SELECT mav.kind = 'VIDEO' AND ma.kind = 'VIDEO' AND ma.retired_at IS NULL
+		FROM media_asset_versions mav JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE mav.id = $1::uuid`
+	if v.lockRows {
+		query += ` FOR SHARE OF mav, ma`
 	}
-	var locked int
-	err := v.queryer.QueryRow(ctx,
-		`SELECT 1 FROM media_asset_versions WHERE id = $1::uuid FOR SHARE`,
-		assetVersionID,
-	).Scan(&locked)
+	var available bool
+	err := v.queryer.QueryRow(ctx, query, assetVersionID).Scan(&available)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("locking lesson video asset version: %w", err)
+		return fmt.Errorf("checking lesson video asset: %w", err)
+	}
+	if err == nil && !available {
+		return ErrAssetVersionNotReady
 	}
 	return nil
 }

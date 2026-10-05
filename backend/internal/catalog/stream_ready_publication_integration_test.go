@@ -496,11 +496,16 @@ func TestPlayableLessonVideoWithNoCanonicalRenditionIsRefused(t *testing.T) {
 func TestReadyLessonVideoPublicationSemanticsAreUnchanged(t *testing.T) {
 	f := newD5Fixture(t)
 
-	// The fixture's live revision was published through a legacy `videos` row,
-	// which has no media row and no rendition evidence at all. That acceptance
-	// must survive, because the PLAYABLE branch is only consulted after the
-	// READY branch declines.
-	if err := f.validator.ValidateLessonVideoForPublication(f.ctx, f.videoOld); err != nil {
+	// Keep a legacy-only validator compatibility probe. The authoring fixture
+	// itself now uses real media to satisfy its stricter ownership contract.
+	legacyLesson, legacyVideo := uuid.NewString(), uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO lessons(id,section_id,title,"order") SELECT $1::uuid,section_id,'Legacy-only',99 FROM lessons WHERE id=$2::uuid`, legacyLesson, f.legacyLessonID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO videos(id,lesson_id,status) VALUES($1::uuid,$2::uuid,'READY')`, legacyVideo, legacyLesson); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.validator.ValidateLessonVideoForPublication(f.ctx, legacyVideo); err != nil {
 		t.Fatalf("legacy READY video is no longer publishable: %v", err)
 	}
 

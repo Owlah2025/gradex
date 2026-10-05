@@ -88,8 +88,7 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 		t.Fatalf("seeding taxonomy: %v", err)
 	}
 
-	// Legacy asset-owning graph. The catalog Asset Version validator reads the
-	// `videos` table, so READY and non-READY rows are seeded there.
+	// Retain legacy carriers for compatibility tests; authoring uses owned media.
 	legacyCourseID := "60000000-0000-0000-0000-0000000000b1"
 	legacyLessonID := "80000000-0000-0000-0000-0000000000b1"
 	f.legacySectionID = "70000000-0000-0000-0000-0000000000b1"
@@ -115,6 +114,9 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	`, firstVideoID, f.spareVideoID, f.processingVideoID, legacyLessonID, legacyLessonB, legacyLessonC); err != nil {
 		t.Fatalf("seeding asset versions: %v", err)
 	}
+	seedCourseVideo(t, p, ctx, ownerID, courseID, firstVideoID, true)
+	seedCourseVideo(t, p, ctx, ownerID, courseID, f.spareVideoID, true)
+	seedCourseVideo(t, p, ctx, ownerID, courseID, f.processingVideoID, false)
 
 	if err := p.QueryRow(ctx, `SELECT id FROM course_revisions WHERE course_id = $1::uuid`, courseID).Scan(&f.firstRevisionID); err != nil {
 		t.Fatalf("querying draft revision: %v", err)

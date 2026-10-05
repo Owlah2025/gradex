@@ -90,6 +90,7 @@ func newApprovalPricingFixture(t *testing.T) *approvalPricingFixture {
 	); err != nil {
 		t.Fatalf("seeding asset version: %v", err)
 	}
+	seedCourseVideo(t, p, ctx, ownerID, courseID, videoID, true)
 
 	if err := p.QueryRow(ctx,
 		`SELECT id FROM course_revisions WHERE course_id = $1::uuid`, courseID,

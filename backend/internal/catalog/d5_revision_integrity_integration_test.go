@@ -160,6 +160,7 @@ func (f *d5Fixture) seedDependencies(t *testing.T) {
 		`, assetID, lessonID); err != nil {
 			t.Fatalf("seeding asset %s: %v", assetID, err)
 		}
+		seedCourseVideo(t, f.p, f.ctx, f.ownerID, f.courseID, assetID, true)
 	}
 }
 
@@ -246,9 +247,10 @@ func (f *d5Fixture) seedPreviewAssetFor(t *testing.T, courseID, ownerID, version
 	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, scanID, versionID); err != nil {
 		t.Fatalf("marking preview scan successful: %v", err)
 	}
-	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
-		t.Fatalf("making preview ready: %v", err)
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("starting preview processing: %v", err)
 	}
+	finishFixtureVideoProcessing(t, f.p, f.ctx, versionID)
 }
 
 // seedTrustedPreviewAsset builds a READY MP4 preview whose only safety
@@ -1045,31 +1047,15 @@ func TestD5ApprovalRevalidatesEveryDependencyClass(t *testing.T) {
 		}{
 			name: asset.name,
 			invalidate: func(t *testing.T, f *d5Fixture, _ *CourseRevision) {
-				if asset.name == "preview asset" || asset.name == "resource asset" || asset.name == "lab material asset" {
-					if _, err := f.p.Exec(f.ctx,
-						`UPDATE media_assets SET retired_at = now() WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
-					); err != nil {
-						t.Fatalf("invalidating %s: %v", asset.name, err)
-					}
-					return
-				}
 				if _, err := f.p.Exec(f.ctx,
-					`UPDATE videos SET status = 'FAILED' WHERE id = $1::uuid`, asset.id(f),
+					`UPDATE media_assets SET retired_at = now() WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
 				); err != nil {
 					t.Fatalf("invalidating %s: %v", asset.name, err)
 				}
 			},
 			restore: func(t *testing.T, f *d5Fixture) {
-				if asset.name == "preview asset" || asset.name == "resource asset" || asset.name == "lab material asset" {
-					if _, err := f.p.Exec(f.ctx,
-						`UPDATE media_assets SET retired_at = NULL WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
-					); err != nil {
-						t.Fatalf("restoring %s: %v", asset.name, err)
-					}
-					return
-				}
 				if _, err := f.p.Exec(f.ctx,
-					`UPDATE videos SET status = 'READY' WHERE id = $1::uuid`, asset.id(f),
+					`UPDATE media_assets SET retired_at = NULL WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
 				); err != nil {
 					t.Fatalf("restoring %s: %v", asset.name, err)
 				}
@@ -1275,6 +1261,9 @@ func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 
 	reached := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releasePublication := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releasePublication)
 	approvalDone := make(chan error, 1)
 	go func() {
 		approvalDone <- f.publish(
@@ -1290,7 +1279,7 @@ func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 	writes := []dependencyWrite{
 		{name: "owner", sql: `UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, arg: f.ownerID},
 		{name: "taxonomy", sql: `UPDATE taxonomy_terms SET retired_at = now() WHERE id = $1::uuid`, arg: f.subjectOld},
-		{name: "asset", sql: `UPDATE videos SET status = 'FAILED' WHERE id = $1::uuid`, arg: f.videoOld},
+		{name: "asset", sql: `UPDATE media_assets SET retired_at = now() WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, arg: f.videoOld},
 	}
 	writeDone := make(chan string, len(writes))
 	writeErr := make(chan error, len(writes))
@@ -1313,7 +1302,7 @@ func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 		t.Fatal(err)
 	case <-time.After(150 * time.Millisecond):
 	}
-	close(release)
+	releasePublication()
 	if err := <-approvalDone; err != nil {
 		t.Fatalf("PublishRevision: %v", err)
 	}
