@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	adminread "github.com/Owlah2025/gradex/backend/internal/admin"
@@ -30,7 +31,7 @@ import (
 )
 
 type adminUser360DeviceReader interface {
-	AdminOverview(context.Context, string, time.Time) (identity.AdminDeviceOverview, error)
+	AdminOverviewInTransaction(context.Context, pgx.Tx, string, time.Time) (identity.AdminDeviceOverview, error)
 }
 
 type tokenSessionRepo struct {

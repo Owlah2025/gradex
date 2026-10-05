@@ -204,8 +204,14 @@ func (s *DeviceService) Overview(
 }
 
 func (s *DeviceService) replacementState(ctx context.Context, accountID string) (ReplacementState, error) {
+	return replacementStateFrom(ctx, s.pool, accountID)
+}
+
+func replacementStateFrom(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, accountID string) (ReplacementState, error) {
 	var state ReplacementState
-	err := s.pool.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`SELECT last_replacement_at, cooldown_cleared_at
 		   FROM identity_device_replacement_state WHERE account_id = $1::uuid`,
 		accountID,

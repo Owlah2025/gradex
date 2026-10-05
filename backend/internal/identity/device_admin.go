@@ -45,7 +45,22 @@ func (s *DeviceService) AdminOverview(
 	accountID string,
 	now time.Time,
 ) (AdminDeviceOverview, error) {
-	rows, err := s.pool.Query(ctx,
+	return s.adminOverview(ctx, s.pool, accountID, now)
+}
+
+// AdminOverviewInTransaction keeps device history and its caller's privileged-read
+// audit on the caller's connection. It never acquires from the pool.
+func (s *DeviceService) AdminOverviewInTransaction(ctx context.Context, tx pgx.Tx, accountID string, now time.Time) (AdminDeviceOverview, error) {
+	return s.adminOverview(ctx, tx, accountID, now)
+}
+
+type deviceOverviewQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (s *DeviceService) adminOverview(ctx context.Context, db deviceOverviewQuerier, accountID string, now time.Time) (AdminDeviceOverview, error) {
+	rows, err := db.Query(ctx,
 		`SELECT id::text, label, browser_family, platform_family,
 		        first_seen_at, last_seen_at, trusted_at, revoked_at,
 		        COALESCE(revocation_reason::text, '')
@@ -79,7 +94,8 @@ func (s *DeviceService) AdminOverview(
 		return AdminDeviceOverview{}, fmt.Errorf("iterating devices for operator: %w", err)
 	}
 
-	state, err := s.replacementState(ctx, accountID)
+	rows.Close()
+	state, err := replacementStateFrom(ctx, db, accountID)
 	if err != nil {
 		return AdminDeviceOverview{}, err
 	}

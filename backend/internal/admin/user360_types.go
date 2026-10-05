@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
@@ -262,5 +264,5 @@ type NoteListResult struct {
 }
 
 type deviceReader interface {
-	AdminOverview(context.Context, string, time.Time) (identity.AdminDeviceOverview, error)
+	AdminOverviewInTransaction(context.Context, pgx.Tx, string, time.Time) (identity.AdminDeviceOverview, error)
 }

@@ -192,7 +192,7 @@ func (r *Repository) queryStudentUser360(
 	if err != nil {
 		return StudentUser360{}, err
 	}
-	student.Devices, err = r.readDevices(ctx, identityView.ID)
+	student.Devices, err = r.readDevices(ctx, tx, identityView.ID)
 	if err != nil {
 		return StudentUser360{}, err
 	}
@@ -329,11 +329,11 @@ func localizedTitle(locale identity.Locale, arabic, english string) string {
 	return arabic
 }
 
-func (r *Repository) readDevices(ctx context.Context, accountID string) (identity.AdminDeviceOverview, error) {
+func (r *Repository) readDevices(ctx context.Context, tx pgx.Tx, accountID string) (identity.AdminDeviceOverview, error) {
 	if r.devices == nil {
 		return identity.AdminDeviceOverview{Devices: []identity.AdminDeviceView{}}, nil
 	}
-	return r.devices.AdminOverview(ctx, accountID, time.Now().UTC())
+	return r.devices.AdminOverviewInTransaction(ctx, tx, accountID, time.Now().UTC())
 }
 
 func queryInstructorUser360(ctx context.Context, tx pgx.Tx, locale identity.Locale, identityView User360Identity) (InstructorUser360, error) {

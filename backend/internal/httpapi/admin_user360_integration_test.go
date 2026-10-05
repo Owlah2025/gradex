@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -225,7 +226,7 @@ type populatedAdminDeviceReader struct {
 	overview identity.AdminDeviceOverview
 }
 
-func (r populatedAdminDeviceReader) AdminOverview(context.Context, string, time.Time) (identity.AdminDeviceOverview, error) {
+func (r populatedAdminDeviceReader) AdminOverviewInTransaction(context.Context, pgx.Tx, string, time.Time) (identity.AdminDeviceOverview, error) {
 	return r.overview, nil
 }
 
