@@ -1,16 +1,12 @@
 "use client";
 
-import { uploadResumable } from "@/lib/api/media-multipart";
+import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
-  beginVideoUpload,
   completeAndSelectLessonVideo,
   describeAssetState,
   isReadyState,
-  newProviderEventID,
-  sha256Hex,
-  uploadFileToStorage,
   validateSelectedVideo,
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -78,6 +74,7 @@ export function LessonVideoUpload({
   const activeAssetVersionID = useRef<string | null>(null);
 
   const busy = isUploadBusy(phase);
+  const resumable = useResumableUpload({ courseID, revisionID, lessonID, kind: "VIDEO", storageKeyId: "video-" + lessonID, locale });
 
   /*
     Processing is watched from the asset the server says is selected, not from
@@ -137,17 +134,9 @@ export function LessonVideoUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const completionResult = await uploadResumable(file, {
-        courseID,
-        lessonID,
-        kind: "VIDEO",
-        storageKeyId: "video-" + lessonID,
-        locale,
-        csrf,
-      }, setProgress);
+      const completionResult = await resumable.run(file, (fraction) => { setPhase("UPLOADING"); setProgress(fraction); });
       activeAssetVersionID.current = completionResult.asset_version_id;
 
-      const digest = await sha256Hex(file);
 
       setPhase("ATTACHING");
       const completion = await completeAndSelectLessonVideo({
@@ -155,15 +144,16 @@ export function LessonVideoUpload({
         revisionID,
         lessonID,
         assetVersionID: completionResult.asset_version_id,
-        providerEventID: newProviderEventID(),
+        providerEventID: completionResult.provider_event_id,
         storageObjectKey: completionResult.storage_object_key,
         storageObjectVersion: completionResult.storage_object_version,
         contentType: file.type,
         sizeBytes: file.size,
-        sha256: digest,
+        sha256: completionResult.sha256_hex,
         locale,
         csrf,
       });
+      resumable.acknowledge(completionResult.sha256_hex);
       await onAttached();
       if (!completion.selected) {
         activeAssetVersionID.current = null;
@@ -182,6 +172,7 @@ export function LessonVideoUpload({
       setPhase("PROCESSING");
       setMessage(media.videoProcessingBackground);
     } catch (error) {
+      if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
       setMessage(describeApiError(error, locale));
@@ -231,6 +222,7 @@ export function LessonVideoUpload({
             : undefined
         }
       />
+      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => fileInput.current?.click()} />
     </div>
   );
 }

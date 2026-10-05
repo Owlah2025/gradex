@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
+	"github.com/Owlah2025/gradex/backend/internal/storage"
 )
 
 type AssetKind string
@@ -106,10 +107,18 @@ type ObjectStore interface {
 	HeadObjectVersion(context.Context, string, string) (sizeBytes int64, exists bool, err error)
 	DownloadPrefixVersion(context.Context, string, string, int64) ([]byte, error)
 	HashObjectVersion(context.Context, string, string) (string, error)
+}
+
+type multipartStore interface {
 	CreateMultipartUpload(context.Context, string, string) (string, error)
-	PresignUploadPartURL(context.Context, string, string, int32, time.Duration) (string, error)
+	PresignUploadPartURL(context.Context, storage.MultipartPartUpload) (string, error)
 	CompleteMultipartUpload(context.Context, string, string, []int32, []string) (string, error)
 	AbortMultipartUpload(context.Context, string, string) error
+	ListMultipartParts(context.Context, string, string) ([]storage.MultipartPart, error)
+	MultipartObjectIdentity(context.Context, string) (string, error)
+	DeleteMultipartObject(context.Context, string, string) error
+	AbortMultipartKey(context.Context, string) error
+	FindMultipartUpload(context.Context, string) (string, error)
 }
 
 // DeliveryStore is deliberately narrower than ObjectStore. Protected delivery
@@ -121,8 +130,9 @@ type DeliveryStore interface {
 }
 
 type UploadRequest struct {
-	OwnerAccountID string
-	CourseID       string
+	ClientRequestID string
+	OwnerAccountID  string
+	CourseID        string
 	// RevisionID is required only for a separately stored public-preview asset.
 	// Lesson media is bound through LessonID instead.
 	RevisionID     string
@@ -151,15 +161,15 @@ type MultipartCompletedPart struct {
 }
 
 type CompleteMultipartRequest struct {
-	OwnerAccountID       string
-	AssetVersionID       string
-	ProviderEventID      string
-	StorageObjectKey     string
-	ContentType          string
-	SizeBytes            int64
-	SHA256Hex            string
-	UploadID             string
-	Parts                []MultipartCompletedPart
+	OwnerAccountID   string
+	AssetVersionID   string
+	ProviderEventID  string
+	StorageObjectKey string
+	ContentType      string
+	SizeBytes        int64
+	SHA256Hex        string
+	UploadID         string
+	Parts            []MultipartCompletedPart
 }
 
 type CompleteUploadRequest struct {

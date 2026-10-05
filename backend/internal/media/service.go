@@ -72,6 +72,8 @@ type Service struct {
 }
 
 type uploadRecord struct {
+	multipart      bool
+	createdAt      time.Time
 	assetVersionID string
 	objectKey      string
 	objectVersion  string
@@ -150,15 +152,22 @@ func NewService(options ServiceOptions) (*Service, error) {
 // otherwise upload successfully and then sit quarantined and undeliverable
 // forever — a silent dead end instead of an answer the Instructor can act on.
 func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (UploadTicket, error) {
+	if err := s.authorizeUploadMode(request); err != nil {
+		return UploadTicket{}, err
+	}
+	return s.beginUploadForOwner(ctx, request)
+}
+
+func (s *Service) authorizeUploadMode(request UploadRequest) error {
 	if s.operatingMode == OperatingModeAdminCatalogue {
-		return UploadTicket{}, ErrNotAuthorized
+		return ErrNotAuthorized
 	}
 	if s.operatingMode == OperatingModeTrustedInstructor && request.Kind != KindThumbnail && !TrustedProfileAdmits(request.Kind, request.ContentType) {
-		return UploadTicket{}, fmt.Errorf(
+		return fmt.Errorf(
 			"%w: this deployment accepts only MP4 Lesson video, PDF or DOCX Lesson Resources, and an MP4 public Course preview",
 			ErrValidation)
 	}
-	return s.beginUploadForOwner(ctx, request)
+	return nil
 }
 
 func (s *Service) presignUpload(ctx context.Context, request UploadRequest, key string) (string, error) {
@@ -499,11 +508,13 @@ func validateBeginUpload(request UploadRequest, maxUploadBytes int64) error {
 
 func newUploadRecord(request UploadRequest, now func() time.Time, expiry time.Duration) uploadRecord {
 	assetVersionID := uuid.NewString()
+	createdAt := now().UTC()
 	return uploadRecord{
+		createdAt:      createdAt,
 		assetVersionID: assetVersionID,
 		objectKey:      fmt.Sprintf("quarantine/%s/%s/source", request.CourseID, assetVersionID),
 		objectVersion:  "pending:" + assetVersionID,
-		expiresAt:      now().UTC().Add(expiry),
+		expiresAt:      createdAt.Add(expiry),
 	}
 }
 
@@ -516,8 +527,29 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	if err := s.requireCourseOwner(ctx, tx, request.CourseID, request.OwnerAccountID); err != nil {
 		return err
 	}
+	if record.multipart {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 57))`, request.OwnerAccountID); err != nil {
+			return err
+		}
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM upload_intents ui JOIN media_asset_versions v ON v.id=ui.asset_version_id JOIN media_assets a ON a.id=v.logical_asset_id WHERE a.owner_account_id=$1::uuid AND ui.is_multipart AND ui.completed_at IS NULL AND ui.multipart_status <> 'ABORTED'`, request.OwnerAccountID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= 20 {
+			return fmt.Errorf("%w: cancel an existing upload before starting another", ErrConflict)
+		}
+	}
 	if err := requirePreviewRevision(ctx, tx, request); err != nil {
 		return err
+	}
+	if request.LessonID != "" {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM course_lessons WHERE lesson_identity_id=$1::uuid AND course_id=$2::uuid)`, request.LessonID, request.CourseID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotAuthorized
+		}
 	}
 	if err := s.enforceLessonAggregate(ctx, tx, request); err != nil {
 		return err
@@ -538,15 +570,18 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	if err != nil {
 		return err
 	}
+	if intentCreatedAt == nil {
+		intentCreatedAt = &record.createdAt
+	}
 	// The intent stores the bound that actually applies to this bucket, not the
 	// deployment ceiling, so completion re-checks the same number the request
 	// was admitted against.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO upload_intents (
 			asset_version_id, expected_object_key, expected_content_type,
-			expected_size_bytes, max_size_bytes, expires_at, created_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, COALESCE($7, now()))
-	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.limits.perFile(request.Kind), record.expiresAt, intentCreatedAt); err != nil {
+			expected_size_bytes, max_size_bytes, expires_at, created_at, is_multipart, multipart_client_request_id
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, COALESCE($7, now()), $8, NULLIF($9,'')::uuid)
+	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.limits.perFile(request.Kind), record.expiresAt, intentCreatedAt, record.multipart, request.ClientRequestID); err != nil {
 		return fmt.Errorf("creating media upload intent: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -633,10 +668,11 @@ func (s *Service) verifyLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 	var owner, course string
 	var kind AssetKind
 	var originRevisionID *string
+	var lessonID *string
 	err := tx.QueryRow(ctx, `
-		SELECT owner_account_id::text, course_id::text, kind, preview_origin_revision_id::text
-		FROM media_assets WHERE id = $1::uuid FOR SHARE
-	`, request.LogicalAssetID).Scan(&owner, &course, &kind, &originRevisionID)
+		SELECT owner_account_id::text, course_id::text, kind, preview_origin_revision_id::text, lesson_id::text
+		FROM media_assets WHERE id = $1::uuid AND retired_at IS NULL FOR SHARE
+	`, request.LogicalAssetID).Scan(&owner, &course, &kind, &originRevisionID, &lessonID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -644,7 +680,7 @@ func (s *Service) verifyLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 		return "", fmt.Errorf("loading logical media asset: %w", err)
 	}
 	if owner != request.OwnerAccountID || course != request.CourseID || kind != request.Kind ||
-		!sameOptionalID(originRevisionID, request.RevisionID) {
+		!sameOptionalID(originRevisionID, request.RevisionID) || !sameOptionalID(lessonID, request.LessonID) {
 		return "", ErrNotAuthorized
 	}
 	return request.LogicalAssetID, nil
@@ -713,6 +749,26 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 		return CompletionResult{}, fmt.Errorf("%w: completion evidence does not match the upload intent", ErrConflict)
 	}
 	state := record.state
+	var multipart bool
+	var multipartStatus, multipartVersion, multipartChecksum string
+	if err := tx.QueryRow(ctx, `SELECT is_multipart, multipart_status, COALESCE(multipart_object_version,''), COALESCE(multipart_sha256,'') FROM upload_intents WHERE asset_version_id=$1::uuid`, request.AssetVersionID).Scan(&multipart, &multipartStatus, &multipartVersion, &multipartChecksum); err != nil {
+		return CompletionResult{}, err
+	}
+	if multipart {
+		if multipartStatus != "ASSEMBLED" || multipartVersion != request.StorageObjectVersion || multipartChecksum != strings.ToLower(request.SHA256Hex) {
+			return CompletionResult{}, ErrConflict
+		}
+		request.ProviderEventID = "multipart:" + request.AssetVersionID
+		fingerprint = completionFingerprint(request)
+		var completed bool
+		var claim string
+		if err := tx.QueryRow(ctx, `SELECT completed_at IS NOT NULL, COALESCE(multipart_verification_claim::text,'') FROM upload_intents WHERE asset_version_id=$1::uuid`, request.AssetVersionID).Scan(&completed, &claim); err != nil {
+			return CompletionResult{}, err
+		}
+		if !completed && (claim == "" || ctx.Value(multipartVerificationKey{}) != claim) {
+			return CompletionResult{}, ErrConflict
+		}
+	}
 	if record.kind == KindThumbnail {
 		var allowed bool
 		err := tx.QueryRow(ctx, `SELECT ma.retired_at IS NULL AND (ui.completed_at IS NOT NULL OR ui.expires_at>now())
@@ -754,8 +810,10 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 	// stored object version. HashObjectVersion deliberately reads the complete
 	// object and therefore only runs after ownership, intent identity,
 	// idempotency, and current-state checks have passed.
-	if err := s.verifyCompletedObject(ctx, request, record.kind, record.maxSize); err != nil {
-		return CompletionResult{}, err
+	if !multipart || ctx.Value(multipartVerificationProofKey{}) != fingerprint {
+		if err := s.verifyCompletedObject(ctx, request, record.kind, record.maxSize); err != nil {
+			return CompletionResult{}, err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -797,6 +855,7 @@ func (s *Service) loadUploadCompletionRecord(ctx context.Context, tx pgx.Tx, ass
 		FROM media_asset_versions mav
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
 		JOIN accounts owner ON owner.id = ma.owner_account_id
+		JOIN courses c ON c.id = ma.course_id AND c.owner_account_id = ma.owner_account_id
 		JOIN upload_intents ui ON ui.asset_version_id = mav.id
 		WHERE mav.id = $1::uuid
 		FOR UPDATE OF mav, ui

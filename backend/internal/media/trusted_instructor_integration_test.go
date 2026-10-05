@@ -39,7 +39,7 @@ func newTrustedInstructorFixture(t *testing.T) *trustedInstructorFixture {
 	return &trustedInstructorFixture{
 		mediaFixture: base,
 		trusted:      trustedServiceOver(t, base, ServiceOptions{}),
-		lessonID:     uuid.NewString(),
+		lessonID:     seedMediaLesson(t, base, base.courseID),
 	}
 }
 
@@ -578,7 +578,7 @@ func TestD088LessonResourceSizeBoundsAreEnforced(t *testing.T) {
 
 	t.Run("per-file cap refuses an oversized resource", func(t *testing.T) {
 		_, err := bounded.BeginUpload(f.ctx, UploadRequest{
-			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: uuid.NewString(),
+			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: seedMediaLesson(t, f.mediaFixture, f.courseID),
 			Kind: KindResource, ContentType: "application/pdf", SizeBytes: int64(len(pdf)) + 1,
 		})
 		if !errors.Is(err, ErrValidation) {
@@ -589,7 +589,7 @@ func TestD088LessonResourceSizeBoundsAreEnforced(t *testing.T) {
 	t.Run("per-lesson aggregate refuses the file that would exceed it", func(t *testing.T) {
 		// The bucket holds exactly two files of this size, so the third is the
 		// first request that must be refused.
-		lessonID := uuid.NewString()
+		lessonID := seedMediaLesson(t, f.mediaFixture, f.courseID)
 		for attempt := 1; attempt <= 2; attempt++ {
 			if _, err := bounded.BeginUpload(f.ctx, UploadRequest{
 				OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: lessonID,
@@ -610,7 +610,7 @@ func TestD088LessonResourceSizeBoundsAreEnforced(t *testing.T) {
 		}
 		// A different Lesson has its own bucket and is unaffected.
 		if _, err := bounded.BeginUpload(f.ctx, UploadRequest{
-			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: uuid.NewString(),
+			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: seedMediaLesson(t, f.mediaFixture, f.courseID),
 			Kind: KindResource, ContentType: "application/pdf", SizeBytes: int64(len(pdf)),
 		}); err != nil {
 			t.Fatalf("a different Lesson's bucket was affected: %v", err)
@@ -619,7 +619,7 @@ func TestD088LessonResourceSizeBoundsAreEnforced(t *testing.T) {
 
 	t.Run("the intent records the bucket bound, not the deployment ceiling", func(t *testing.T) {
 		ticket, err := bounded.BeginUpload(f.ctx, UploadRequest{
-			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: uuid.NewString(),
+			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: seedMediaLesson(t, f.mediaFixture, f.courseID),
 			Kind: KindResource, ContentType: "application/pdf", SizeBytes: int64(len(pdf)),
 		})
 		if err != nil {

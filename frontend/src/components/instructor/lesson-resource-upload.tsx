@@ -1,18 +1,13 @@
 "use client";
 
-import { uploadResumable } from "@/lib/api/media-multipart";
+import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
 import React, { useRef, useState } from "react";
 import { addLessonFile, deleteLessonFile, type LessonFileWire } from "@/lib/api/authoring";
 import {
   ACCEPTED_RESOURCE_CONTENT_TYPES,
   ACCEPTED_RESOURCE_EXTENSIONS,
-  beginResourceUpload,
-  completeUpload,
   describeAssetState,
   isReadyState,
-  newProviderEventID,
-  sha256Hex,
-  uploadFileToStorage,
   validateSelectedResource,
   waitForProcessing,
 } from "@/lib/api/media-upload";
@@ -62,6 +57,7 @@ export function LessonResourceUpload({
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const busy = isUploadBusy(phase);
+  const resumable = useResumableUpload({ courseID, revisionID, lessonID, kind: "RESOURCE", storageKeyId: "resource-" + lessonID, locale });
   const resources = files.filter((file) => file.kind === "RESOURCE");
 
   const fail = (text: string) => {
@@ -85,18 +81,12 @@ export function LessonResourceUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const completion = await uploadResumable(file, {
-        courseID,
-        lessonID,
-        kind: "RESOURCE",
-        storageKeyId: "resource-" + lessonID,
-        locale,
-        csrf,
-      }, setProgress);
+      const completion = await resumable.run(file, (fraction) => { setPhase("UPLOADING"); setProgress(fraction); }, checked.contentType);
 
       // A validated Lesson Resource is READY the moment completion returns; a
       // scanner-gated deployment needs the poll. Both are handled without the
       // Instructor needing to know which one this deployment is.
+      if (!isReadyState(completion.state)) setPhase("CHECKING");
       const state = isReadyState(completion.state)
         ? completion
         : await waitForProcessing(completion.asset_version_id, locale);
@@ -123,9 +113,11 @@ export function LessonResourceUpload({
       });
 
       setPhase("READY");
+      resumable.acknowledge(completion.sha256_hex);
       setMessage(media.resourceAttached);
       await onChanged();
     } catch (error) {
+      if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
       fail(describeApiError(error, locale));
     }
   };
@@ -215,6 +207,7 @@ export function LessonResourceUpload({
           event.target.value = "";
         }}
       />
+      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => fileInput.current?.click()} />
       <UploadStatus
         phase={phase}
         progress={progress}

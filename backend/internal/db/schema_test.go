@@ -40,11 +40,11 @@ func TestSchemaConstants(t *testing.T) {
 		CourseCompletionsSchemaVersion != InstructorProfilesSchemaVersion+1 ||
 		CourseAnnouncementsSchemaVersion != CourseCompletionsSchemaVersion+1 ||
 		CatalogSearchAnalyticsSchemaVersion != CourseAnnouncementsSchemaVersion+1 ||
-		MaxSchemaVersion != CatalogSearchAnalyticsSchemaVersion {
+		MaxSchemaVersion != DurableMultipartSchemaVersion || DurableMultipartSchemaVersion != 57 {
 		t.Fatalf("CourseAnnouncementsSchemaVersion = %d, CatalogSearchAnalyticsSchemaVersion = %d, MaxSchemaVersion = %d, want analytics %d", CourseAnnouncementsSchemaVersion, CatalogSearchAnalyticsSchemaVersion, MaxSchemaVersion, CourseAnnouncementsSchemaVersion+1)
 	}
-	if APIRequiredSchemaVersion != CatalogSearchAnalyticsSchemaVersion {
-		t.Fatalf("APIRequiredSchemaVersion = %d, want %d", APIRequiredSchemaVersion, CatalogSearchAnalyticsSchemaVersion)
+	if APIRequiredSchemaVersion != DurableMultipartSchemaVersion {
+		t.Fatalf("APIRequiredSchemaVersion = %d, want %d", APIRequiredSchemaVersion, DurableMultipartSchemaVersion)
 	}
 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",

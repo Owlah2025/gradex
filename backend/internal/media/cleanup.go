@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // queryRower captures the QueryRow method shared by *pgxpool.Pool, pgx.Tx,
@@ -115,47 +114,4 @@ func cleanupAttemptSafeWithDB(ctx context.Context, q queryRower, process any, as
 		return false, fmt.Errorf("cleaning attempt %s: %w", operationID, err)
 	}
 	return true, nil
-}
-func CleanupAbandonedMultipartUploads(ctx context.Context, db *pgxpool.Pool, store ObjectStore, limit int) (int, error) {
-	rows, err := db.Query(ctx, `
-		SELECT id, expected_object_key, provider_upload_id
-		FROM upload_intents
-		WHERE is_multipart = true AND completed_at IS NULL AND expires_at < now()
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return 0, fmt.Errorf("querying abandoned multipart uploads: %w", err)
-	}
-	defer rows.Close()
-
-	type intent struct {
-		id       string
-		key      string
-		uploadID string
-	}
-	var intents []intent
-	for rows.Next() {
-		var i intent
-		if err := rows.Scan(&i.id, &i.key, &i.uploadID); err != nil {
-			return 0, fmt.Errorf("scanning abandoned multipart upload: %w", err)
-		}
-		intents = append(intents, i)
-	}
-	rows.Close()
-
-	cleaned := 0
-	for _, i := range intents {
-		if i.uploadID != "" {
-			_ = store.AbortMultipartUpload(ctx, i.key, i.uploadID)
-		}
-		// Mark it as failed so it drops out of the index
-		_, err := db.Exec(ctx, `
-			UPDATE upload_intents SET completed_at = now(), completion_fingerprint = 'ABORTED' WHERE id = $1::uuid
-		`, i.id)
-		if err != nil {
-			return cleaned, fmt.Errorf("marking multipart upload as aborted: %w", err)
-		}
-		cleaned++
-	}
-	return cleaned, nil
 }

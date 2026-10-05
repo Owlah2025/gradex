@@ -1,5 +1,6 @@
 import { authenticatedRequest } from "./http";
 import { ProblemError } from "./problem";
+import { sha256 } from "@noble/hashes/sha256";
 
 /**
  * Browser side of the existing direct-to-storage media upload contract.
@@ -427,12 +428,13 @@ export function uploadFileToStorage(
 }
 
 /** SHA-256 over the file's bytes, as lowercase hex. */
-export async function sha256Hex(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await file.arrayBuffer(),
-  );
-  return Array.from(new Uint8Array(digest))
+export async function sha256Hex(file: File, signal?: AbortSignal): Promise<string> {
+  const hash = sha256.create();
+  for (let offset = 0; offset < file.size; offset += 1024 * 1024) {
+    signal?.throwIfAborted();
+    hash.update(new Uint8Array(await file.slice(offset, offset + 1024 * 1024).arrayBuffer()));
+  }
+  return Array.from(hash.digest())
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }

@@ -26,7 +26,7 @@ func TestSchemaRangeReportsAPIReadinessFloorAndMaximum(t *testing.T) {
 	if _, err := io.Copy(&output, read); err != nil {
 		t.Fatalf("read schema-range output: %v", err)
 	}
-	if got := output.String(); got != "53 53\n" {
-		t.Fatalf("schema-range output = %q, want %q", got, "53 53\n")
+	if got := output.String(); got != "57 57\n" {
+		t.Fatalf("schema-range output = %q, want %q", got, "57 57\n")
 	}
 }

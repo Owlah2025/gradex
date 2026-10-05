@@ -96,8 +96,9 @@ const (
 	CatalogSearchAnalyticsSchemaVersion = CourseAnnouncementsSchemaVersion + 1
 	// APIRequiredSchemaVersion is the readiness floor for the complete API
 	// application tier. Migration tooling and API readiness share this authority.
-	APIRequiredSchemaVersion = CatalogSearchAnalyticsSchemaVersion
-	MaxSchemaVersion         = CatalogSearchAnalyticsSchemaVersion
+	DurableMultipartSchemaVersion = 57
+	APIRequiredSchemaVersion      = DurableMultipartSchemaVersion
+	MaxSchemaVersion              = DurableMultipartSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

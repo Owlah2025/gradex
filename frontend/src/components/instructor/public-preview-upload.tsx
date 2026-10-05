@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { uploadResumable } from "@/lib/api/media-multipart";
+import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
 import { clearPublicPreview } from "@/lib/api/authoring";
 import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -9,16 +9,10 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
 import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
-  beginPublicPreviewUpload,
   completeAndSelectPublicPreview,
   describeAssetState,
   isReadyState,
-  newProviderEventID,
-  ProcessingObservationTimeoutError,
-  sha256Hex,
-  uploadFileToStorage,
   validateSelectedVideo,
-  waitForProcessing,
 } from "@/lib/api/media-upload";
 import { recoverMediaPhase } from "./media-upload-phase";
 import { useProcessingWatch } from "./use-processing-watch";
@@ -102,6 +96,7 @@ export function PublicPreviewUpload({
   const [message, setMessage] = useState<string | null>(() => describeRecovered(previewAssetState));
   const activeAssetVersionID = useRef<string | null>(null);
   const busy = ["PREPARING", "UPLOADING", "ATTACHING", "PROCESSING"].includes(phase);
+  const resumable = useResumableUpload({ courseID, revisionID, kind: "PREVIEW", storageKeyId: "preview-" + courseID, locale });
 
   /*
     The same single watch the Lesson video uses, for the same reason: a trusted
@@ -152,32 +147,25 @@ export function PublicPreviewUpload({
     setProgress(0);
     try {
       setPhase("PREPARING");
-      const completionResult = await uploadResumable(file, {
-        courseID,
-        revisionID,
-        kind: "PREVIEW",
-        storageKeyId: "preview-" + courseID,
-        locale,
-        csrf,
-      }, setProgress);
+      const completionResult = await resumable.run(file, (fraction) => { setPhase("UPLOADING"); setProgress(fraction); });
       activeAssetVersionID.current = completionResult.asset_version_id;
 
-      const sha256 = await sha256Hex(file);
 
       setPhase("ATTACHING");
       const completion = await completeAndSelectPublicPreview({
         courseID,
         revisionID,
         assetVersionID: completionResult.asset_version_id,
-        providerEventID: newProviderEventID(),
+        providerEventID: completionResult.provider_event_id,
         storageObjectKey: completionResult.storage_object_key,
         storageObjectVersion: completionResult.storage_object_version,
         contentType: file.type,
         sizeBytes: file.size,
-        sha256,
+        sha256: completionResult.sha256_hex,
         locale,
         csrf,
       });
+      resumable.acknowledge(completionResult.sha256_hex);
       await onChanged();
       if (!completion.selected) {
         // A newer completed upload already holds the revision. This upload is
@@ -193,6 +181,7 @@ export function PublicPreviewUpload({
       setPhase("PROCESSING");
       setMessage(t.processingBackground);
     } catch (cause) {
+      if (isPausedUpload(cause)) { setPhase("IDLE"); setMessage(null); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
       setMessage(describeApiError(cause, locale) || t.failed);
@@ -297,6 +286,7 @@ export function PublicPreviewUpload({
           </Button>
         ) : null}
       </div>
+      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => input.current?.click()} />
       {status ? (
         /* A failure must not read like a success: different role, different ink. */
         <p

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -22,13 +23,14 @@ type mediaHandlers struct {
 }
 
 type mediaUploadBody struct {
-	CourseID       string          `json:"course_id" binding:"required"`
-	RevisionID     string          `json:"revision_id"`
-	LessonID       string          `json:"lesson_id"`
-	LogicalAssetID string          `json:"logical_asset_id"`
-	Kind           media.AssetKind `json:"kind" binding:"required"`
-	ContentType    string          `json:"content_type" binding:"required"`
-	SizeBytes      int64           `json:"size_bytes" binding:"required,gt=0"`
+	ClientRequestID string          `json:"client_request_id"`
+	CourseID        string          `json:"course_id" binding:"required"`
+	RevisionID      string          `json:"revision_id"`
+	LessonID        string          `json:"lesson_id"`
+	LogicalAssetID  string          `json:"logical_asset_id"`
+	Kind            media.AssetKind `json:"kind" binding:"required"`
+	ContentType     string          `json:"content_type" binding:"required"`
+	SizeBytes       int64           `json:"size_bytes" binding:"required,gt=0"`
 }
 
 type mediaCompletionBody struct {
@@ -50,7 +52,7 @@ type mediaOutOfBandScanBody struct {
 func mountMediaRoutes(v1 *gin.RouterGroup, foundation *MediaFoundation, sessionFoundation *SessionFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
 	h := &mediaHandlers{service: foundation.service}
 	content := v1.Group("/media")
-	mountMediaUploadRoutes(content, h, authenticator, principals, logger)
+	mountMediaUploadRoutes(content, h, sessionFoundation, authenticator, principals, logger)
 	mountMediaStatusRoute(content, h, authenticator, principals, logger)
 	if sessionFoundation != nil {
 		mountMediaRetryRoute(content, h, sessionFoundation, authenticator, principals, logger)
@@ -80,7 +82,7 @@ func mountMediaCatalogueRoutes(content *gin.RouterGroup, h *mediaHandlers, authe
 	evidence.POST("", strictJSONMiddleware(func() any { return &mediaOutOfBandScanBody{} }, mediaRequestBodyLimit), h.recordOutOfBandScanEvidence)
 }
 
-func mountMediaUploadRoutes(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+func mountMediaUploadRoutes(content *gin.RouterGroup, h *mediaHandlers, sessions *SessionFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
 	uploads := content.Group("/uploads")
 	uploads.Use(
 		requireAuth(authenticator),
@@ -89,10 +91,41 @@ func mountMediaUploadRoutes(content *gin.RouterGroup, h *mediaHandlers, authenti
 	)
 	uploads.POST("", strictJSONMiddleware(func() any { return &mediaUploadBody{} }, mediaRequestBodyLimit), h.beginUpload)
 	uploads.POST("/:id/completions", strictJSONMiddleware(func() any { return &mediaCompletionBody{} }, mediaRequestBodyLimit), h.completeUpload)
-	uploads.POST("/multipart", strictJSONMiddleware(func() any { return &mediaUploadBody{} }, mediaRequestBodyLimit), h.beginMultipartUpload)
-	uploads.POST("/:id/multipart/parts/:partNumber", h.presignUploadPart)
-	uploads.POST("/:id/multipart/completions", strictJSONMiddleware(func() any { return &mediaMultipartCompletionBody{} }, mediaRequestBodyLimit), h.completeMultipartUpload)
-	uploads.DELETE("/:id/multipart", h.abortMultipartUpload)
+	mp := content.Group("/uploads")
+	if sessions != nil {
+		guard := sessions.requireSessionMutationSecurity()
+		mp.Use(func(c *gin.Context) {
+			if c.Request.Method == http.MethodGet {
+				c.Next()
+				return
+			}
+			guard(c)
+		})
+		mp.Use(func(c *gin.Context) {
+			if c.Request.Method == http.MethodGet {
+				c.Next()
+				return
+			}
+			view, err := sessions.repository.Resolve(c.Request.Context(), identity.SessionResolutionRequest{CredentialDigest: c.GetString(sessionCredentialDigestContextKey), DeviceCredentialDigest: auth.DeviceCredentialDigest(c.Request), UseKind: identity.UseStateChanging})
+			if err != nil {
+				writeProblem(c, problem.Unauthenticated())
+				return
+			}
+			if subtle.ConstantTimeCompare([]byte(view.CSRFToken.Expose()), []byte(c.GetHeader(csrfHeaderName))) != 1 {
+				writeProblem(c, problem.SessionCSRFFailed())
+				return
+			}
+			c.Next()
+		})
+	}
+	mp.Use(requireAuth(authenticator), requireCapability(principals, logger, identity.CapContentManagement), requireRole(identity.RoleInstructor))
+	mp.POST("/multipart", strictJSONMiddleware(func() any { return &mediaUploadBody{} }, mediaRequestBodyLimit), h.beginMultipartUpload)
+	mp.GET("/:id/multipart", h.getMultipartUpload)
+	mp.GET("/:id/multipart/verification", h.getMultipartVerification)
+	mp.GET("/multipart/requests/:requestID", h.getMultipartRequest)
+	mp.POST("/:id/multipart/parts/:partNumber", h.presignUploadPart)
+	mp.POST("/:id/multipart/completions", strictJSONMiddleware(func() any { return &mediaMultipartCompletionBody{} }, mediaRequestBodyLimit), h.completeMultipartUpload)
+	mp.DELETE("/:id/multipart", h.abortMultipartUpload)
 }
 
 func mountMediaStatusRoute(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
@@ -324,7 +357,8 @@ type mediaMultipartCompletedPart struct {
 func (h *mediaHandlers) beginMultipartUpload(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*mediaUploadBody)
 	ticket, err := h.service.BeginMultipartUpload(c.Request.Context(), media.UploadRequest{
-		OwnerAccountID: c.GetString(ctxUserIDKey), CourseID: body.CourseID, RevisionID: body.RevisionID, LessonID: body.LessonID,
+		ClientRequestID: body.ClientRequestID,
+		OwnerAccountID:  c.GetString(ctxUserIDKey), CourseID: body.CourseID, RevisionID: body.RevisionID, LessonID: body.LessonID,
 		LogicalAssetID: body.LogicalAssetID, Kind: body.Kind,
 		ContentType: body.ContentType, SizeBytes: body.SizeBytes,
 	})
@@ -333,21 +367,10 @@ func (h *mediaHandlers) beginMultipartUpload(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, gin.H{
-		"asset_version_id":   ticket.AssetVersionID,
-		"upload_id":          ticket.UploadID,
-		"storage_object_key": ticket.StorageObjectKey,
-		"expires_at":         ticket.ExpiresAt,
-	})
+	c.JSON(http.StatusCreated, ticket)
 }
 
 func (h *mediaHandlers) presignUploadPart(c *gin.Context) {
-	uploadID := c.Query("upload_id")
-	storageKey := c.Query("storage_key")
-	if uploadID == "" || storageKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "upload_id and storage_key are required"})
-		return
-	}
 	partStr := c.Param("partNumber")
 	partNumber, err := strconv.ParseInt(partStr, 10, 32)
 	if err != nil || partNumber < 1 || partNumber > 10000 {
@@ -355,7 +378,7 @@ func (h *mediaHandlers) presignUploadPart(c *gin.Context) {
 		return
 	}
 
-	url, err := h.service.PresignUploadPart(c.Request.Context(), storageKey, uploadID, int32(partNumber))
+	url, err := h.service.PresignUploadPart(c.Request.Context(), media.MultipartSessionRequest{OwnerAccountID: c.GetString(ctxUserIDKey), AssetVersionID: c.Param("id")}, int32(partNumber))
 	if err != nil {
 		writeMediaProblem(c, err)
 		return
@@ -396,15 +419,39 @@ func (h *mediaHandlers) completeMultipartUpload(c *gin.Context) {
 	})
 }
 func (h *mediaHandlers) abortMultipartUpload(c *gin.Context) {
-	uploadID := c.Query("upload_id")
-	storageKey := c.Query("storage_key")
-	if uploadID == "" || storageKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "upload_id and storage_key are required"})
-		return
-	}
-	if err := h.service.AbortMultipartUpload(c.Request.Context(), storageKey, uploadID); err != nil {
+	if err := h.service.AbortMultipartUpload(c.Request.Context(), media.MultipartSessionRequest{OwnerAccountID: c.GetString(ctxUserIDKey), AssetVersionID: c.Param("id")}); err != nil {
 		writeMediaProblem(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "aborted"})
+}
+
+func (h *mediaHandlers) getMultipartUpload(c *gin.Context) {
+	ticket, err := h.service.GetMultipartUpload(c.Request.Context(), media.MultipartSessionRequest{OwnerAccountID: c.GetString(ctxUserIDKey), AssetVersionID: c.Param("id")})
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, ticket)
+}
+
+func (h *mediaHandlers) getMultipartRequest(c *gin.Context) {
+	ticket, err := h.service.MultipartRequestSession(c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("requestID"))
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, ticket)
+}
+
+func (h *mediaHandlers) getMultipartVerification(c *gin.Context) {
+	result, err := h.service.GetMultipartCompletion(c.Request.Context(), media.MultipartSessionRequest{OwnerAccountID: c.GetString(ctxUserIDKey), AssetVersionID: c.Param("id")})
+	if err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"asset_version_id": result.AssetVersionID, "state": result.State, "duplicate": result.Duplicate, "storage_object_version": result.StorageObjectVersion})
 }

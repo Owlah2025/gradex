@@ -167,7 +167,7 @@ func runLessonVideoWorker(t *testing.T, f *d5Fixture, versionID string, processo
 
 func TestLessonVideoUploadClaimIsDurableAndOrdered(t *testing.T) {
 	t.Run("incomplete replacement leaves existing video selected", func(t *testing.T) {
-		f := newD5Fixture(t)
+		f := newLessonMediaFixture(t)
 		candidate := f.candidate(t)
 		incomplete := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC), false)
 
@@ -199,7 +199,7 @@ func TestLessonVideoUploadClaimIsDurableAndOrdered(t *testing.T) {
 	})
 
 	t.Run("newer completed intent wins despite reverse claim arrival", func(t *testing.T) {
-		f := newD5Fixture(t)
+		f := newLessonMediaFixture(t)
 		candidate := f.candidate(t)
 		older := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC), true)
 		newer := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 10, 1, 0, 0, time.UTC), true)
@@ -221,7 +221,7 @@ func TestLessonVideoUploadClaimIsDurableAndOrdered(t *testing.T) {
 
 func TestLessonVideoUploadClaimSurvivesBrowserExitAndProjectsWorkerState(t *testing.T) {
 	t.Run("worker success becomes READY in the reloaded authoring graph", func(t *testing.T) {
-		f := newD5Fixture(t)
+		f := newLessonMediaFixture(t)
 		candidate := f.candidate(t)
 		versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 11, 0, 0, 0, time.UTC), true)
 		claimLessonVideo(t, f, candidate.ID, versionID)
@@ -236,7 +236,7 @@ func TestLessonVideoUploadClaimSurvivesBrowserExitAndProjectsWorkerState(t *test
 	})
 
 	t.Run("worker failure becomes PROCESS_FAILED in the reloaded authoring graph", func(t *testing.T) {
-		f := newD5Fixture(t)
+		f := newLessonMediaFixture(t)
 		candidate := f.candidate(t)
 		versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC), true)
 		claimLessonVideo(t, f, candidate.ID, versionID)
@@ -253,7 +253,7 @@ func TestLessonVideoUploadClaimSurvivesBrowserExitAndProjectsWorkerState(t *test
 }
 
 func TestNonReadySelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
-	f := newD5Fixture(t)
+	f := newLessonMediaFixture(t)
 	candidate := f.candidate(t)
 	versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC), true)
 	claimLessonVideo(t, f, candidate.ID, versionID)
@@ -315,7 +315,7 @@ func (p playableOnlyProcessor) TranscodeProgressive(ctx context.Context, object 
 // READY-only rule. The positive half lives in the stream-ready publication
 // suite.
 func TestPlayableSelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
-	f := newD5Fixture(t)
+	f := newLessonMediaFixture(t)
 	candidate := f.candidate(t)
 	versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC), true)
 	claimLessonVideo(t, f, candidate.ID, versionID)

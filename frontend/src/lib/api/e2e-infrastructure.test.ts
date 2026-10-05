@@ -12,7 +12,7 @@ import {
   RunState,
 } from "./e2e-infrastructure.js";
 
-const testDir = "/var/tmp/gradex-e2e-infra-test-" + Date.now();
+const testDir = (process.env.GRADEX_E2E_TMP_DIR || "/tmp") + "/gradex-e2e-infra-test-" + Date.now();
 if (!fs.existsSync(testDir)) {
   fs.mkdirSync(testDir, { recursive: true });
 }

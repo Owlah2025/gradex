@@ -2,12 +2,14 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 func (c *Client) CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error) {
@@ -19,18 +21,29 @@ func (c *Client) CreateMultipartUpload(ctx context.Context, key, contentType str
 	if err != nil {
 		return "", fmt.Errorf("creating multipart upload for %q: %w", key, err)
 	}
+	if aws.ToString(out.UploadId) == "" {
+		return "", errors.New("provider returned no multipart identifier")
+	}
 	return *out.UploadId, nil
 }
 
-func (c *Client) PresignUploadPartURL(ctx context.Context, key, uploadID string, partNumber int32, expiry time.Duration) (string, error) {
+type MultipartPartUpload struct {
+	Key, UploadID string
+	PartNumber    int32
+	SizeBytes     int64
+	Expiry        time.Duration
+}
+
+func (c *Client) PresignUploadPartURL(ctx context.Context, part MultipartPartUpload) (string, error) {
 	req, err := c.presign.PresignUploadPart(ctx, &s3.UploadPartInput{
-		Bucket:     aws.String(c.bucket),
-		Key:        aws.String(key),
-		UploadId:   aws.String(uploadID),
-		PartNumber: aws.Int32(partNumber),
-	}, s3.WithPresignExpires(expiry))
+		Bucket:        aws.String(c.bucket),
+		Key:           aws.String(part.Key),
+		UploadId:      aws.String(part.UploadID),
+		PartNumber:    aws.Int32(part.PartNumber),
+		ContentLength: aws.Int64(part.SizeBytes),
+	}, s3.WithPresignExpires(part.Expiry))
 	if err != nil {
-		return "", fmt.Errorf("presigning multipart upload part %d for %q: %w", partNumber, key, err)
+		return "", fmt.Errorf("presigning multipart upload part %d for %q: %w", part.PartNumber, part.Key, err)
 	}
 	return req.URL, nil
 }
@@ -57,10 +70,13 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 	if err != nil {
 		return "", fmt.Errorf("completing multipart upload for %q: %w", key, err)
 	}
-	if out.VersionId != nil {
+	if aws.ToString(out.VersionId) != "" && aws.ToString(out.VersionId) != "null" {
 		return *out.VersionId, nil
 	}
-	return "", nil
+	if validStrongETag(aws.ToString(out.ETag)) {
+		return objectIdentityETagPrefix + *out.ETag, nil
+	}
+	return "", errors.New("provider returned no immutable multipart object identity")
 }
 
 func (c *Client) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
@@ -70,7 +86,100 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, key, uploadID string)
 		UploadId: aws.String(uploadID),
 	})
 	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchUpload" {
+			return nil
+		}
 		return fmt.Errorf("aborting multipart upload for %q: %w", key, err)
 	}
 	return nil
+}
+
+type MultipartPart struct {
+	PartNumber int32  `json:"part_number"`
+	ETag       string `json:"etag"`
+	SizeBytes  int64  `json:"size_bytes"`
+}
+
+func (c *Client) ListMultipartParts(ctx context.Context, key, uploadID string) ([]MultipartPart, error) {
+	pages := s3.NewListPartsPaginator(c.s3, &s3.ListPartsInput{Bucket: aws.String(c.bucket), Key: aws.String(key), UploadId: aws.String(uploadID)})
+	parts := []MultipartPart{}
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range page.Parts {
+			parts = append(parts, MultipartPart{aws.ToInt32(p.PartNumber), aws.ToString(p.ETag), aws.ToInt64(p.Size)})
+		}
+	}
+	return parts, nil
+}
+
+// MultipartObjectIdentity reconciles provider success whose response was lost.
+// Multipart keys are unique per intent and are never issued a single PUT URL.
+func (c *Client) MultipartObjectIdentity(ctx context.Context, key string) (string, error) {
+	out, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && (apiErr.ErrorCode() == "NotFound" || apiErr.ErrorCode() == "NoSuchKey") {
+			return "", nil
+		}
+		return "", err
+	}
+	if aws.ToString(out.VersionId) != "" && aws.ToString(out.VersionId) != "null" {
+		return *out.VersionId, nil
+	}
+	if validStrongETag(aws.ToString(out.ETag)) {
+		return objectIdentityETagPrefix + *out.ETag, nil
+	}
+	return "", errors.New("provider returned no immutable object identity")
+}
+
+func (c *Client) DeleteMultipartObject(ctx context.Context, key, version string) error {
+	input := &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}
+	identity, err := parseObjectIdentity(version)
+	if err != nil {
+		return err
+	}
+	if identity.kind == objectIdentityVersion {
+		input.VersionId = aws.String(identity.value)
+	}
+	_, err = c.s3.DeleteObject(ctx, input)
+	return err
+}
+
+// AbortMultipartKey also covers a crash after provider creation but before ID binding.
+func (c *Client) AbortMultipartKey(ctx context.Context, key string) error {
+	pages := s3.NewListMultipartUploadsPaginator(c.s3, &s3.ListMultipartUploadsInput{Bucket: aws.String(c.bucket), Prefix: aws.String(key)})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+		for _, upload := range page.Uploads {
+			if aws.ToString(upload.Key) == key {
+				if err := c.AbortMultipartUpload(ctx, key, aws.ToString(upload.UploadId)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Client) FindMultipartUpload(ctx context.Context, key string) (string, error) {
+	pages := s3.NewListMultipartUploadsPaginator(c.s3, &s3.ListMultipartUploadsInput{Bucket: aws.String(c.bucket), Prefix: aws.String(key)})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, upload := range page.Uploads {
+			if aws.ToString(upload.Key) == key {
+				return aws.ToString(upload.UploadId), nil
+			}
+		}
+	}
+	return "", nil
 }

@@ -69,7 +69,7 @@ func main() {
 	// the worker accepts 43 without changing media processing semantics.
 	{
 		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
-		err := db.CheckSchemaAtLeast(startupCtx, pool, db.ActiveProcessingKindSchemaVersion)
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.DurableMultipartSchemaVersion)
 		cancel()
 		if err != nil {
 			exitWorker(logger, "media_schema_check", logging.ErrorClassOf(err))
@@ -243,6 +243,14 @@ func main() {
 		return
 	}
 	logger.WorkerLifecycle(logging.WorkerReady)
+	uploadService, err := media.NewService(media.ServiceOptions{DB: pool, Store: storageClient, Outbox: writer, Scanner: scanner,
+		UploadURLExpiry: cfg.UploadURLExpiry(), MaxUploadBytes: cfg.MaxUploadSizeBytes(), OperatingMode: media.OperatingMode(cfg.MediaOperatingMode()), AutoRecoveryStateAvailable: autoRecoveryStateAvailable})
+	if err != nil {
+		exitWorker(logger, "multipart_verifier_build", logging.ErrorClassOf(err))
+		return
+	}
+	verificationDone := make(chan struct{})
+	go func() { defer close(verificationDone); runMultipartVerification(ctx, uploadService, logger) }()
 
 	thumbnailCleanupDone := make(chan struct{})
 	go func() { defer close(thumbnailCleanupDone); runThumbnailCleanup(ctx, pool, storageClient, logger) }()
@@ -293,6 +301,7 @@ func main() {
 	<-dispatcherDone
 	<-mediaRecoveryDone
 	<-multipartCleanupDone
+	<-verificationDone
 	<-autoRecoveryDone
 	<-emailDispatcherDone
 	<-catalogSearchCleanupDone
@@ -460,6 +469,22 @@ func runMultipartCleanup(ctx context.Context, pool *pgxpool.Pool, store media.Ob
 			logger.WorkerFailed(logging.WorkerFailureEvent{
 				Operation: "multipart_abandonment_cleanup", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
 			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runMultipartVerification(ctx context.Context, service *media.Service, logger *logging.Logger) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		_, err := service.VerifyPendingMultipartUpload(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{Operation: "multipart_verification", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: 3})
 		}
 		select {
 		case <-ctx.Done():

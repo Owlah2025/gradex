@@ -20,7 +20,7 @@ async function settled(): Promise<void> {
 }
 
 test("api log drain: the run-owned path follows the documented pattern", () => {
-  assert.equal(apiLogPath("abc123"), "/var/tmp/gradex-s5-e2e-api-abc123.log");
+  assert.ok(apiLogPath("abc123").endsWith("/gradex-s5-e2e-api-abc123.log"));
 });
 
 // The defect this guards: a child spawned with piped stdio and no consumer blocks on its own

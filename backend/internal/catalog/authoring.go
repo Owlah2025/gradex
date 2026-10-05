@@ -1825,6 +1825,15 @@ func (r *Repository) AddLessonFile(
 			return ErrAssetVersionInvalid
 		}
 
+		// Course locking serializes attachment retries, including a response lost after commit.
+		err = tx.QueryRow(ctx, `SELECT id, lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at FROM lesson_files WHERE lesson_id=$1::uuid AND asset_version_id=$2::uuid AND kind=$3`, versionLessonID, req.AssetVersionID, req.Kind).Scan(&lf.ID, &lf.LessonID, &lf.Kind, &lf.AssetVersionID, &lf.DisplayNameAr, &lf.DisplayNameEn, &lf.Position, &lf.CreatedAt, &lf.UpdatedAt)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("checking existing lesson attachment: %w", err)
+		}
+
 		var pos int
 		if req.Position != nil {
 			pos = *req.Position

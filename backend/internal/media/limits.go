@@ -125,6 +125,7 @@ func (s *Service) enforceLessonAggregate(ctx context.Context, tx pgx.Tx, request
 			FROM media_asset_versions mav
 			WHERE mav.logical_asset_id = ma.id
 			  AND mav.state NOT IN ('SCAN_FAILED', 'SCAN_ERROR', 'PROCESS_FAILED')
+			  AND NOT EXISTS (SELECT 1 FROM upload_intents ui WHERE ui.asset_version_id=mav.id AND ui.is_multipart AND ui.multipart_status IN ('ABORTING','ABORTED'))
 			ORDER BY mav.created_at DESC, mav.id DESC
 			LIMIT 1
 		) current_version ON TRUE
