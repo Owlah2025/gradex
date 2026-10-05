@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { seedReadyVideoForCourse } from "./ready-media";
 
 /**
  * UX Tranche A — Admin Course discovery without a Course identifier.
@@ -31,7 +32,6 @@ const MANIFEST = "kuwait-university-launch-v1";
 const ANY_INSTITUTION = "00000000-0000-0000-0000-000000000000";
 const LAUNCH_UNIVERSITY = "Kuwait University";
 const SHARED_SUBJECT_CODE = "0418-320";
-const READY_ASSET_VERSION_ID = "60000000-0000-0000-0000-000000000001";
 /** Distinctive so no other spec's title search can match these. */
 const FILLER_TITLE_PREFIX = "UXA Directory Filler";
 /** Mirrors catalog.LifecycleDirectoryLimit, the server's bound on one directory read. */
@@ -134,10 +134,11 @@ async function authorCourse(
   );
   expect(lesson.status(), await lesson.text()).toBe(201);
   const lessonID = (await lesson.json() as { id: string }).id;
+  const readyAssetVersionID = seedReadyVideoForCourse(courseID, INSTRUCTOR.accountID);
 
   const video = await instructor.put(
     `/api/v1/courses/${courseID}/revisions/${revisionID}/lessons/${lessonID}/video`,
-    { data: { video_asset_version_id: READY_ASSET_VERSION_ID } },
+    { data: { video_asset_version_id: readyAssetVersionID } },
   );
   expect(video.status(), await video.text()).toBe(200);
 

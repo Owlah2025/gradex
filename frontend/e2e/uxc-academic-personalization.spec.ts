@@ -27,7 +27,7 @@ import { frontendOrigin } from "../src/lib/api/e2e-ports";
  * here: what is proven is the product against real data.
  *
  * The journey under test is the one an anonymous Student actually has — arrive, name their
- * university and program, browse a catalogue that reflects it, open a Course, come back, switch
+ * university and program, see the study-plan subject discovery reflect it, browse a catalogue, come back, switch
  * language, leave and return — plus the two things that must *not* happen: the browsing preference
  * silently becoming account state, and a real saved profile being overwritten by it.
  */
@@ -194,15 +194,16 @@ function programChoice(page: Page, name: string) {
 /**
  * Answers both questions on the landing page and waits for the results to be personalised.
  *
- * The wait is on the courses section retitling itself, which is the observable consequence of the
- * context resolving — not on a navigation, because completing the questions no longer leaves the
- * page.
+ * The wait is on the study-plan filters reflecting the resolved slugs, which is the observable
+ * consequence of the context resolving — not on a navigation, because completing the questions no
+ * longer leaves the page.
  */
 async function personalise(page: Page, university: string, program: string) {
   await chooseUniversity(page, university);
   await expect(page.getByTestId("academic-picker-institution")).toContainText(university);
   await programChoice(page, program).click();
-  await expect(page.getByTestId("featured-courses-context")).toBeVisible();
+  await expect(page.getByTestId("study-plan-institution")).toHaveValue(UNIVERSITY_SLUG);
+  await expect(page.getByTestId("study-plan-program")).toHaveValue(PROGRAM_SLUG);
 }
 
 async function seedLocale(context: BrowserContext, locale: "ar" | "en") {
@@ -280,14 +281,12 @@ test.describe("UX-C anonymous academic personalisation", () => {
     await expect(page.getByRole("button", { name: "Show my courses" })).toHaveCount(0);
     await programChoice(page, PROGRAM_EN).click();
 
-    // The reader stays on the landing page and the courses below are now theirs, named by the
-    // context that produced them.
+    // The reader stays on the landing page and the study-plan subject discovery below is now
+    // filtered by the context that produced it.
     await expect(page).toHaveURL(/\/$/);
-    const resolved = page.getByTestId("featured-courses-context");
-    await expect(resolved).toBeVisible();
-    await expect(resolved.getByTestId("academic-context-names")).toContainText(UNIVERSITY_EN);
-    await expect(resolved.getByTestId("academic-context-names")).toContainText(PROGRAM_EN);
-    await expect(page.getByRole("heading", { name: "Courses for you" })).toBeVisible();
+    await expect(page.getByTestId("study-plan-institution")).toHaveValue(UNIVERSITY_SLUG);
+    await expect(page.getByTestId("study-plan-program")).toHaveValue(PROGRAM_SLUG);
+    await expect(page.getByTestId("study-plan-subjects")).toBeVisible();
 
     // What was stored is the slug pair, and it says so is a device-local preference.
     const stored = await readStored(page);
@@ -299,10 +298,10 @@ test.describe("UX-C anonymous academic personalisation", () => {
     // here already — not a provenance line the compact form deliberately does not carry.
     await expect(page.getByTestId("hero-academic-trigger")).toContainText(UNIVERSITY_EN);
 
-    // The shareable, addressed catalogue is still exactly where the results point.
-    await expect(page.getByTestId("featured-courses-view-all")).toHaveAttribute(
+    // The shareable, addressed subject discovery is exactly where the resolved study plan points.
+    await expect(page.getByTestId("study-plan-view-all")).toHaveAttribute(
       "href",
-      `/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`,
+      `/en/subjects?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`,
     );
     await page.goto(`/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`);
     const bar = page.getByTestId("catalogue-academic-context");
@@ -373,7 +372,10 @@ test.describe("UX-C anonymous academic personalisation", () => {
       const back = page
         .getByTestId("breadcrumbs")
         .getByRole("link", { name: "Courses", exact: true });
-      await expect(back).toBeVisible();
+      // The canonical development lane may spend longer compiling/loading the first public Course
+      // after its long preceding suite; keep the same breadcrumb assertion without treating that
+      // bounded cold-start cost as a product failure.
+      await expect(back).toBeVisible({ timeout: 15_000 });
       await expect(back).toHaveAttribute(
         "href",
         `/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`,
@@ -567,7 +569,8 @@ test.describe("UX-C anonymous academic personalisation", () => {
     await program.focus();
     await expect(program).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page.getByTestId("featured-courses-context")).toBeVisible();
+    await expect(page.getByTestId("study-plan-institution")).toHaveValue(UNIVERSITY_SLUG);
+    await expect(page.getByTestId("study-plan-program")).toHaveValue(PROGRAM_SLUG);
     await context.close();
   });
 

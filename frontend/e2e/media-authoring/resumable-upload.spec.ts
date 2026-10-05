@@ -96,7 +96,7 @@ test("multipart interruption, reload recovery, ownership and cancellation use re
   try {
     const page = await context.newPage();
     await page.goto("/en/instructor/courses");
-    
+
     // Use seeded academic identities; no other spec needs to create a subject first.
     // Create a dedicated course so we don't pollute the shared fixture and break s15
     await page.getByTestId("toggle-new-course").click();

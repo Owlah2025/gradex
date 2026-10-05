@@ -10,6 +10,7 @@ import {
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import { openAuthoringSections } from "./authoring-sections";
+import { seedReadyVideoForCourse } from "./ready-media";
 
 const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000-0000-0000-000000000003" };
 const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
@@ -18,7 +19,6 @@ const ANY_INSTITUTION = "00000000-0000-0000-0000-000000000000";
 const LAUNCH_UNIVERSITY = "Kuwait University";
 const SHARED_SUBJECT_CODE = "0418-320";
 const ALT_SUBJECT_CODE = "0418-321";
-const READY_ASSET_VERSION_ID = "60000000-0000-0000-0000-000000000001";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Session = ReturnType<typeof issueRotatingSession>;
@@ -114,9 +114,10 @@ async function makeRevisionPublishable(
   );
   expect(lessonResponse.status(), await lessonResponse.text()).toBe(201);
   const lesson = await lessonResponse.json() as { id: string };
+  const readyAssetVersionID = seedReadyVideoForCourse(courseID, INSTRUCTOR.accountID);
   const videoResponse = await instructor.put(
     `/api/v1/courses/${courseID}/revisions/${revisionID}/lessons/${lesson.id}/video`,
-    { data: { video_asset_version_id: READY_ASSET_VERSION_ID } },
+    { data: { video_asset_version_id: readyAssetVersionID } },
   );
   expect(videoResponse.status(), await videoResponse.text()).toBe(200);
 }

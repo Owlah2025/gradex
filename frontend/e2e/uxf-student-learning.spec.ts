@@ -34,7 +34,7 @@ const TEXT = {
     lessonTwo: "Lesson 2: Variables",
     lessonThree: "Lesson 3: Functions",
     myCourses: "My courses",
-    openCourse: "Open course",
+    continueCourse: "Continue",
     activeDetail: "You can open every lesson.",
     previous: "Previous lesson",
     next: "Next lesson",
@@ -57,7 +57,7 @@ const TEXT = {
     lessonTwo: "الدرس الثاني: المتغيرات",
     lessonThree: "الدرس الثالث: الدوال",
     myCourses: "مقرراتي",
-    openCourse: "فتح المقرر",
+    continueCourse: "تابع",
     activeDetail: "يمكنك فتح كل الدروس.",
     previous: "الدرس السابق",
     next: "الدرس التالي",
@@ -168,7 +168,13 @@ for (const locale of ["en", "ar"] as const) {
     }
 
     // --- into the Course, through its own control -------------------------
-    await card.getByRole("link", { name: t.openCourse }).click();
+    // The seeded Student has a real partial Progress row, so the dashboard's primary card resumes
+    // the exact Lesson rather than discarding that state at the Course home. Follow that target,
+    // then use the Course breadcrumb to continue the Course-home assertions below.
+    await card.getByRole("link", { name: t.continueCourse }).click();
+    await page.waitForURL(`**/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_ONE}`);
+    await expect(page.getByRole("heading", { name: t.lessonOne, level: 1 })).toBeVisible();
+    await page.getByRole("link", { name: t.courseTitle }).click();
     await page.waitForURL(`**/${locale}/learn/courses/${COURSE_ID}`);
     await expect(page.getByRole("heading", { name: t.courseTitle, level: 1 })).toBeVisible();
 
@@ -178,7 +184,7 @@ for (const locale of ["en", "ar"] as const) {
     );
 
     // Authored order, and a section that says how much of itself is done.
-    const sections = page.locator("main h2");
+    const sections = page.locator("main h2").filter({ hasText: /Section|القسم/ });
     await expect(sections.nth(0)).toContainText(t.sectionOne);
     await expect(sections.nth(1)).toContainText(t.sectionTwo);
     for (const identifier of IDENTIFIERS) {

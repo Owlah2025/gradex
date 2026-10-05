@@ -71,6 +71,8 @@ func TestMain(m *testing.M) {
 	var queryEmailVerificationToken bool
 	var queryCredentialState bool
 	var previewInstitutionsFlag bool
+	var seedReadyVideoCourseID string
+	var seedReadyVideoOwnerID string
 	var invitationIDParam string
 	flag.StringVar(&dbName, "dbname", "", "Target database name")
 	flag.BoolVar(&dropOnly, "drop", false, "Drop target database and exit")
@@ -94,6 +96,8 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
 	flag.BoolVar(&previewInstitutionsFlag, "preview-institutions", false, "Add the local Student preview stack's demonstration Universities. Not part of the E2E fixture: no spec sees these rows unless this verb is passed")
+	flag.StringVar(&seedReadyVideoCourseID, "seed-ready-video-course", "", "Seed one disposable READY video Asset Version bound to this Course")
+	flag.StringVar(&seedReadyVideoOwnerID, "seed-ready-video-owner", "", "Owner Account ID for -seed-ready-video-course")
 	flag.Parse()
 	if loadtestFixtures && issueLoadtestSessionsFlag || betaLoadtestFixtures && issueBetaLoadtestSessionsFlag {
 		log.Fatalf("fixture creation and session issuance are separate operations")
@@ -240,6 +244,27 @@ func TestMain(m *testing.M) {
 			log.Fatalf("seeding preview institutions: %v", err)
 		}
 		log.Printf("seeded %d preview institutions", added)
+		os.Exit(0)
+	}
+
+	if seedReadyVideoCourseID != "" || seedReadyVideoOwnerID != "" {
+		if seedReadyVideoCourseID == "" || seedReadyVideoOwnerID == "" {
+			log.Fatalf("-seed-ready-video-course and -seed-ready-video-owner must be provided together")
+		}
+		pool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for ready video fixture: %v", err)
+		}
+		versionID, err := seedReadyVideoForCourse(ctx, pool, seedReadyVideoCourseID, seedReadyVideoOwnerID)
+		pool.Close()
+		if err != nil {
+			log.Fatalf("seeding ready video fixture: %v", err)
+		}
+		encoded, err := json.Marshal(map[string]string{"asset_version_id": versionID})
+		if err != nil {
+			log.Fatalf("encoding ready video fixture: %v", err)
+		}
+		fmt.Printf("%s", encoded)
 		os.Exit(0)
 	}
 

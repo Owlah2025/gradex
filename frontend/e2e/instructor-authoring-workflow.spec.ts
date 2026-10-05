@@ -376,7 +376,7 @@ test.describe("Arabic", () => {
     await expect(page.getByTestId("authoring-subline-BASICS")).toContainText("مكتمل");
 
     // The disclosure headings sit on the reading edge, which in Arabic is the right.
-    const trigger = await toggle(page, "CURRICULUM").boundingBox();
+    const trigger = await toggle(page, "CURRICULUM").getByText("المنهج", { exact: true }).boundingBox();
     const item = await page.getByTestId("authoring-section-CURRICULUM").boundingBox();
     expect(trigger).not.toBeNull();
     expect(item).not.toBeNull();

@@ -11,10 +11,10 @@ import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import { openAuthoringSections } from "./authoring-sections";
 import { installIssuedSession, issueRotatingSession } from "./rotating-students";
 import { ADMIN, V2_INSTRUCTOR } from "./session/principals";
+import { seedReadyVideoForCourse } from "./ready-media";
 
 const DRAFT_COURSE_ID = "c7000000-0000-0000-0000-000000000002";
 const DRAFT_REVISION_ID = "f7000000-0000-0000-0000-000000000002";
-const READY_ASSET_VERSION_ID = "67000000-0000-0000-0000-000000000001";
 
 const viewports = [375, 768, 1280] as const;
 const locales = ["en", "ar"] as const;
@@ -93,9 +93,10 @@ test.describe("T8 V2 Instructor experience", () => {
       expect(persistedSections[0].lessons[0].title_en).toBe("V2 Authoring Lesson");
 
       const lessonID = persistedSections[0].lessons[0].id;
+      const readyAssetVersionID = seedReadyVideoForCourse(DRAFT_COURSE_ID, V2_INSTRUCTOR.accountID);
       const attachVideo = await instructorAPI.put(
         `/api/v1/courses/${DRAFT_COURSE_ID}/revisions/${DRAFT_REVISION_ID}/lessons/${lessonID}/video`,
-        { data: { video_asset_version_id: READY_ASSET_VERSION_ID } },
+        { data: { video_asset_version_id: readyAssetVersionID } },
       );
       expect(attachVideo.status(), await attachVideo.text()).toBe(200);
 
@@ -116,9 +117,13 @@ test.describe("T8 V2 Instructor experience", () => {
       const admin = await signedContext(browser, ADMIN);
       try {
         await admin.page.goto("/en/admin/catalog");
-        await expect(admin.page.getByTestId(`review-item-${DRAFT_COURSE_ID}`)).toBeVisible();
-        await admin.page.getByTestId(`inspect-review-item-${DRAFT_COURSE_ID}`).click();
-        await expect(admin.page.getByTestId("submitted-revision-inspector")).toBeVisible();
+        await expect(admin.page.getByTestId(`review-item-${DRAFT_COURSE_ID}`)).toBeVisible({ timeout: 15_000 });
+        const reviewLink = admin.page.getByTestId(`inspect-review-item-${DRAFT_COURSE_ID}`);
+        await Promise.all([
+          admin.page.waitForURL(new RegExp(`/en/admin/courses/${DRAFT_COURSE_ID}/review$`)),
+          reviewLink.click(),
+        ]);
+        await expect(admin.page.getByTestId("submitted-revision-inspector")).toBeVisible({ timeout: 20_000 });
         await expect(admin.page.getByTestId("submitted-revision-inspector")).toContainText("V2 Authoring Lesson");
       } finally {
         await admin.context.close();

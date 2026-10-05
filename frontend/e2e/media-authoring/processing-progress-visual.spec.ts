@@ -193,11 +193,21 @@ test("processing progress is real, visible, accessible, and localized", async ({
   const recovered = page.getByTestId(`lesson-video-phase-${lessonID}`);
   await expect(recovered).toContainText(/Processing|Ready/, { timeout: 60_000 });
   if ((await recovered.textContent())?.includes("Processing")) {
-    const recoveredPercent = Number((await recovered.getAttribute("data-processing-percent")) ?? "-1");
-    expect(
-      recoveredPercent,
-      "after a reload the studio must show the server's own progress, not zero",
-    ).toBeGreaterThanOrEqual(midPercent);
+    // The background label is rendered from the selected revision immediately, while the first
+    // status poll may still be in flight. Wait for the persisted observation rather than sampling
+    // that transient render; READY is also authoritative if the worker finishes in the meantime.
+    await expect
+      .poll(
+        async () => {
+          if ((await recovered.getAttribute("data-upload-phase")) === "READY") return 100;
+          return Number((await recovered.getAttribute("data-processing-percent")) ?? "-1");
+        },
+        {
+          timeout: 60_000,
+          message: "after a reload the studio must show the server's own progress, not zero",
+        },
+      )
+      .toBeGreaterThanOrEqual(midPercent);
     await page.getByTestId(`lesson-video-upload-${lessonID}`).screenshot({
       path: testInfo.outputPath("processing-after-reload.png"),
     });

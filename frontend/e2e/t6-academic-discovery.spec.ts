@@ -10,6 +10,7 @@ import {
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import { openAuthoringSections } from "./authoring-sections";
+import { seedReadyVideoForCourse } from "./ready-media";
 
 /**
  * T6 — Academic Course Discovery, real browser journey.
@@ -28,7 +29,6 @@ const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000
 const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
 const MANIFEST = "kuwait-university-launch-v1";
 const ANY_INSTITUTION = "00000000-0000-0000-0000-000000000000";
-const READY_ASSET_VERSION_ID = "60000000-0000-0000-0000-000000000001";
 
 const UNIVERSITY_EN = "Kuwait University";
 const UNIVERSITY_AR = "جامعة الكويت";
@@ -132,9 +132,10 @@ async function publishAcademicCourse(
   );
   expect(lessonResponse.status(), await lessonResponse.text()).toBe(201);
   const lesson = (await lessonResponse.json()) as { id: string };
+  const readyAssetVersionID = seedReadyVideoForCourse(courseID, INSTRUCTOR.accountID);
   const videoResponse = await instructor.put(
     `/api/v1/courses/${courseID}/revisions/${revisionID}/lessons/${lesson.id}/video`,
-    { data: { video_asset_version_id: READY_ASSET_VERSION_ID } },
+    { data: { video_asset_version_id: readyAssetVersionID } },
   );
   expect(videoResponse.status(), await videoResponse.text()).toBe(200);
 

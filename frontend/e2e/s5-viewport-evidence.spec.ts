@@ -101,7 +101,7 @@ const DEFERRED_SURFACE_TERMS = ["community", "discord", "telegram", "office hour
 const LABELS = {
   en: {
     dashboardTitle: "Your learning",
-    openCourse: "Open course",
+    openCourse: "Continue",
     courseTitle: "CS101: Introduction to Programming",
     courseOutline: "Course outline",
     lessonTitle: "Lesson 1: Introduction",
@@ -112,7 +112,7 @@ const LABELS = {
   },
   ar: {
     dashboardTitle: "تعلّمك",
-    openCourse: "فتح المقرر",
+    openCourse: "تابع",
     courseTitle: "مقدمة في البرمجة",
     courseOutline: "مخطط المقرر",
     lessonTitle: "الدرس الأول: مرحباً بك",

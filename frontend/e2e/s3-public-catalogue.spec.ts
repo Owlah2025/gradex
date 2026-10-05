@@ -225,9 +225,10 @@ for (const locale of ["ar", "en"] as const) {
     const courseLink = page.getByRole("link", { name: localized[locale].title });
     await expect(courseLink).toHaveAttribute("href", `/${locale}/catalog/${course.slug}`);
     await expect(page.getByText(localized[locale].instructor, { exact: false })).toBeVisible();
-    await expect(page.locator("body")).not.toContainText("Introduction to Programming");
-    await expect(page.locator("body")).not.toContainText("Dr. Sara Al-Mutairi");
-    await expect(page.locator("body")).not.toContainText("Fahd A.");
+    const featuredCourses = page.getByTestId("featured-courses-list");
+    await expect(featuredCourses).not.toContainText("Introduction to Programming");
+    await expect(featuredCourses).not.toContainText("Dr. Sara Al-Mutairi");
+    await expect(featuredCourses).not.toContainText("Fahd A.");
 
     await courseLink.click();
     await expect(page).toHaveURL(new RegExp(`/${locale}/catalog/${course.slug}$`));

@@ -67,10 +67,16 @@ test("AD-14 Student report reaches Admin queue and can be dismissed", async ({ b
   expect(body).not.toContain(student.accountID);
   expect(body).not.toContain(ADMIN.accountID);
 
-  await adminPage.goto(`/en/admin/users/${student.accountID}`);
-  await adminPage.getByRole("tab", { name: "Audit" }).click();
-  const auditPanel = adminPage.getByRole("tabpanel", { name: "Audit" });
-  await expect(auditPanel.getByText("Reviewed; no platform action required.")).toBeVisible();
+  // Report resolution is audited against the CONTENT_REPORT target, not the
+  // reporter's ACCOUNT target. User 360 deliberately shows only account-target
+  // events, so the authoritative assertion belongs on the Admin Audit Log.
+  await adminPage.goto("/en/admin/audit");
+  await adminPage.locator("#admin-audit-action").selectOption("REPORT_RESOLVED");
+  await adminPage.getByRole("button", { name: "Apply filters" }).click();
+  const auditTable = adminPage.getByRole("table");
+  await expect(auditTable).toBeVisible();
+  await expect(auditTable).toContainText("Resolved a content report");
+  await expect(auditTable).toContainText("Reviewed; no platform action required.");
 
   await adminContext.close();
 });

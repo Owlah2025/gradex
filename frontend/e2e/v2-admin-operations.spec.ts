@@ -44,9 +44,11 @@ async function openUser(page: Page, email: string, accountID: string): Promise<v
   await page.getByPlaceholder("Name or email prefix").fill(email);
   await page.getByRole("button", { name: "Apply filters" }).click();
   const account = page.getByRole("link", { name: "Open account" });
-  await expect(account).toHaveCount(1);
-  await account.click();
-  await expect(page).toHaveURL(new RegExp(`/en/admin/users/${accountID}$`));
+  await expect(account).toHaveCount(1, { timeout: 15_000 });
+  await Promise.all([
+    page.waitForURL(new RegExp(`/en/admin/users/${accountID}$`)),
+    account.click(),
+  ]);
 }
 
 test.describe("T8 V2 Admin operations", () => {
@@ -67,6 +69,7 @@ test.describe("T8 V2 Admin operations", () => {
       await expect(admin.page.getByRole("heading", { name: "V2 Completion Course" })).toBeVisible();
 
       await admin.page.getByRole("tab", { name: "Access diagnostic" }).click();
+      await admin.page.getByLabel("Search courses").fill("V2 Completion Course");
       const diagnosticCourse = admin.page.locator("#diagnostic-course");
       await expect(diagnosticCourse).toBeVisible();
       await diagnosticCourse.selectOption(V2_COURSE_ID);
@@ -105,12 +108,31 @@ test.describe("T8 V2 Admin operations", () => {
       await expect(admin.page.getByText("Account restored.")).toBeVisible();
 
       await admin.page.reload();
+      // Notes are a separate User 360 surface. The Audit tab is reserved for the persisted
+      // account-target audit events produced by the privileged actions below.
+      await admin.page.getByRole("tab", { name: "Notes" }).click();
+      await expect(admin.page.getByRole("tabpanel", { name: "Notes" })).toContainText(
+        "V2 Admin operational note",
+      );
+      // Account suspension and reinstatement are identity security events. They are intentionally
+      // not account-target audit rows; the latter is the separate operator-activity projection.
+      await admin.page.getByRole("tab", { name: "Devices & security" }).click();
+      const securityPanel = admin.page.getByRole("tabpanel", { name: "Devices & security" });
+      await expect(securityPanel).toContainText("Account suspended");
+      await expect(securityPanel).toContainText("Account restored");
+      const securityRead = await admin.page.evaluate(async (accountID) => {
+        const response = await fetch(`/api/v1/admin/accounts/${accountID}/security-events?page=1&limit=10`, { credentials: "same-origin" });
+        return { status: response.status, history: await response.json() };
+      }, V2_ADMIN_TARGET.accountID);
+      expect(securityRead.status).toBe(200);
+      const securityHistory = securityRead.history;
+      expect(securityHistory.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event_type: "ACCOUNT_SUSPENDED", evidence: expect.objectContaining({ reason: "V2 suspension verification" }) }),
+        expect.objectContaining({ event_type: "ACCOUNT_REINSTATED", evidence: expect.objectContaining({ reason: "V2 restoration verification" }) }),
+      ]));
       await admin.page.getByRole("tab", { name: "Audit" }).click();
       const auditPanel = admin.page.getByRole("tabpanel", { name: "Audit" });
-      await expect(auditPanel.getByText("V2 Admin operational note")).toBeVisible();
       await expect(auditPanel.getByText("V2 session invalidation verification")).toBeVisible();
-      await expect(auditPanel.getByText("V2 suspension verification")).toBeVisible();
-      await expect(auditPanel.getByText("V2 restoration verification")).toBeVisible();
 
       // Grant is a real pending-admin invitation followed by the queue's approval
       // command; the entitlement is then adjusted and revoked from the persisted record.

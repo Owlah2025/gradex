@@ -49,7 +49,9 @@ test("an Instructor reaches the owned Course roster and another Instructor is de
   const expiredRow = page.getByTestId("course-roster-row").filter({ hasText: "Expired Student" });
   await expect(activeRow.locator("[data-roster-status]")).toHaveAttribute("data-roster-status", "ACTIVE");
   await expect(expiredRow.locator("[data-roster-status]")).toHaveAttribute("data-roster-status", "EXPIRED");
-  await expect(activeRow.locator("time")).toHaveCount(3);
+  // The roster exposes enrollment, access start, access end, and last learning activity.
+  // Completion time is conditional and the active fixture is intentionally incomplete.
+  await expect(activeRow.locator("time")).toHaveCount(4);
   await expect(page.locator("body")).not.toContainText("student-active@example.test");
   await expect(page.locator("body")).not.toContainText("payment");
 
