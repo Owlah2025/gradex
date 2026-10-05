@@ -50,6 +50,8 @@ export function Footer() {
               <StudentLogo
                 surface="dark"
                 ariaLabel={t.meta.logoHomeAria}
+                loading="lazy"
+                fetchPriority="low"
                 // Larger than the header's, and without the optical nudge that
                 // aligns it to a 64px bar it is not in.
                 imageClassName="w-[124px] translate-x-0 translate-y-0 sm:w-[132px] rtl:translate-x-0"

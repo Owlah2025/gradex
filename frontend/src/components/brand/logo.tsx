@@ -18,6 +18,8 @@ export function Logo({
   imageSrc,
   surface = "theme",
   imageClassName,
+  loading,
+  fetchPriority,
 }: {
   className?: string;
   href?: string;
@@ -35,6 +37,10 @@ export function Logo({
   surface?: "theme" | "dark";
   /** Size override for the asset. Merged last, so widths here win. */
   imageClassName?: string;
+  /** Loading policy for a logo whose position is known by the caller. */
+  loading?: "eager" | "lazy";
+  /** Network priority for a logo whose position is known by the caller. */
+  fetchPriority?: "high" | "low" | "auto";
 }) {
   return (
     <Link
@@ -47,17 +53,27 @@ export function Logo({
     >
       {imageSrc ? (
         surface === "dark" ? (
-          <LogoImage src={DARK_LOGO_SRC} className="block" imageClassName={imageClassName} />
+          <LogoImage
+            src={DARK_LOGO_SRC}
+            className="block"
+            loading={loading}
+            fetchPriority={fetchPriority}
+            imageClassName={imageClassName}
+          />
         ) : (
           <>
             <LogoImage
               src={imageSrc}
               className="block dark:hidden"
+              loading={loading}
+              fetchPriority={fetchPriority}
               imageClassName={imageClassName}
             />
             <LogoImage
               src={DARK_LOGO_SRC}
               className="hidden dark:block"
+              loading="lazy"
+              fetchPriority="low"
               imageClassName={imageClassName}
             />
           </>
@@ -91,6 +107,8 @@ export function StudentLogo({
   ariaLabel,
   surface,
   imageClassName,
+  loading,
+  fetchPriority,
 }: {
   className?: string;
   ariaLabel?: string;
@@ -98,6 +116,10 @@ export function StudentLogo({
   surface?: "theme" | "dark";
   /** Size override, for a surface where the header's size is wrong. */
   imageClassName?: string;
+  /** Loading policy for a logo whose position is known by the caller. */
+  loading?: "eager" | "lazy";
+  /** Network priority for a logo whose position is known by the caller. */
+  fetchPriority?: "high" | "low" | "auto";
 }) {
   return (
     <Logo
@@ -107,6 +129,8 @@ export function StudentLogo({
       imageSrc={LIGHT_LOGO_SRC}
       surface={surface}
       imageClassName={imageClassName}
+      loading={loading}
+      fetchPriority={fetchPriority}
     />
   );
 }
@@ -114,10 +138,14 @@ export function StudentLogo({
 function LogoImage({
   src,
   className,
+  loading = "eager",
+  fetchPriority = "high",
   imageClassName,
 }: {
   src: string;
   className: string;
+  loading?: "eager" | "lazy";
+  fetchPriority?: "high" | "low" | "auto";
   imageClassName?: string;
 }) {
   // The logo is above the fold on the landing page, so request it with the initial render.
@@ -126,8 +154,8 @@ function LogoImage({
     <img
       src={src}
       alt="GradeX"
-      loading="eager"
-      fetchPriority="high"
+      loading={loading}
+      fetchPriority={fetchPriority}
       className={cn(LOGO_IMAGE_CLASS, className, imageClassName)}
     />
   );
