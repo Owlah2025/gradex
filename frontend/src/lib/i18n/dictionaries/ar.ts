@@ -836,6 +836,8 @@ export const ar: Dictionary = {
     reasonUnavailable: "السبب غير متاح",
     diagnosticTitle: "تشخيص الوصول",
     diagnosticDescription: "اسأل مقيّم المنح المعتمد عن سبب السماح بالوصول أو رفضه.",
+    courseSearchLabel: "البحث عن المقررات",
+    courseSearchPlaceholder: "ابحث باسم المقرر",
     coursePicker: "المقرر",
     chooseCourse: "اختر مقررًا",
     diagnose: "تشخيص الوصول",

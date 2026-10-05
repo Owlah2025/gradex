@@ -793,6 +793,8 @@ export const en = {
      reasonUnavailable: "Reason unavailable",
     diagnosticTitle: "Access diagnostic",
     diagnosticDescription: "Ask the authoritative entitlement evaluator why this account can or cannot access a course.",
+    courseSearchLabel: "Search courses",
+    courseSearchPlaceholder: "Search by course title",
     coursePicker: "Course",
     chooseCourse: "Choose a course",
     diagnose: "Diagnose access",

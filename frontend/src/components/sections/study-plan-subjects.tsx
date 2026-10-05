@@ -68,31 +68,44 @@ export function StudyPlanSubjects() {
   const [subjects, setSubjects] = React.useState<SubjectState>({ kind: "idle" });
   const [subjectAttempt, setSubjectAttempt] = React.useState(0);
   const [requested, setRequested] = React.useState<Set<string>>(new Set());
-  const initialized = React.useRef(false);
+  // Keep the displayed filters aligned with a context that another landing surface just resolved.
+  // The hero and this section mount together, so a one-time initialization misses a later
+  // anonymous selection after the section has already rendered. Keying only on the resolved
+  // source and slugs also preserves deliberate local filter changes for a profile-backed Student.
+  const lastResolvedSelection = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (
       context.status !== "ready" ||
-      context.profileStatus !== "ready" ||
-      initialized.current
+      context.profileStatus !== "ready"
     )
       return;
-    initialized.current = true;
+
+    const resolvedSelection =
+      context.source === "profile"
+        ? `profile:${context.profile?.institution_slug ?? ""}:${context.profile?.program_slug ?? ""}`
+        : context.source === "anonymous"
+          ? `anonymous:${context.anonymous?.institutionSlug ?? ""}:${context.anonymous?.programSlug ?? ""}`
+          : "none";
+    if (lastResolvedSelection.current === resolvedSelection) return;
+    lastResolvedSelection.current = resolvedSelection;
+
     if (context.source === "profile" && context.profile?.institution_slug) {
       setInstitution(context.profile.institution_slug);
       setProgram(context.profile.program_slug ?? "");
       return;
     }
-    if (context.anonymous) {
-      setInstitution(context.anonymous.institutionSlug);
-      setProgram(context.anonymous.programSlug);
-    }
+
+    setInstitution(context.anonymous?.institutionSlug ?? "");
+    setProgram(context.anonymous?.programSlug ?? "");
   }, [
     context.status,
     context.profileStatus,
     context.source,
-    context.profile,
-    context.anonymous,
+    context.profile?.institution_slug,
+    context.profile?.program_slug,
+    context.anonymous?.institutionSlug,
+    context.anonymous?.programSlug,
   ]);
 
   const options = useAcademicOptions(locale, institution);
