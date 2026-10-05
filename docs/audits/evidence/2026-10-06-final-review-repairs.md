@@ -38,6 +38,13 @@ denials and never reached the unavailable UI during 90 seconds of active
 playback. The five-second deadline bounds that retry behavior, does not restart
 on repeated failures, and is canceled by a successful fragment or teardown.
 
+The stronger outage test then reproduced position loss across sources that
+never loaded metadata: an explicit retry resumed at zero rather than the saved
+12 seconds (`/var/tmp/gradex-repair-storage-position-before.log`). The player
+now retains its last saved position and intended play state until metadata
+allows a replacement source to restore them. The assertion remains 12 seconds
+after repeated real storage failures and explicit retry.
+
 Inspected prior browser/seeder repairs were continued in `6f4b7fc` and
 `7909730`. Course selection uses the existing server search contract; resolved
 academic context updates an already-mounted study-plan section. Dynamically
@@ -63,14 +70,15 @@ system. No protected application database was reset.
 - Backend build, ordinary/integration vet, and race-enabled unit tests passed
   (`/var/tmp/gradex-repair-backend-unit.log`).
 - Initial frontend lint/typecheck passed and `npm test` executed 861 passing
-  tests; the follow-up adds runtime deadline/cancellation regressions.
+  tests; with deadline/cancellation regressions, 863 unit tests pass.
 - The final short-expiry Chromium playback suite passed 3/3
-  (`/var/tmp/gradex-repair-storage-playback-fixed.log`, run `muvvtdy1xd5uv6c6`). The first
+  (`/var/tmp/gradex-repair-playback-strong-progress.log`, run `muvw6kiy52hfu7cc`). The first
   test proves an old capability returns exact 404 NOT_FOUND, a fresh authorized
-  source plays past the saved position, database progress persists, the old
-  lease is gone, and SPA navigation releases the current lease. Further tests
-  prove bounded real storage-segment 403 failures/user retry and terminal
-  media-element recovery with paused position preserved. The earlier manifest-
+  source plays past the saved position, the replacement reporter persists new
+  progress at 10 seconds and retains it after navigation, the old lease is gone,
+  and SPA navigation releases the current lease. Further tests prove bounded
+  real storage-segment 403 failures/user retry with the saved 12-second paused
+  position preserved, and terminal media-element recovery. The earlier manifest-
   intercepted exhaustion proof is superseded by this stronger real-storage test.
 
 These are targeted working-tree repair checks. The frozen-checkout gate ledger
