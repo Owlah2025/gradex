@@ -25,7 +25,7 @@ import { execFileSync } from "child_process";
  * this constant has always had, so an unset environment behaves exactly as before for every
  * existing E2E suite.
  */
-export const E2E_TMP_DIR = process.env.GRADEX_E2E_TMP_DIR || "/var/tmp";
+export const E2E_TMP_DIR = process.env.GRADEX_E2E_TMP_DIR || "/tmp";
 
 export const API_LOG_DIR = E2E_TMP_DIR;
 /** Run-owned log naming pattern: `<tmp>/gradex-s5-e2e-api-<runId>.log`, mode 0600. */

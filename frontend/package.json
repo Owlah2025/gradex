@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "legal:generate": "node scripts/generate-legal-content.mjs",
     "legal:check": "node scripts/generate-legal-content.mjs --check",
-    "test": "npm run legal:check && rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && NODE_PATH=./node_modules node --test ../.frontend-test-build/",
+    "test": "GRADEX_E2E_TMP_DIR=/tmp npm run legal:check && rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && GRADEX_E2E_TMP_DIR=/tmp NODE_PATH=./node_modules node --test ../.frontend-test-build/",
     "test:s2-ui": "node scripts/verify-s2-taxonomy-ui.mjs",
     "test:e2e": "playwright test",
     "test:e2e:canonical": "node scripts/e2e-canonical.mjs",

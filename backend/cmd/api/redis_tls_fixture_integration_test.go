@@ -28,7 +28,7 @@ type tlsRedisFixture struct {
 
 func newTLSRedisFixture(t *testing.T) tlsRedisFixture {
 	t.Helper()
-	dir, err := os.MkdirTemp("/var/tmp", "gradex-t108-redis-")
+	dir, err := os.MkdirTemp("", "gradex-t108-redis-")
 	if err != nil {
 		t.Fatal(err)
 	}

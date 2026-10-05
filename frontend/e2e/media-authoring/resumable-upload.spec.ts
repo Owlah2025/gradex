@@ -92,14 +92,38 @@ test("multipart interruption, reload recovery, ownership and cancellation use re
     },
   ]);
   try {
-    const candidate = await ownerAPI.put(
-      `/api/v1/courses/${courseID}/candidate`,
-    );
-    expect(candidate.status(), await candidate.text()).toBe(200);
     const page = await context.newPage();
     await page.goto("/en/instructor/courses");
-    await page.getByTestId(`owned-course-${courseID}`).click();
+    
+    // Create a dedicated course so we don't pollute the shared fixture and break s15
+    await page.getByTestId("toggle-new-course").click();
+    await page.getByTestId("new-course-institution").selectOption({ index: 1 });
+    await page.getByTestId("new-course-subject-search").fill("CS101");
+    await expect(page.getByTestId("new-course-subject-result")).toBeVisible();
+    await page.getByTestId("new-course-subject-result").click();
+    await page.getByTestId("new-course-title-ar").fill("دورة الرفع التجريبية");
+    await page.getByTestId("new-course-title-en").fill(`Resumable Upload ${Date.now()}`);
+    await page.getByTestId("new-course-description-ar").fill("وصف");
+    await page.getByTestId("new-course-description-en").fill("Desc");
+    await page.getByTestId("create-course").click();
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
     await openAuthoringSections(page);
+    const newCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
+
+    // Add Section
+    await page.getByTestId("section-title-ar").fill("القسم");
+    await page.getByTestId("section-title-en").fill("Media Section");
+    await page.getByTestId("add-section").click();
+    const sectionRow = page.locator('[data-testid^="section-"]').first();
+    await expect(sectionRow).toBeVisible();
+    await expect(sectionRow).toContainText("Media Section");
+    const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace("section-", "");
+
+    // Add Lesson
+    await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس");
+    await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Media Lesson");
+    await page.getByTestId(`add-lesson-${sectionID}`).click();
+    await expect(sectionRow).toContainText("Media Lesson");
     const control = page
       .locator('[data-testid^="lesson-video-upload-"]')
       .first();
@@ -156,7 +180,7 @@ test("multipart interruption, reload recovery, ownership and cancellation use re
     ).toEqual([1, 3]);
 
     await page.reload();
-    await page.getByTestId(`owned-course-${courseID}`).click();
+    await page.getByTestId(`owned-course-${newCourseID}`).click();
     await openAuthoringSections(page);
     await expect(
       control.getByText(
@@ -173,7 +197,7 @@ test("multipart interruption, reload recovery, ownership and cancellation use re
     expect(attempts.get(3)).toBe(1);
     expect(attempts.get(2)).toBe(4);
     await page.reload();
-    await page.getByTestId(`owned-course-${courseID}`).click();
+    await page.getByTestId(`owned-course-${newCourseID}`).click();
     await openAuthoringSections(page);
     await expect(
       control.getByText("Video attached to this lesson.", { exact: true }),

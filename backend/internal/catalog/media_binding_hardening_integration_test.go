@@ -38,7 +38,7 @@ func seedReadyCourseVideo(t *testing.T, f *d5Fixture, id string) {
 		{`UPDATE media_asset_versions SET state='SCANNING' WHERE id=$1::uuid`, []any{id}},
 		{`UPDATE media_asset_versions SET state='SCAN_PASSED',successful_scan_attempt_id=$2::uuid WHERE id=$1::uuid`, []any{id, scan}},
 		{`UPDATE media_asset_versions SET state='PROCESSING',trusted_duration_ms=60000 WHERE id=$1::uuid`, []any{id}},
-		{`INSERT INTO video_renditions(logical_asset_id,asset_version_id,rendition_name,storage_object_key,width,height,bitrate_kbps,duration_ms) VALUES($1::uuid,$2::uuid,'720p',$3,1280,720,2800,60000)`, []any{logical, id, "media/" + id + "/fixture/720p/playlist.m3u8"}},
+		{`INSERT INTO video_renditions(asset_version_id,name,storage_object_key,width,height,bitrate_kbps,duration_ms) VALUES($1::uuid,'720p',$2,1280,720,2800,60000)`, []any{id, "media/" + id + "/fixture/720p/playlist.m3u8"}},
 		{`UPDATE media_asset_versions SET state='READY' WHERE id=$1::uuid`, []any{id}},
 	}
 	for _, statement := range statements {
