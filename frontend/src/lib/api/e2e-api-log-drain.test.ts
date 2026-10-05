@@ -19,6 +19,19 @@ async function settled(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
+async function waitForFileSize(path: string, expectedBytes: number): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    try {
+      if (fs.statSync(path).size >= expectedBytes) return;
+    } catch {
+      // The write stream may not have opened its file yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(fs.statSync(path).size, expectedBytes, "drained output did not reach the run-owned file");
+}
+
 test("api log drain: the run-owned path follows the documented pattern", () => {
   assert.ok(apiLogPath("abc123").endsWith("/gradex-s5-e2e-api-abc123.log"));
 });
@@ -32,16 +45,19 @@ test("api log drain: stdout and stderr are both consumed and cannot fill", async
   try {
     assert.equal(activeApiLogPath(), logPath);
 
-    // Far more than the ~64 KB pipe buffer that wedged the API when nothing was reading.
-    const block = "x".repeat(1024);
-    for (let written = 0; written < 200; written += 1) child.stdout.write(`${block}\n`);
-    for (let written = 0; written < 200; written += 1) child.stderr.write(`${block}\n`);
-    await settled();
+    // Far more than the ~64 KB pipe buffer that wedged the API when nothing was reading. Distinct
+    // payloads let the assertion prove that both sources, not just one, reached the run-owned file.
+    const stdoutLine = `stdout-${"x".repeat(1024)}\n`;
+    const stderrLine = `stderr-${"y".repeat(1024)}\n`;
+    for (let written = 0; written < 200; written += 1) child.stdout.write(stdoutLine);
+    for (let written = 0; written < 200; written += 1) child.stderr.write(stderrLine);
+    const expectedBytes = Buffer.byteLength(stdoutLine) * 200 + Buffer.byteLength(stderrLine) * 200;
+    await waitForFileSize(logPath, expectedBytes);
 
-    // Both streams kept flowing: a blocked pipe would leave them unreadable and paused.
-    assert.equal(child.stdout.isPaused(), false, "stdout is not being consumed");
-    assert.equal(child.stderr.isPaused(), false, "stderr is not being consumed");
-    assert.ok(fs.statSync(logPath).size > 300_000, "drained output did not reach the run-owned file");
+    const drained = fs.readFileSync(logPath, "utf-8");
+    assert.equal(Buffer.byteLength(drained), expectedBytes, "drained output was truncated");
+    assert.equal((drained.match(/stdout-/g) ?? []).length, 200, "stdout was not fully consumed");
+    assert.equal((drained.match(/stderr-/g) ?? []).length, 200, "stderr was not fully consumed");
   } finally {
     closeApiLogDrain();
     // The stream opens asynchronously, so settle before unlinking or a late open recreates it.
