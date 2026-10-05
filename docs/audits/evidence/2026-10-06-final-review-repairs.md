@@ -17,7 +17,7 @@ New closure evidence must identify the committed checkout actually tested.
 | Review finding | Repair | Regression contract |
 |---|---|---|
 | A4-001, Sev2, admin/identity | `3ddcbf6`: User 360 passes its transaction through device history and cooldown reads. | One pool connection suffices; two concurrent requests saturate a two-connection pool without nested acquisition. Active/revoked history and privileged-read audit are preserved; failed audit returns no view and rolls back. |
-| A5-001, Sev2, Student playback | `2edd386`: HLS/native error handling, source fencing, two automatic reauthorizations per lesson, explicit retry, and teardown. | Normal authorization evaluates session/device/entitlement/lease; recovery restores position and play state. Exhaustion shows a recoverable error. Stale requests release their own leases. |
+| A5-001, Sev2, Student playback | `2edd386` and the follow-up recorded in the frozen ledger: HLS/native error handling, source fencing, two automatic reauthorizations per lesson, explicit retry, and teardown. Persistent non-fatal authorization errors have a five-second recovery deadline canceled by successful fragments. | Normal authorization evaluates session/device/entitlement/lease; recovery restores position and play state. Exhaustion shows a recoverable error. Stale requests release their own leases. |
 | False-green gate evidence | `2edd386` enumerates compiled unit test files; `1b87319` commits inspected prior formatting, strict payload, owned-media fixtures, and constant-time secret comparison. | Actual tests execute. Forged unknown fields fail with exact MALFORMED_JSON and no course persistence. Privileged mutation/audit assertions remain behavioral. |
 | CAT-01, Sev2, catalog/media | `a227226`: real course-owned asset versions, trusted scan/processing fixtures, catalog/admin CI coverage, and logical asset validation/locking. | Wrong owner/course/lesson/kind denials preserve selected video and audit count; composite FK rejects direct cross-course writes. Publication refuses retired assets and serializes concurrent retirement. Legacy-only validation remains supported. |
 
@@ -27,6 +27,16 @@ READY branch ignored logical asset retirement and locked only the version.
 both rows when the validator is transactional. The existing dependency
 revalidation and controlled concurrency tests exposed the failure before this
 repair; their assertions were retained.
+
+The first frozen browser run exposed a conflict with the S5 no-protected-mocks
+guard: the initial exhaustion test intercepted the application manifest.
+That run failed and was interrupted after 205 passes; it is not a green gate.
+The guard is unchanged. The replacement injects real segment 403s in the
+run-owned local storage fixture while API authorization/manifests remain live.
+It then reproduced a second A5-001 failure: hls.js kept reporting non-fatal
+denials and never reached the unavailable UI during 90 seconds of active
+playback. The five-second deadline bounds that retry behavior, does not restart
+on repeated failures, and is canceled by a successful fragment or teardown.
 
 Inspected prior browser/seeder repairs were continued in `6f4b7fc` and
 `7909730`. Course selection uses the existing server search contract; resolved
@@ -52,14 +62,16 @@ system. No protected application database was reset.
   including a READY resource refusal (`/var/tmp/gradex-repair-catalog-race.log`).
 - Backend build, ordinary/integration vet, and race-enabled unit tests passed
   (`/var/tmp/gradex-repair-backend-unit.log`).
-- Frontend lint/typecheck passed and `npm test` executed 861 passing tests.
-- Short-expiry Chromium playback suite passed 3/3
-  (`/var/tmp/gradex-repair-playback-e2e.log`, run `muvuf46xrvsd2iuy`). The first
+- Initial frontend lint/typecheck passed and `npm test` executed 861 passing
+  tests; the follow-up adds runtime deadline/cancellation regressions.
+- The final short-expiry Chromium playback suite passed 3/3
+  (`/var/tmp/gradex-repair-storage-playback-fixed.log`, run `muvvtdy1xd5uv6c6`). The first
   test proves an old capability returns exact 404 NOT_FOUND, a fresh authorized
   source plays past the saved position, database progress persists, the old
   lease is gone, and SPA navigation releases the current lease. Further tests
-  prove bounded repeated 403 failures/user retry and terminal media-element
-  recovery with paused position preserved.
+  prove bounded real storage-segment 403 failures/user retry and terminal
+  media-element recovery with paused position preserved. The earlier manifest-
+  intercepted exhaustion proof is superseded by this stronger real-storage test.
 
 These are targeted working-tree repair checks. The frozen-checkout gate ledger
 below must be completed before treating the repair task as verified.

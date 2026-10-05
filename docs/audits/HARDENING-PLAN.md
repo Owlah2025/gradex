@@ -67,6 +67,9 @@ It fences stale callbacks, tears down listeners, restores position, and keeps
 session/device/entitlement/lease checks. Explicit retry resets the budget.
 Three short-expiry browser tests cover real expired delivery, persisted
 progress and lease release, exhaustion/retry, and media-element recovery.
+The follow-up replaces manifest interception with real local storage segment
+denials and gives persistent non-fatal authorization retries a five-second
+deadline, canceled by successful fragment delivery. The S5 no-mocks guard remains.
 The following requirements are retained as review criteria; actual Safari
 and production-provider acceptance remain separate from Chromium evidence.
 
