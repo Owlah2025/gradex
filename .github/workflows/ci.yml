@@ -271,7 +271,7 @@ jobs:
   admission-integration:
     name: Admission Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     services:
       postgres:
         image: postgres:16
@@ -309,6 +309,11 @@ jobs:
           go test -tags=integration ./internal/identity ./internal/outbox
           go test -timeout=15m -tags=integration ./internal/httpapi
           go test -tags=integration ./internal/catalog ./internal/catalogpublic ./internal/admin ./internal/ratelimit ./internal/learning ./internal/access ./internal/entitlement
+          # Media and upload binding, academic, email, playback-lease and command
+          # suites. Each owns a distinctly named disposable database, and cmd/api
+          # starts its own TLS Redis container. Left out of CI, their fixtures
+          # silently drifted from the stricter media-binding schema.
+          go test -timeout=20m -tags=integration ./internal/media ./internal/academic/... ./internal/email ./internal/legacymigrate ./internal/db/e2equery ./internal/playback ./cmd/api ./cmd/migrate
 
   guards:
     name: Guards
