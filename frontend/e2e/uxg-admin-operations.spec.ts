@@ -341,29 +341,34 @@ for (const [name, route] of SHOTS) {
           viewport: { width, height: width === 390 ? 900 : 1000 },
           colorScheme: theme,
         });
-        await signInAdmin(context, locale);
-        await context.addInitScript(
-          (value) => window.localStorage.setItem("theme", value),
-          theme,
-        );
-        const page = await context.newPage();
-        // The staff route carries no locale segment; the others do, so the Arabic shot asks for the
-        // Arabic address rather than relying on the saved language alone.
-        await page.goto(locale === "ar" ? route.replace("/en/", "/ar/") : route);
-        await expect(page.locator("main")).toBeVisible();
-        await page.waitForTimeout(2000);
+        // Closed even when an assertion fails, so a failed capture cannot leave pages alive for the
+        // rest of the worker.
+        try {
+          await signInAdmin(context, locale);
+          await context.addInitScript(
+            (value) => window.localStorage.setItem("theme", value),
+            theme,
+          );
+          const page = await context.newPage();
+          // The staff route carries no locale segment; the others do, so the Arabic shot asks for the
+          // Arabic address rather than relying on the saved language alone.
+          await page.goto(locale === "ar" ? route.replace("/en/", "/ar/") : route);
+          await expect(page.locator("main")).toBeVisible();
+          await page.waitForTimeout(2000);
 
-        const file = path.join(
-          process.env.GRADEX_UXG_EVIDENCE_DIR || testInfo.outputDir,
-          `uxg-${name}-${locale}-${theme}-${width}.png`,
-        );
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        const shot = await page.screenshot({ fullPage: true, path: file });
-        await testInfo.attach(`uxg-${name}-${locale}-${theme}-${width}`, {
-          body: shot,
-          contentType: "image/png",
-        });
-        await context.close();
+          const file = path.join(
+            process.env.GRADEX_UXG_EVIDENCE_DIR || testInfo.outputDir,
+            `uxg-${name}-${locale}-${theme}-${width}.png`,
+          );
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          const shot = await page.screenshot({ fullPage: true, path: file });
+          await testInfo.attach(`uxg-${name}-${locale}-${theme}-${width}`, {
+            body: shot,
+            contentType: "image/png",
+          });
+        } finally {
+          await context.close();
+        }
       });
     }
   }

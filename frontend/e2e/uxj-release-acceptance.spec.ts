@@ -40,8 +40,14 @@ const FIXTURE_PASSWORD = "StudentPassword123!";
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
 const LESSON_ONE = "30000000-0000-0000-0000-000000000001";
 
-const EVIDENCE_DIR =
-  process.env.GRADEX_UXJ_EVIDENCE_DIR || path.join(__dirname, "..", "test-results", "uxj-release-evidence");
+/**
+ * Where the curated release evidence is written. `GRADEX_UXJ_EVIDENCE_DIR` puts it somewhere durable;
+ * without it the set lands in the test's own output directory, which Playwright clears at the start of
+ * every run, so one run's screenshots can never be mistaken for another's.
+ */
+function evidenceDirFor(testInfo: import("@playwright/test").TestInfo): string {
+  return process.env.GRADEX_UXJ_EVIDENCE_DIR || testInfo.outputPath("uxj-release-evidence");
+}
 
 type Role = "admin" | "anonymous" | "instructor" | "student";
 
@@ -89,7 +95,6 @@ test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext();
   studentSession = await studentCookies(context);
   await context.close();
-  fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
 });
 
 async function contextFor(
@@ -693,7 +698,37 @@ test.describe("UX-J release evidence", () => {
     { height: 900, label: "1440", width: 1440 },
   ] as const;
 
-  test("the curated release evidence set is captured", async ({ browser }) => {
+  test("the curated release evidence set is captured", async ({ browser }, testInfo) => {
+    const evidenceDir = evidenceDirFor(testInfo);
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const written: string[] = [];
+
+    /**
+     * Writes one evidence file. Any earlier copy is removed first, so a file present afterwards can
+     * only have been produced by this run, and the context is closed even when an assertion fails so
+     * a failed capture cannot leave pages alive for the rest of the worker.
+     */
+    async function capture(
+      context: BrowserContext,
+      route: string,
+      file: string,
+      check?: (page: Page) => Promise<void>,
+    ): Promise<void> {
+      try {
+        const page = await context.newPage();
+        await page.goto(route);
+        await expect(page.locator("main")).toBeVisible();
+        await page.waitForTimeout(600);
+        if (check) await check(page);
+        const target = path.join(evidenceDir, file);
+        fs.rmSync(target, { force: true });
+        await page.screenshot({ fullPage: true, path: target });
+        written.push(file);
+      } finally {
+        await context.close();
+      }
+    }
+
     for (const viewport of VIEWPORTS) {
       for (const locale of ["en", "ar"] as const) {
         for (const { name, path: route, role } of EVIDENCE) {
@@ -701,25 +736,20 @@ test.describe("UX-J release evidence", () => {
             height: viewport.height,
             width: viewport.width,
           });
-          const page = await context.newPage();
-          await page.goto(route.startsWith("/en") ? `/${locale}${route.slice(3)}` : route);
-          await expect(page.locator("main")).toBeVisible();
-          await page.waitForTimeout(600);
-
-          // A page-level sideways scroll is a mobile defect, so the capture records it rather than
-          // leaving it for a reviewer to notice in an image.
-          if (viewport.width === 390) {
-            const overflows = await page.evaluate(
-              () => document.documentElement.scrollWidth > window.innerWidth + 1,
-            );
-            expect(overflows, `${name} scrolls sideways at 390px in ${locale}`).toBe(false);
-          }
-
-          await page.screenshot({
-            fullPage: true,
-            path: path.join(EVIDENCE_DIR, `${viewport.label}-${locale}-${name}.png`),
-          });
-          await context.close();
+          await capture(
+            context,
+            route.startsWith("/en") ? `/${locale}${route.slice(3)}` : route,
+            `${viewport.label}-${locale}-${name}.png`,
+            async (page) => {
+              // A page-level sideways scroll is a mobile defect, so the capture records it rather than
+              // leaving it for a reviewer to notice in an image.
+              if (viewport.width !== 390) return;
+              const overflows = await page.evaluate(
+                () => document.documentElement.scrollWidth > window.innerWidth + 1,
+              );
+              expect(overflows, `${name} scrolls sideways at 390px in ${locale}`).toBe(false);
+            },
+          );
         }
       }
     }
@@ -736,18 +766,23 @@ test.describe("UX-J release evidence", () => {
       const context = await contextFor(browser, role, "en", { height: 900, width: 1440 });
       // The stored preference, for the reason given in the dark-theme suite above.
       await context.addInitScript(() => window.localStorage.setItem("theme", "dark"));
-      const page = await context.newPage();
-      await page.goto(route);
-      await expect(page.locator("main")).toBeVisible();
-      await page.waitForTimeout(600);
-      await page.screenshot({ fullPage: true, path: path.join(EVIDENCE_DIR, `dark-1440-en-${name}.png`) });
-      await context.close();
+      await capture(context, route, `dark-1440-en-${name}.png`);
     }
 
-    const captured = fs.readdirSync(EVIDENCE_DIR).filter((file) => file.endsWith(".png"));
-    expect(captured.length, "the release evidence set is incomplete").toBe(
+    // Every file of the set, by name, written by this run and non-empty. A directory count would let a
+    // stale file from an earlier run stand in for a capture this run never made.
+    expect(new Set(written).size, "the release evidence set is incomplete").toBe(
       VIEWPORTS.length * 2 * EVIDENCE.length + DARK.length,
     );
+    for (const file of written) {
+      expect(fs.statSync(path.join(evidenceDir, file)).size, `${file} is empty`).toBeGreaterThan(0);
+    }
+    if (!process.env.GRADEX_UXJ_EVIDENCE_DIR) {
+      const present = fs.readdirSync(evidenceDir).filter((file) => file.endsWith(".png")).sort();
+      expect(present, "the run-owned evidence directory holds files this run did not write").toEqual(
+        [...written].sort(),
+      );
+    }
   });
 });
 
