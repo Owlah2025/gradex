@@ -79,11 +79,13 @@ async function openCurriculum(page: Page, locale: "en" | "ar", viewport?: { widt
   await expect(page.getByTestId("curriculum")).toBeVisible();
 }
 
-async function keyboardMove(page: Page, testID: string, times: number, direction: "ArrowUp" | "ArrowDown") {
+/**
+ * Picks the item up, moves it, and drops it, waiting at each step for the sortable to acknowledge the
+ * key. Pressing the keys back to back races the keyboard sensor: a move or the drop can land before
+ * the pick-up is active, and then no order is ever sent.
+ */
+async function keyboardReorder(page: Page, testID: string, times: number, direction: "ArrowUp" | "ArrowDown") {
   const handle = page.getByTestId(testID);
-  const orderResponse = page.waitForResponse((response) =>
-    response.request().method() === "PATCH" && response.url().includes("/order"),
-  );
   const announcements = page.locator('[id^="DndLiveRegion-"]');
   await handle.focus();
   await handle.press("Space");
@@ -95,8 +97,15 @@ async function keyboardMove(page: Page, testID: string, times: number, direction
   }
   await handle.press("Space");
   await expect(handle).not.toHaveAttribute("aria-pressed", "true");
+}
+
+async function keyboardMove(page: Page, testID: string, times: number, direction: "ArrowUp" | "ArrowDown") {
+  const orderResponse = page.waitForResponse((response) =>
+    response.request().method() === "PATCH" && response.url().includes("/order"),
+  );
+  await keyboardReorder(page, testID, times, direction);
   expect((await orderResponse).ok()).toBe(true);
-  await expect(handle).toBeFocused();
+  await expect(page.getByTestId(testID)).toBeFocused();
 }
 
 async function pointerDrag(page: Page, sourceTestID: string, targetTestID: string) {
@@ -152,12 +161,8 @@ test("D-102 rejected order rolls back without losing concurrent unsaved details"
   });
   await openCurriculum(page, "en");
   reject = true;
-  const handle = page.getByTestId(`section-drag-handle-${sectionIDs[2]}`);
-  await handle.focus();
-  await handle.press("Space");
-  await handle.press("ArrowUp");
-  await handle.press("ArrowUp");
-  await handle.press("Space");
+  // The rejection is held for 1.5s, so the title below is edited while the order is still in flight.
+  await keyboardReorder(page, `section-drag-handle-${sectionIDs[2]}`, 2, "ArrowUp");
   await expect.poll(() => reorderAttempts).toBe(1);
   await page.getByTestId("authoring-toggle-BASICS").click();
   await page.getByTestId("revision-title-en").fill("Unsaved local title");
