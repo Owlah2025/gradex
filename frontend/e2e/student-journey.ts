@@ -205,6 +205,9 @@ export async function completePurchaseConfirmation(page: Page): Promise<Purchase
   expect(page.isClosed()).toBe(false);
   expect(page.url()).toBe(gradexURL);
 
+  // The popup is announced before its wa.me navigation commits. Closing it mid-commit has left
+  // `close()` waiting until the test timed out, so let the stubbed handoff finish loading first.
+  await handoffPage.waitForLoadState("domcontentloaded");
   await handoffPage.close();
   expect(persistedPayload).toBeDefined();
   return { response: persistedPayload!, handoffURL };
