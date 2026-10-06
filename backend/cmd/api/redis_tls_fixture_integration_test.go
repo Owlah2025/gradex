@@ -28,7 +28,10 @@ type tlsRedisFixture struct {
 
 func newTLSRedisFixture(t *testing.T) tlsRedisFixture {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "gradex-t108-redis-")
+	// The certificates are bind-mounted into a Docker container, so they must live where the Docker
+	// daemon can see them. A snap-packaged daemon has its own private /tmp and cannot see the
+	// default temporary directory; /var/tmp is shared with the host.
+	dir, err := os.MkdirTemp("/var/tmp", "gradex-t108-redis-")
 	if err != nil {
 		t.Fatal(err)
 	}
