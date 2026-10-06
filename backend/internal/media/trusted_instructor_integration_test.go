@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // The D-088 trusted-Instructor launch profile, end to end.
@@ -150,7 +151,19 @@ func (f *trustedInstructorFixture) mustStage(
 // preview upload must bind to.
 func (f *trustedInstructorFixture) draftRevision(t *testing.T) string {
 	t.Helper()
-	revisionID := uuid.NewString()
+	// The fixture's real Lesson already lives in the Course's draft revision, and a Course has one
+	// draft revision, so a preview binds to that revision rather than to a second revision number 1.
+	var revisionID string
+	err := f.pool.QueryRow(f.ctx, `
+		SELECT id::text FROM course_revisions WHERE course_id = $1::uuid AND state = 'DRAFT'
+	`, f.courseID).Scan(&revisionID)
+	if err == nil {
+		return revisionID
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("reading the draft Course revision: %v", err)
+	}
+	revisionID = uuid.NewString()
 	if _, err := f.pool.Exec(f.ctx, `
 		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
 		VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'معاينة', 'Preview')

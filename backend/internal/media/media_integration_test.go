@@ -316,6 +316,9 @@ func TestBeginLessonVideoUploadDoesNotClaimLessonAndOrdersReplacementIntents(t *
 	f := newMediaFixture(t)
 	revisionID, sectionIdentityID, sectionRowID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	lessonIdentityID, lessonRowID, existingVideoID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	// The Lesson's current selection is a real video version of this Course: the composite
+	// course_lessons_video_asset_course_fk refuses a selection that names no version of the Course.
+	existingAssetID := uuid.NewString()
 	seedStatements := []struct {
 		query string
 		args  []any
@@ -327,6 +330,10 @@ func TestBeginLessonVideoUploadDoesNotClaimLessonAndOrdersReplacementIntents(t *
 		  VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم', 'Section', 0)`, []any{sectionRowID, revisionID, f.courseID, sectionIdentityID}},
 		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id)
 		  VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{lessonIdentityID, f.courseID, sectionIdentityID}},
+		{`INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility)
+		  VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, $4::uuid, 'PROTECTED')`, []any{existingAssetID, f.instructorID, f.courseID, lessonIdentityID}},
+		{`INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
+		  VALUES ($1::uuid, $2::uuid, 'VIDEO', 'QUARANTINED', $3, 'v1', 'video/mp4', 12)`, []any{existingVideoID, existingAssetID, "quarantine/" + f.courseID + "/" + existingVideoID + "/source"}},
 		{`INSERT INTO course_lessons (
 			id, section_id, course_id, section_identity_id, lesson_identity_id,
 			title_ar, title_en, position, video_asset_version_id
