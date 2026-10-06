@@ -14,8 +14,9 @@ prioritized plan, not authorization to start another implementation batch.
 Current decision:
 
 - No Sev1 was established.
-- **A4-001**, **A5-001**, and **CAT-01** have committed repairs and targeted
-  regression evidence; the repaired tree needs a fresh independent review.
+- **A4-001**, **A5-001**, and **CAT-01** have committed repairs, regression
+  evidence, and green local gates on frozen software `0235c43`; the repaired
+  tree needs a fresh independent review.
 - The cross-course media/lesson binding, Admin lockout, metadata admission, and
   the primary durable resumable-upload deliverable are repaired in committed
   history.

@@ -231,7 +231,9 @@ This is qualitative; the repository contains no benchmark proving capacity at
 
 Use the [repair evidence](evidence/2026-10-06-final-review-repairs.md) for exact
 checkout identity, commands, outcomes, disposable infrastructure, and declared
-skips. The rejected `GATES-1.md` committed-head assertion is not closure proof.
+skips. Local gates passed on frozen software `0235c43`, including the full
+catalog/HTTP API integrations and real storage/playback recovery suites.
+The rejected `GATES-1.md` committed-head assertion is not closure proof.
 Local repair completion is distinct from overall campaign completion: a fresh
 independent final review must inspect the frozen tree and return APPROVE.
 Production R2/scanner/manual acceptance, migration 0054 legacy-ID preflight,

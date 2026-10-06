@@ -81,12 +81,100 @@ system. No protected application database was reset.
   position preserved, and terminal media-element recovery. The earlier manifest-
   intercepted exhaustion proof is superseded by this stronger real-storage test.
 
-These are targeted working-tree repair checks. The frozen-checkout gate ledger
-below must be completed before treating the repair task as verified.
+These were targeted working-tree repair checks. The completed frozen-checkout
+ledger below supplies the committed-software closure evidence.
 
 ## Frozen-checkout gates
 
-Pending. No all-green committed-head assertion is made by this draft ledger.
+The software checkout is frozen at
+`0235c43dc79f486981eac20744c89bc88090aed4`, detached at
+`/home/owlah/worktrees/gradex-final-repair-3`. Its tracked working tree was clean
+before verification. Closing documentation will be committed separately;
+the results below apply to this exact software SHA, not an uncommitted diff.
+Logs are under `/var/tmp/gradex-final-repair-gates-3`.
+
+| Gate | Command / proof | Result |
+|---|---|---|
+| Formatting and whitespace | `gofmt -l .` in backend; `git diff --check 45e66f0 HEAD` | Empty output, pass |
+| Repository guards | `./scripts/docs-guard.sh`; `./scripts/expose-guard.sh` | Pass: 288 Markdown files, 21 approved exposure sites |
+| Local deployment tooling | `verify-schema-41-rollback.sh`, `verify-schema-42-rollback.sh`, `verify-compose-render.sh` under `deploy/scripts/` | Pass; local rendering and disposable database checks only |
+| Backend canonical checks | `go build ./...`; `go vet ./...`; `go vet -tags=integration ./...`; `go test -race -count=1 ./...` | Pass (`backend-unit.log`) |
+| Frontend canonical checks | `npm ci`; `npm run lint`; `npm run typecheck`; `npm test`; `npm run build` | Pass; 863 actual unit tests, zero failures/skips (`frontend-*.log`; build in `canonical-e2e.log`) |
+| Backend integration | Command below | All 11 packages pass (`backend-integration.jsonl`, no failure actions) |
+| Focused concurrency/retry races | Command below | Media, HTTP API, and catalog pass (`targeted-race.log`) |
+| Migration CLI | Run-owned `verify-migrations.sh` in the log directory | Fresh/up/idempotent-up/down-one/up reaches clean 57; production-shaped local down refuses and leaves 57; connection-error output redacts the canary password; owned database dropped (`migration-cli.log`) |
+| S3 performance | `npx playwright test --config=playwright.s3-performance.config.ts` at the same SHA in `/home/owlah/worktrees/gradex-final-render-673a31c` | 1 passed; synthetic local 4G list/detail p95 LCP 900/2416ms (`s3-performance.log`); this is not an account-capacity benchmark |
+
+All Go commands use `GOTMPDIR=/var/tmp` to avoid the local `/tmp` quota.
+The integration and race commands, run from `backend/`, were:
+
+```sh
+go test -json -tags=integration -p 1 -count=1 -timeout=20m \
+  ./internal/db ./internal/identity ./internal/outbox ./internal/httpapi \
+  ./internal/catalog ./internal/catalogpublic ./internal/admin ./internal/ratelimit \
+  ./internal/learning ./internal/access ./internal/entitlement
+
+go test -race -tags=integration -p 1 -count=1 -timeout=10m \
+  -run 'Multipart|TestAdminUser360UsesOneConnectionAndAuditsConcurrentReads|TestD5ApprovalDependencyLocksSerializeConflictingWrites|TestD5ApprovalRevalidatesEveryDependencyClass|TestLesson.*Binding|TestLessonFileAttachmentRetry' \
+  ./internal/media ./internal/httpapi ./internal/catalog
+```
+
+The exact User 360 regression is selected by name in this final race command;
+an earlier trial using a `.*Pool` expression selected no such test and is not
+evidence for that regression. The selected catalog tests cover real dependency
+retirement, kind/binding refusals, and concurrent publication writes.
+
+`npm run test:e2e:canonical` rebuilt the frontend from this checkout, then ran
+the production lane followed by the development lane. Both exited zero:
+
+| Lane | Passed | Failed | Flaky | Skipped |
+|---|---:|---:|---:|---:|
+| Production | 4 | 0 | 0 | 0 |
+| Development | 637 | 0 | 0 | 3 |
+| Aggregate | 641 | 0 | 0 | 3 |
+
+The production lane took 36.2s and development 3735.5s. The owned databases
+were `gradex_playwright_e2e_muvwd0e79s7kogjf` and
+`gradex_playwright_e2e_muvwe2a96mcnbnfd`, respectively, under
+`/var/tmp/gradex-final-repair-e2e-3`. The canonical runner's JSON summaries
+were copied to `canonical-report/` in the log directory. The S5 no-protected-
+mocks guard, real progress/journey tests, Arabic heading assertions, privileged
+mutation/audit assertions, and S11 release acceptance all passed in this run.
+
+The three declared skips are the English and Arabic production landing smoke
+cases (excluded by their mode guard in the development lane) and the existing
+UX-I read-count `fixme`. The production canonical selection runs T076, so it
+does not establish a pass for those two landing cases. No skipped case is
+counted as a pass; these are retained coverage boundaries.
+
+The standalone lanes then ran sequentially in the same frozen checkout, with
+`GOTMPDIR=/var/tmp`, `NODE_OPTIONS=--max-old-space-size=6144`, and
+`NEXT_TELEMETRY_DISABLED=1`. Each had a distinct run-owned
+`GRADEX_E2E_TMP_DIR` and external HTML report directory so canonical evidence
+was preserved:
+
+| Command from `frontend/` | Result | Run / evidence |
+|---|---|---|
+| `npm run test:e2e:playback-recovery` | 3 passed (1.4m) | `muvyn1hnq0kzzshq`, `/var/tmp/gradex-final-repair-playback-3`; `playback-recovery.log`, `playback.json`, `playback-report/` |
+| `npm run test:e2e:release` | 1 passed (50.9s) | `muvyotyvudmq09v4`, `/var/tmp/gradex-final-repair-release-3`; `release.log`, `release.json`, `release-report/` |
+| `npm run test:e2e:media-authoring` | 9 passed (6.2m) | `muvypy7cvguq0837`, `/var/tmp/gradex-final-repair-media-3`; `media-authoring.log`, `media-report/` |
+
+Playback repeats the real expiry/new progress proof and the saved-position
+storage outage regressions described above. Media authoring uses local MinIO
+and the real worker/FFmpeg. It includes the committed
+`resumable-upload.spec.ts`: part interruption, reload/reselection recovery,
+ownership refusal, and provider cancellation. The backend multipart race lane
+separately proves lost creation/provider responses and concurrent completion
+retry convergence. The unrelated untracked review duplicate is absent from this
+clean checkout and does not inflate the count. Worker READY processing,
+attachment persistence, Admin candidate preview, and protected Resource/Lab
+Material bytes with revision isolation also pass.
+
+All listed gates have completed with zero failures on the frozen software
+SHA. No test assertion or security control was weakened. The earlier failed
+or interrupted trials are retained as defect evidence, not green gates.
+This closes the assigned blocking-repair task locally; it does not grant the
+independent APPROVE verdict required for overall campaign completion.
 
 ## Remaining boundaries and risks
 
