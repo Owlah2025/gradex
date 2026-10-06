@@ -2,6 +2,13 @@
 
 ## Scope and authority
 
+> **Correction (2026-10-06 closure).** Two gate rows below were overstated:
+> `gofmt -l .` was not empty (`internal/httpapi/authorization_test.go`), and the
+> "11 packages" integration run omitted `cmd/api`, `internal/media` (run only with
+> `-run Multipart`) and other integration-tagged packages, several of which failed.
+> See [2026-10-06-final-closure.md](2026-10-06-final-closure.md) for the repairs and
+> the authoritative results on `683a67a`.
+
 The input is `.hardening-campaign/reports/FINAL-REVIEW-1.md`, which rejected
 `45e66f0..16aa3c2`. This task repairs its four blocking findings. It grants no
 production access, deployment, push, or independent approval. Optional P2/P3

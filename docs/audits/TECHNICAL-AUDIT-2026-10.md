@@ -5,8 +5,11 @@
 The A0–A7 audit was originally performed against campaign base
 `45e66f0550e3d0c6ec436bd2e9357f2de28ee33c`. This reconciliation covers the
 repair work after the independent rejection of `16aa3c2` on 2026-10-06.
-The exact frozen software revision and fresh checkout gates are recorded in
-[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md).
+The repairs are recorded in
+[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md); the
+gate results for the closing software revision `683a67a`, including corrections
+to earlier gate claims, are in the
+[final closure evidence](evidence/2026-10-06-final-closure.md).
 
 Valid prior fixture and UI repairs were inspected and continued; unrelated run
 logs and temporary review artifacts remain preserved. Only committed changes
@@ -229,10 +232,15 @@ This is qualitative; the repository contains no benchmark proving capacity at
 
 ## Recorded verification and authority boundary
 
-Use the [repair evidence](evidence/2026-10-06-final-review-repairs.md) for exact
+Use the [final closure evidence](evidence/2026-10-06-final-closure.md) for exact
 checkout identity, commands, outcomes, disposable infrastructure, and declared
-skips. Local gates passed on frozen software `0235c43`, including the full
-catalog/HTTP API integrations and real storage/playback recovery suites.
+skips. On the clean checkout of software `683a67a` every backend integration
+package passed (1449 top-level tests), the frontend ran 863 unit tests, and the
+sharded canonical E2E passed 641 with 0 failed and 3 declared skips, together
+with playback recovery, release acceptance, real-MinIO media authoring including
+resumable upload, and S3 performance. The earlier claims of an empty `gofmt` and
+of a full backend integration run on `0235c43` were incomplete and are corrected
+there.
 The rejected `GATES-1.md` committed-head assertion is not closure proof.
 Local repair completion is distinct from overall campaign completion: a fresh
 independent final review must inspect the frozen tree and return APPROVE.

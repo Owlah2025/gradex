@@ -8,15 +8,21 @@ audit base was `45e66f0550e3d0c6ec436bd2e9357f2de28ee33c`.
 
 Valid prior work was inspected and continued; unrelated run artifacts remain
 preserved. Exact checkout gates are in the
-[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md). This document is a
+[final-review repair evidence](evidence/2026-10-06-final-review-repairs.md), superseded for gate
+results by the [final closure evidence](evidence/2026-10-06-final-closure.md). This document is a
 prioritized plan, not authorization to start another implementation batch.
 
 Current decision:
 
 - No Sev1 was established.
-- **A4-001**, **A5-001**, and **CAT-01** have committed repairs, regression
-  evidence, and green local gates on frozen software `0235c43`; the repaired
-  tree needs a fresh independent review.
+- **A4-001**, **A5-001**, and **CAT-01** have committed repairs and regression
+  evidence. The 2026-10-06 closure re-ran every gate on the exact clean
+  checkout of software `683a67a`, corrected three overstated earlier gate
+  claims, and repaired the defects that exposed (media fixtures, TLS Redis
+  fixture, formatting, CI coverage, two E2E harness races, a host-memory
+  canonical runner defect). See the
+  [final closure evidence](evidence/2026-10-06-final-closure.md); the
+  independent final verdict is recorded in the campaign's FINAL-REVIEW-2.
 - The cross-course media/lesson binding, Admin lockout, metadata admission, and
   the primary durable resumable-upload deliverable are repaired in committed
   history.
