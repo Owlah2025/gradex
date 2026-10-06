@@ -103,6 +103,9 @@ func SuspendAccount(
 			activeAdminCount++
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return SuspendAccountResult{}, fmt.Errorf("locking active admin accounts: %w", err)
+		}
 
 		if activeAdminCount <= 1 {
 			return SuspendAccountResult{}, fmt.Errorf("%w: cannot suspend the last active Admin", ErrUnauthorized)
