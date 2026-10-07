@@ -1,3 +1,12 @@
+> **2026-10-07 production release — DEPLOYED.** Production runs
+> `d0827261e5e756d196fc80af3ff5a23dcc079bef` (hardening candidate plus a 0054 READY-media
+> migration fix, both independently approved) on clean schema **57**, moved from `0c5c67e` on
+> clean schema 46. Health, public edge, visitor and logged-out checks are green; logged-in
+> Student/Instructor/Admin smokes remain NOT AVAILABLE without an approved smoke identity.
+> Rollback is a database restore plus the old application, not a container swap. Record:
+> [2026-10-07 production release](evidence/2026-10-07-production-release-d082726.md).
+> This supersedes the production-state claims of the entries below.
+
 > **2026-09-24 schema 44 → 46 tranche, COMPLETE LOCALLY — NOT DEPLOYED.** Production
 > is untouched: it remains `0fee657897c939cb679c9d804d184542bb2f692f` on clean
 > schema 44. No deployment, migration, restart, or `RetryEnhancements` invocation
