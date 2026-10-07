@@ -30,6 +30,12 @@ type Client struct {
 	s3      *s3.Client
 	presign *s3.PresignClient
 	bucket  string
+	// etagIdentity records objects by strong ETag even when the provider also
+	// returns x-amz-version-id. Cloudflare R2 returns a version id but answers
+	// every versioned HEAD/GET with 501 NotImplemented, so a recorded R2
+	// version id can never be read back. The browser PUT path made the same
+	// choice in 62fc5b1; multipart completion must agree with it.
+	etagIdentity bool
 }
 
 type Options struct {
@@ -40,6 +46,18 @@ type Options struct {
 	Bucket          string
 	Region          string
 	UsePathStyle    bool
+	// ETagObjectIdentity forces ETag identities. It is implied for a Cloudflare
+	// R2 endpoint.
+	ETagObjectIdentity bool
+}
+
+// isCloudflareR2Endpoint mirrors the browser rule in media-upload.ts.
+func isCloudflareR2Endpoint(endpoint string) bool {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".r2.cloudflarestorage.com")
 }
 
 func New(ctx context.Context, opts Options) (*Client, error) {
@@ -59,9 +77,10 @@ func New(ctx context.Context, opts Options) (*Client, error) {
 	presignClient := newS3Client(cfg, presignEndpoint, opts.UsePathStyle)
 
 	return &Client{
-		s3:      s3Client,
-		presign: s3.NewPresignClient(presignClient),
-		bucket:  opts.Bucket,
+		s3:           s3Client,
+		presign:      s3.NewPresignClient(presignClient),
+		bucket:       opts.Bucket,
+		etagIdentity: opts.ETagObjectIdentity || isCloudflareR2Endpoint(opts.Endpoint),
 	}, nil
 }
 

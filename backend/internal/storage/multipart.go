@@ -70,13 +70,21 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, key, uploadID stri
 	if err != nil {
 		return "", fmt.Errorf("completing multipart upload for %q: %w", key, err)
 	}
-	if aws.ToString(out.VersionId) != "" && aws.ToString(out.VersionId) != "null" {
-		return *out.VersionId, nil
+	return c.immutableObjectIdentity(out.VersionId, out.ETag, "multipart object")
+}
+
+// immutableObjectIdentity chooses the identity later exact reads will use. A
+// provider version id is preferred where versioned reads work; where they do
+// not (R2), only a strong ETag is acceptable and its absence fails closed.
+func (c *Client) immutableObjectIdentity(versionID, eTag *string, what string) (string, error) {
+	version := aws.ToString(versionID)
+	if !c.etagIdentity && version != "" && version != "null" {
+		return version, nil
 	}
-	if validStrongETag(aws.ToString(out.ETag)) {
-		return objectIdentityETagPrefix + *out.ETag, nil
+	if validStrongETag(aws.ToString(eTag)) {
+		return objectIdentityETagPrefix + aws.ToString(eTag), nil
 	}
-	return "", errors.New("provider returned no immutable multipart object identity")
+	return "", fmt.Errorf("provider returned no immutable %s identity", what)
 }
 
 func (c *Client) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
@@ -127,13 +135,7 @@ func (c *Client) MultipartObjectIdentity(ctx context.Context, key string) (strin
 		}
 		return "", err
 	}
-	if aws.ToString(out.VersionId) != "" && aws.ToString(out.VersionId) != "null" {
-		return *out.VersionId, nil
-	}
-	if validStrongETag(aws.ToString(out.ETag)) {
-		return objectIdentityETagPrefix + *out.ETag, nil
-	}
-	return "", errors.New("provider returned no immutable object identity")
+	return c.immutableObjectIdentity(out.VersionId, out.ETag, "object")
 }
 
 func (c *Client) DeleteMultipartObject(ctx context.Context, key, version string) error {
