@@ -233,13 +233,14 @@ export async function beginMultipartUpload(
       content_type: input.contentType,
       size_bytes: input.sizeBytes,
     },
+    input.signal,
   );
   if (!ticket) throw new Error("Upload creation returned no session");
   return ticket;
 }
 
 export async function presignUploadPart(
-  input: LocalisedInput & { assetVersionID: string; partNumber: number },
+  input: LocalisedInput & { assetVersionID: string; partNumber: number; signal?: AbortSignal },
 ): Promise<{ url: string }> {
   const result = await authenticatedRequest<{ url: string }>(
     `/media/uploads/${encodeURIComponent(input.assetVersionID)}/multipart/parts/${input.partNumber}`,
@@ -247,6 +248,7 @@ export async function presignUploadPart(
     input.locale,
     input.csrf,
     {},
+    input.signal,
   );
   if (!result) throw new Error("Part signing returned no URL");
   return result;
@@ -255,11 +257,15 @@ export async function presignUploadPart(
 async function getSession(
   input: Pick<LocalisedInput, "locale">,
   id: string,
+  signal?: AbortSignal,
 ): Promise<MultipartUploadTicket> {
   const ticket = await authenticatedRequest<MultipartUploadTicket>(
     `/media/uploads/${encodeURIComponent(id)}/multipart`,
     "GET",
     input.locale,
+    undefined,
+    undefined,
+    signal,
   );
   if (!ticket) throw new Error("Upload recovery returned no session");
   return ticket;
@@ -272,6 +278,7 @@ export async function completeMultipartUpload(
     sizeBytes: number;
     sha256Hex: string;
     parts: Part[];
+    signal?: AbortSignal;
   },
 ): Promise<MultipartCompletionResult> {
   const result = await authenticatedRequest<MultipartCompletionResult>(
@@ -291,6 +298,7 @@ export async function completeMultipartUpload(
         etag,
       })),
     },
+    input.signal,
   );
   if (!result?.storage_object_version)
     throw new Error("Completion returned no immutable object identity");
@@ -395,12 +403,17 @@ async function uploadPartWithRetry(
   );
   for (let attempt = 0; ; attempt++) {
     input.signal?.throwIfAborted();
+    // A retry that was waiting out its backoff when Pause was pressed does not start.
+    if (attempt > 0 && input.drain?.aborted) throw new DOMException("Upload paused", "AbortError");
     try {
       const { url } = await presignUploadPart({
         ...input,
         assetVersionID: ticket.asset_version_id,
         partNumber: number,
       });
+      // Pause arrived while this part was being signed: no byte of it is on the wire yet, so it
+      // is left for Resume rather than started.
+      if (input.drain?.aborted) throw new DOMException("Upload paused", "AbortError");
       const etag = await uploadFilePart(
         url,
         chunk,
@@ -554,6 +567,7 @@ async function uploadResumableExclusive(
     const ticket = await getSession(
       input,
       checkpoint.ticket.asset_version_id,
+      input.signal,
     );
     checkpoint.ticket = ticket;
     checkpoint.file = checkpoint.file || description;
@@ -590,6 +604,9 @@ async function uploadResumableExclusive(
   if (ticket.status === "ACTIVE")
     await transferParts(file, input, checkpoint, key, onProgress);
   input.signal?.throwIfAborted();
+  // A pause requested after the last part was saved still pauses: every part stays saved and
+  // Resume only has to complete.
+  if (input.drain?.aborted) throw new DOMException("Upload paused", "AbortError");
   let result = await completeMultipartUpload({
     ...input,
     ticket,
@@ -597,6 +614,7 @@ async function uploadResumableExclusive(
     sizeBytes: file.size,
     sha256Hex: digest,
     parts: checkpoint.parts,
+    signal: input.signal,
   });
   const deadline = Date.now() + 16 * 60 * 1000;
   if (result.state === "UPLOADED") input.onVerifying?.();
@@ -611,6 +629,9 @@ async function uploadResumableExclusive(
       `/media/uploads/${encodeURIComponent(ticket.asset_version_id)}/multipart/verification`,
       "GET",
       input.locale,
+      undefined,
+      undefined,
+      input.signal,
     );
     if (!status) throw new Error("Upload verification returned no status");
     result = { ...result, ...status };

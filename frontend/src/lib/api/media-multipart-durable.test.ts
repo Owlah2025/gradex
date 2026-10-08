@@ -43,6 +43,11 @@ function harness(partBytes: number) {
   const puts = new Map<number, number>();
   const inflight: Inflight[] = [];
   const completions: Array<{ parts: Array<{ part_number: number }>; size_bytes: number }> = [];
+  // Signing requests the test holds open, keyed by part number; released or aborted by the run.
+  const heldSigning = new Map<number, { release: () => void }>();
+  const holdSigning = new Set<number>();
+  const signs = new Map<number, number>();
+  let completionGate: Promise<void> | null = null;
   class XHR {
     status = 200;
     upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
@@ -107,10 +112,30 @@ function harness(partBytes: number) {
       };
       return Response.json(current(), { status: 201 });
     }
-    if (path.includes("/parts/")) return Response.json({ url: `https://storage.test/asset-1/${path.split("/").at(-1)}` });
+    if (path.includes("/parts/")) {
+      const number = Number(path.split("/").at(-1));
+      signs.set(number, (signs.get(number) || 0) + 1);
+      const respond = () => Response.json({ url: `https://storage.test/asset-1/${number}` });
+      if (!holdSigning.has(number)) return respond();
+      holdSigning.delete(number);
+      return new Promise<Response>((resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        heldSigning.set(number, { release: () => resolve(respond()) });
+      });
+    }
     if (path.endsWith("/completions")) {
       completions.push(JSON.parse(init?.body as string));
+      // The server assembles the object when the request lands; only the reply can be lost.
       ticket!.status = "ASSEMBLED";
+      if (completionGate) {
+        // Like fetch, a held request rejects when its signal aborts.
+        const signal = init?.signal;
+        await Promise.race([
+          completionGate,
+          new Promise<never>((_, reject) => signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))),
+        ]);
+      }
       return Response.json({ asset_version_id: "asset-1", state: "QUARANTINED", duplicate: false, storage_object_version: 'etag:"whole-2"' });
     }
     if (method === "GET") return Response.json(current());
@@ -138,6 +163,17 @@ function harness(partBytes: number) {
     stored,
     inflight,
     completions,
+    heldSigning,
+    holdSigning,
+    signs,
+    gateCompletion: () => {
+      let open!: () => void;
+      completionGate = new Promise<void>((resolve) => (open = resolve));
+      return () => {
+        completionGate = null;
+        open();
+      };
+    },
     settle,
     waitInflight,
     part,
@@ -319,5 +355,146 @@ test("lecture-sized files: an abrupt reload can discard at most three in-flight 
     // After an abrupt stop only completed parts remain.
     tracker.stopAll();
     assert.equal(tracker.snapshot().transferredBytes, snapshot.completedBytes);
+  }
+});
+
+const within = async <T,>(promise: Promise<T>, ms: number, what: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} did not settle within ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+test("a hard stop settles the run even while a part is still being signed", async () => {
+  const h = harness(10);
+  try {
+    h.holdSigning.add(3);
+    const stop = new AbortController();
+    const drain = new AbortController();
+    const run = uploadResumable(sized(40), { ...input, signal: stop.signal, drain: drain.signal });
+    const outcome = run.then(() => null, (error: unknown) => error);
+    await h.waitInflight(2);
+    assert.ok(h.heldSigning.has(3), "part 3 is waiting for its signature");
+    drain.abort();
+    for (const n of [1, 2]) {
+      h.part(n).progress(10);
+      h.part(n).load();
+    }
+    await h.settle();
+    // The bounded drain expires (or the Instructor presses Stop now): the run must settle at once.
+    stop.abort(new DOMException("Upload paused", "AbortError"));
+    const ended = await within(outcome, 1000, "the stopped run");
+    assert.ok(ended instanceof DOMException && ended.name === "AbortError", String(ended));
+    assert.equal(h.puts.get(3), undefined, "the part being signed never started");
+    assert.deepEqual(checkpointParts(h.data), [1, 2]);
+  } finally {
+    h.restore();
+  }
+});
+
+test("a part whose signature arrives after Pause is not started", async () => {
+  const h = harness(10);
+  try {
+    h.holdSigning.add(3);
+    const drain = new AbortController();
+    const run = uploadResumable(sized(40), { ...input, drain: drain.signal });
+    const outcome = run.then(() => null, (error: unknown) => error);
+    await h.waitInflight(2);
+    drain.abort();
+    h.heldSigning.get(3)!.release();
+    for (const n of [1, 2]) {
+      h.part(n).progress(10);
+      h.part(n).load();
+    }
+    const ended = await within(outcome, 2000, "the drained run");
+    assert.ok(ended instanceof DOMException && ended.name === "AbortError", String(ended));
+    assert.equal(h.puts.get(3), undefined, "no byte of part 3 was ever sent");
+    assert.equal(h.puts.get(4), undefined);
+    assert.equal(readSavedUpload(input)?.percent, 50);
+  } finally {
+    h.restore();
+  }
+});
+
+test("a retry waiting out its backoff when Pause is pressed does not start", async () => {
+  const h = harness(10);
+  try {
+    const drain = new AbortController();
+    const run = uploadResumable(sized(40), { ...input, drain: drain.signal });
+    const outcome = run.then(() => null, (error: unknown) => error);
+    await h.waitInflight(3);
+    h.part(1).fail(); // a transient failure before Pause: its retry is scheduled
+    await h.settle();
+    drain.abort();
+    for (const n of [2, 3]) {
+      h.part(n).progress(10);
+      h.part(n).load();
+    }
+    const ended = await within(outcome, 3000, "the drained run");
+    assert.ok(ended instanceof DOMException && ended.name === "AbortError", String(ended));
+    assert.equal(h.puts.get(1), 1, "the retry of part 1 never started");
+    assert.equal(h.signs.get(1), 1, "not even its signature was requested again");
+    assert.deepEqual(checkpointParts(h.data), [2, 3]);
+  } finally {
+    h.restore();
+  }
+});
+
+test("Pause pressed after the last part is saved still pauses instead of completing", async () => {
+  const h = harness(10);
+  try {
+    const drain = new AbortController();
+    const run = uploadResumable(sized(20), { ...input, drain: drain.signal });
+    const outcome = run.then(() => null, (error: unknown) => error);
+    await h.waitInflight(2);
+    for (const n of [1, 2]) {
+      h.part(n).progress(10);
+      h.part(n).load();
+    }
+    drain.abort();
+    const ended = await within(outcome, 2000, "the paused run");
+    assert.ok(ended instanceof DOMException && ended.name === "AbortError", String(ended));
+    assert.equal(h.completions.length, 0, "no completion was sent after Pause");
+    assert.equal(readSavedUpload(input)?.percent, 100);
+  } finally {
+    h.restore();
+  }
+});
+
+test("a resumed run whose parts are all saved does not complete once paused", async () => {
+  const h = harness(10);
+  try {
+    // First run: every part is stored and the completion is sent; its answer never arrives.
+    const open = h.gateCompletion();
+    const stop = new AbortController();
+    const first = uploadResumable(sized(20), { ...input, signal: stop.signal });
+    const firstOutcome = first.then(() => null, (error: unknown) => error);
+    await h.waitInflight(2);
+    for (const n of [1, 2]) {
+      h.part(n).progress(10);
+      h.part(n).load();
+    }
+    await h.settle();
+    stop.abort(new DOMException("Upload paused", "AbortError"));
+    await within(firstOutcome, 1000, "the stopped first run");
+    open();
+    await h.settle();
+    // Resume with Pause already requested: nothing is left to send, and nothing is completed.
+    const drain = new AbortController();
+    drain.abort();
+    const completionsBefore = h.completions.length;
+    const resumed = uploadResumable(sized(20), { ...input, drain: drain.signal });
+    const ended = await within(resumed.then(() => null, (error: unknown) => error), 2000, "the paused resume");
+    assert.ok(ended instanceof DOMException && ended.name === "AbortError", String(ended));
+    assert.equal(h.completions.length, completionsBefore, "no completion is sent once paused");
+  } finally {
+    h.restore();
   }
 });

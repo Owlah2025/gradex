@@ -96,6 +96,8 @@ export async function authenticatedRequest<T>(
   language: "ar" | "en",
   csrf?: string,
   body?: unknown,
+  /** Aborts the request; a resumable upload passes its stop signal so no run waits on the network. */
+  signal?: AbortSignal,
 ): Promise<T | null> {
   const headers: Record<string, string> = {
     Accept: "application/json, application/problem+json",
@@ -110,6 +112,8 @@ export async function authenticatedRequest<T>(
     cache: "no-store",
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    // Only abortable callers add a signal; every other request keeps its exact options.
+    ...(signal ? { signal } : {}),
   });
 
   if (response.status === 204) return null;

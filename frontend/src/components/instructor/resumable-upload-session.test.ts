@@ -397,3 +397,30 @@ test("Cancel during a draining pause is still an immediate, hard cancel", async 
   assert.deepEqual(f.cancelled, ["video-a"]);
   assert.equal(f.state().cancelled, true);
 });
+
+test("Pause pressed while the completion request is in flight ends paused, never attached", async () => {
+  const f = fixture();
+  withTimers(f);
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[0].onProgress?.(0.9, progress(90));
+  f.session.pause();
+  // The upload layer finished regardless (the completion was already on its way).
+  f.runs[0].resolve(completion("9".repeat(64)));
+  await assert.rejects(run, (error: unknown) => error instanceof DOMException && error.name === "AbortError");
+  assert.equal(f.state().running, false);
+  assert.equal(f.state().pausing, false);
+});
+
+test("once every part is saved, nothing is at risk: no leave-page warning", () => {
+  const done = { ...progress(100), completedBytes: 100 };
+  assert.equal(
+    transferInProgress({ running: true, verifying: false, transfer: { progress: done, bytesPerSecond: null, secondsRemaining: null } }),
+    false,
+  );
+  assert.equal(
+    transferInProgress({ running: true, verifying: false, transfer: { progress: progress(60), bytesPerSecond: null, secondsRemaining: null } }),
+    true,
+  );
+});

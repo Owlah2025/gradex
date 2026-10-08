@@ -199,7 +199,9 @@ export function ResumableUploadControls({
           >
             {ar ? "إيقاف الآن" : "Stop now"}
           </Button>
-        ) : upload.running && !upload.verifying ? (
+        ) : upload.running &&
+          !upload.verifying &&
+          !(transfer && transfer.progress.completedBytes >= transfer.progress.totalBytes) ? (
           <Button
             type="button"
             variant="outline"

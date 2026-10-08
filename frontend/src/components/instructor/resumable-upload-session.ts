@@ -69,7 +69,12 @@ export const DEFAULT_PAUSE_DRAIN_TIMEOUT_MS = 60_000;
  * to be here for them. Verification and processing run on the server and need no tab.
  */
 export function transferInProgress(state: Pick<ResumableState, "running" | "transfer" | "verifying">): boolean {
-  return state.running && state.transfer !== null && !state.verifying;
+  return (
+    state.running &&
+    state.transfer !== null &&
+    !state.verifying &&
+    state.transfer.progress.completedBytes < state.transfer.progress.totalBytes
+  );
 }
 
 // Progress events arrive per XHR many times a second; the readout is refreshed at most this often,
@@ -205,6 +210,9 @@ export class ResumableUploadSession {
       const result = await task;
       active.signal.throwIfAborted();
       if (!current()) throw new DOMException("Upload paused", "AbortError");
+      // Pause was requested after the last part: the run ends paused and its checkpoint stays for
+      // Resume. It is never handed to the caller to attach and acknowledge.
+      if (drain.signal.aborted) throw new DOMException("Upload paused", "AbortError");
       this.completedRuns.set(result, { identity: identity!, input });
       return result;
     } catch (cause) {
