@@ -636,3 +636,92 @@ test("a lecture-sized file: abrupt reload keeps only server-confirmed parts, and
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("a slow uplink: parts that take longer than two minutes are not cut off and the upload completes", async ({
+  browser,
+}) => {
+  // Production, 2026-10-08: on a ~200 KB/s uplink every 8 MiB part hit a 120 s whole-request
+  // deadline while still moving, restarted from zero and finally failed ("Part upload timed out").
+  test.setTimeout(9 * 60 * 1000);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gradex-slow-e2e-"));
+  const session = issueRotatingSession(instructor);
+  const context = await browser.newContext();
+  const origin = new URL(frontendOrigin());
+  await context.addCookies([
+    {
+      name: session.cookie_name,
+      value: session.cookie_value,
+      domain: origin.hostname,
+      path: "/",
+      httpOnly: true,
+      secure: true,
+      sameSite: "Strict",
+    },
+  ]);
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(recorder);
+    await page.goto("/en/instructor/courses");
+    await page.getByTestId("toggle-new-course").click();
+    await page.getByTestId("new-course-institution").selectOption(institutionID);
+    await page.getByTestId("new-course-subject-search").fill(subjectCode);
+    const subject = page.getByTestId("new-course-subject-result");
+    await expect(subject).toHaveCount(1);
+    await subject.click();
+    await page.getByTestId("new-course-title-ar").fill("رفع بطيء");
+    await page.getByTestId("new-course-title-en").fill(`Slow Upload ${Date.now()}`);
+    await page.getByTestId("new-course-description-ar").fill("وصف");
+    await page.getByTestId("new-course-description-en").fill("Desc");
+    await page.getByTestId("create-course").click();
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+    await openAuthoringSections(page);
+    await page.getByTestId("section-title-ar").fill("القسم");
+    await page.getByTestId("section-title-en").fill("Slow Section");
+    await page.getByTestId("add-section").click();
+    const sectionRow = page.locator('[data-testid^="section-"]').filter({ hasText: "Slow Section" }).first();
+    await expect(sectionRow).toBeVisible();
+    const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace("section-", "");
+    await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس");
+    await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Slow Lesson");
+    await page.getByTestId(`add-lesson-${sectionID}`).click();
+    await expect(sectionRow).toContainText("Slow Lesson");
+    const control = page.locator('[data-testid^="lesson-video-upload-"]').first();
+
+    // Like production (55.6 MB, 7 parts): enough parts that three are always competing.
+    const file = multipartVideo(directory, "slow.mp4", 40);
+    const size = fs.statSync(file).size;
+    const partCount = Math.ceil(size / PART_BYTES);
+    expect(partCount).toBe(6);
+    const started = new Map<number, number>();
+    const finished = new Map<number, number>();
+    const puts = new Map<number, number>();
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PUT" && url.searchParams.has("partNumber")) {
+        const n = Number(url.searchParams.get("partNumber"));
+        puts.set(n, (puts.get(n) || 0) + 1);
+        if (!started.has(n)) started.set(n, Date.now());
+      }
+    });
+    page.on("requestfinished", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PUT" && url.searchParams.has("partNumber")) finished.set(Number(url.searchParams.get("partNumber")), Date.now());
+    });
+    // ~180 KB/s shared by three parts (~60 KB/s each): an 8 MiB part needs ~140 s, past the old
+    // 120 s deadline, on every attempt.
+    await throttleUploads(page, 180 * 1024);
+    await control.locator('input[type="file"]').setInputFiles(file);
+    await expect(control.getByText("Video attached to this lesson.", { exact: true })).toBeVisible({ timeout: 8 * 60 * 1000 });
+
+    const parts = Array.from({ length: partCount }, (_, i) => i + 1);
+    const longest = Math.max(...parts.map((n) => finished.get(n)! - started.get(n)!));
+    console.log(`[slow] size=${size} longest-part-ms=${longest} puts=${JSON.stringify([...puts.entries()])}`);
+    expect(longest, "at least one part took longer than the old 120 s deadline").toBeGreaterThan(120_000);
+    for (const n of parts) expect(puts.get(n), `part ${n} was sent exactly once`).toBe(1);
+    const seen = await page.evaluate(() => (window as unknown as { __gx: { phases: string[] } }).__gx.phases);
+    expect(seen).not.toContain("FAILED");
+  } finally {
+    await context.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

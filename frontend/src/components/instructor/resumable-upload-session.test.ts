@@ -8,7 +8,9 @@ import {
   type UploadProgressListener,
 } from "../../lib/api/media-multipart";
 import {
+  MAX_PAUSE_DRAIN_TIMEOUT_MS,
   ResumableUploadSession,
+  pauseDrainTimeoutMs,
   transferInProgress,
   type ResumableState,
   type SessionDependencies,
@@ -459,6 +461,34 @@ test("the first in-flight bytes are acted on at once, even inside the readout th
   assert.equal(f.runs[0].input.drain?.aborted, true);
   assert.equal(f.runs[0].input.signal?.aborted, false);
   assert.equal(timers.length, 1);
+  f.session.stopNow();
+  await assert.rejects(run);
+});
+
+test("the graceful-pause bound is sized from the measured upload speed, within fixed limits", () => {
+  assert.equal(pauseDrainTimeoutMs(null), 60_000, "unknown speed: the floor");
+  assert.equal(pauseDrainTimeoutMs(10_000_000), 60_000, "a fast link never waits less than the floor");
+  // ~200 KB/s, the production link of 2026-10-08: three 8 MiB parts need ~2 minutes, not 60 s.
+  const slow = pauseDrainTimeoutMs(200_000);
+  assert.ok(slow > 150_000 && slow < 160_000, String(slow));
+  assert.equal(pauseDrainTimeoutMs(10_000), MAX_PAUSE_DRAIN_TIMEOUT_MS, "never more than the ceiling");
+});
+
+test("Pause on a slow link waits long enough for the parts in flight to be saved", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  let clock = 1_000_000;
+  f.deps.now = () => clock;
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  // Two seconds of real transfer at 200 KB/s give the meter a measured speed.
+  for (let step = 0; step <= 10; step++) {
+    clock += 200;
+    f.runs[0].onProgress?.(0, { ...progress(0), totalBytes: 50_000_000, transferredBytes: 1 + step * 40_000, reportedBytes: 1 + step * 40_000 });
+  }
+  f.session.pause();
+  assert.ok(timers[0].ms > 150_000, `drain bound ${timers[0].ms} ms`);
   f.session.stopNow();
   await assert.rejects(run);
 });

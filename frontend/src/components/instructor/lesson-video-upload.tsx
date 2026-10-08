@@ -10,7 +10,7 @@ import {
   validateSelectedVideo,
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
-import { describeUploadError } from "./resumable-upload-copy";
+import { describeUploadError, isConnectionInterruption } from "./resumable-upload-copy";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
 import { recoverLessonVideoPhase } from "./lesson-video-upload-state";
@@ -183,6 +183,9 @@ export function LessonVideoUpload({
       setMessage(media.videoProcessingBackground);
     } catch (error) {
       if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
+      // The connection gave out after the automatic retries; what was stored stays saved and the
+      // saved-upload panel offers Resume. That is an interruption, not "Upload failed".
+      if (isConnectionInterruption(error)) { activeAssetVersionID.current = null; setPhase("IDLE"); setMessage(describeUploadError(error, locale)); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
       setMessage(describeUploadError(error, locale));

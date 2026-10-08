@@ -1,5 +1,5 @@
 import type { SavedUploadSummary } from "../../lib/api/media-multipart";
-import { ResumeFileMismatchError, UploadAlreadyRunningError } from "../../lib/api/media-multipart";
+import { PartTransferError, ResumeFileMismatchError, UploadAlreadyRunningError } from "../../lib/api/media-multipart";
 import { describeApiError } from "../../lib/api/api-error";
 import { formatBytes, type UploadProgress } from "../../lib/api/upload-progress";
 
@@ -200,6 +200,14 @@ export function cancelledLine(locale: Locale): string {
   return locale === "ar" ? "أُلغي الرفع." : "Upload cancelled.";
 }
 
+/**
+ * The connection, not the file, ended the upload after its automatic retries. Everything stored is
+ * kept and the upload resumes from it, so this is shown as an interruption, not a failure.
+ */
+export function isConnectionInterruption(error: unknown): boolean {
+  return error instanceof PartTransferError;
+}
+
 /** Upload errors as the Instructor reads them; the wrong-file refusal names the file to pick. */
 export function describeUploadError(error: unknown, locale: Locale): string {
   if (error instanceof ResumeFileMismatchError) {
@@ -208,6 +216,10 @@ export function describeUploadError(error: unknown, locale: Locale): string {
       ? `هذا ليس الملف نفسه الخاص بالرفع المتوقف. اختر ${name ?? "الملف الأصلي"} للمتابعة، أو ألغِ الرفع المحفوظ وابدأ رفعاً جديداً.`
       : `This is not the same file as the paused upload. Select ${name ?? "the original file"} to continue, or cancel the saved upload and start a new one.`;
   }
+  if (error instanceof PartTransferError)
+    return locale === "ar"
+      ? "توقف الرفع لأن الاتصال انقطع أو أصبح بطيئاً جداً. كل ما رُفع محفوظ — استكمل الرفع للمتابعة."
+      : "The upload stopped because the connection dropped or became too slow. Everything already uploaded is saved — resume to continue.";
   if (error instanceof UploadAlreadyRunningError)
     return locale === "ar"
       ? "هذا الرفع قيد التشغيل في علامة تبويب أو نافذة أخرى."

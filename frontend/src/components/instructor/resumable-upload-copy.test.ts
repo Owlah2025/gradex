@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { ResumeFileMismatchError, UploadAlreadyRunningError, type SavedUploadSummary } from "../../lib/api/media-multipart";
+import { PartTransferError, ResumeFileMismatchError, UploadAlreadyRunningError, type SavedUploadSummary } from "../../lib/api/media-multipart";
 import {
+  isConnectionInterruption,
   describeUploadError,
   durablePercent,
   pausingLine,
@@ -176,4 +177,23 @@ test("the saved readout appears from the first in-flight byte, even below 1% of 
   );
   const behindByUnderOnePercent = { totalBytes: 200_000_000, completedBytes: 100_000_000, transferredBytes: 100_500_000, reportedBytes: 100_500_000 };
   assert.match(savedForResumeLine(behindByUnderOnePercent, "en")!, /^Saved for resume: 50% · 100 MB safely uploaded\./);
+});
+
+test("a connection that gives out is an interruption with saved progress, not a raw 'timed out'", () => {
+  const error = new PartTransferError("Part upload stalled: no data moved for 60 s", "stalled");
+  assert.equal(isConnectionInterruption(error), true);
+  assert.equal(isConnectionInterruption(new Error("Part upload failed with HTTP 403")), false);
+  assert.equal(
+    describeUploadError(error, "en"),
+    "The upload stopped because the connection dropped or became too slow. Everything already uploaded is saved — resume to continue.",
+  );
+  assert.match(describeUploadError(error, "ar"), /كل ما رُفع محفوظ/);
+  for (const relative of [
+    "src/components/instructor/lesson-video-upload.tsx",
+    "src/components/instructor/public-preview-upload.tsx",
+    "src/components/instructor/lesson-resource-upload.tsx",
+  ]) {
+    const source = readFileSync(join(process.cwd(), relative), "utf8");
+    assert.match(source, /if \(isConnectionInterruption\((error|cause)\)\) \{[^}]*setPhase\("IDLE"\)/, relative);
+  }
 });

@@ -61,8 +61,18 @@ export type SessionDependencies = {
   clearTimer?: (handle: unknown) => void;
 };
 
-// Long enough for one 8 MiB part per worker on a slow (~150 KB/s) link; a pause never hangs longer.
+// How long a graceful pause may wait for the parts in flight. It is sized from the measured upload
+// speed so a slow link can still finish its parts (three 8 MiB parts plus margin), within fixed
+// bounds; a stalled part is abandoned on its own after PART_STALL_TIMEOUT_MS, and Stop now ends the
+// wait at once.
 export const DEFAULT_PAUSE_DRAIN_TIMEOUT_MS = 60_000;
+export const MAX_PAUSE_DRAIN_TIMEOUT_MS = 10 * 60_000;
+const DRAIN_BUDGET_BYTES = 30 * 1024 * 1024;
+
+export function pauseDrainTimeoutMs(bytesPerSecond: number | null, floorMs = DEFAULT_PAUSE_DRAIN_TIMEOUT_MS): number {
+  if (bytesPerSecond === null || !(bytesPerSecond > 0)) return floorMs;
+  return Math.min(MAX_PAUSE_DRAIN_TIMEOUT_MS, Math.max(floorMs, Math.ceil((DRAIN_BUDGET_BYTES / bytesPerSecond) * 1000)));
+}
 
 /**
  * Whether leaving the page now would discard work: bytes of parts not yet accepted are actually on
@@ -256,7 +266,8 @@ export class ResumableUploadSession {
     this.drain.abort();
     this.update({ pausing: true });
     const setTimer = this.deps.setTimer ?? ((callback: () => void, ms: number) => setTimeout(callback, ms));
-    this.drainTimer = setTimer(() => this.stopNow(), this.deps.pauseDrainTimeoutMs ?? DEFAULT_PAUSE_DRAIN_TIMEOUT_MS);
+    const floor = this.deps.pauseDrainTimeoutMs ?? DEFAULT_PAUSE_DRAIN_TIMEOUT_MS;
+    this.drainTimer = setTimer(() => this.stopNow(), pauseDrainTimeoutMs(this.state.transfer?.bytesPerSecond ?? null, floor));
   }
 
   /** Stop immediately. Parts still in flight are discarded; completed parts stay saved. */

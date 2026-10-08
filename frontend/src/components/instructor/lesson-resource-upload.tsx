@@ -13,7 +13,7 @@ import {
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
-import { describeUploadError } from "./resumable-upload-copy";
+import { describeUploadError, isConnectionInterruption } from "./resumable-upload-copy";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
@@ -123,6 +123,9 @@ export function LessonResourceUpload({
       await onChanged();
     } catch (error) {
       if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
+      // The connection gave out after the automatic retries; what was stored stays saved and the
+      // saved-upload panel offers Resume. That is an interruption, not "Upload failed".
+      if (isConnectionInterruption(error)) { setPhase("IDLE"); setMessage(describeUploadError(error, locale)); return; }
       fail(describeUploadError(error, locale));
     }
   };

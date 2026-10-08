@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
 import { clearPublicPreview } from "@/lib/api/authoring";
 import { describeApiError } from "@/lib/api/api-error";
-import { describeUploadError } from "./resumable-upload-copy";
+import { describeUploadError, isConnectionInterruption } from "./resumable-upload-copy";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
@@ -188,6 +188,9 @@ export function PublicPreviewUpload({
       setMessage(t.processingBackground);
     } catch (cause) {
       if (isPausedUpload(cause)) { setPhase("IDLE"); setMessage(null); return; }
+      // The connection gave out after the automatic retries; what was stored stays saved and the
+      // saved-upload panel offers Resume. That is an interruption, not "Upload failed".
+      if (isConnectionInterruption(cause)) { activeAssetVersionID.current = null; setPhase("IDLE"); setMessage(describeUploadError(cause, locale)); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
       setMessage(describeUploadError(cause, locale) || t.failed);

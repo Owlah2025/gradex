@@ -41,6 +41,8 @@ export type ResumableInput = LocalisedInput & {
    * remains the hard stop.
    */
   drain?: AbortSignal;
+  /** Inactivity window before a part PUT is abandoned; defaults to PART_STALL_TIMEOUT_MS. */
+  partStallTimeoutMs?: number;
   onVerifying?: () => void;
   /** Called once the server confirmed which parts it already holds for a resumed upload. */
   onResuming?: (summary: SavedUploadSummary) => void;
@@ -321,19 +323,57 @@ export async function abortMultipartUpload(
   );
 }
 
+/**
+ * A part PUT is abandoned only when no byte has moved for this long — never merely for being slow.
+ *
+ * The previous whole-request deadline (120 s per 8 MiB part) silently required ~210 KB/s of uplink
+ * with three parts in flight: on a slower connection every part that was still moving was killed at
+ * 120 s and restarted from its first byte until retries ran out (production, 2026-10-08).
+ */
+export const PART_STALL_TIMEOUT_MS = 60_000;
+
+/** A part could not be sent because of the connection or the storage service, not the file. */
+export class PartTransferError extends Error {
+  constructor(
+    message: string,
+    readonly reason: "network" | "stalled" | "server",
+  ) {
+    super(message);
+    this.name = "PartTransferError";
+  }
+}
+
 export function uploadFilePart(
   url: string,
   chunk: Blob,
   contentType: string,
   signal?: AbortSignal,
   onProgress?: (loaded: number) => void,
+  stallTimeoutMs = PART_STALL_TIMEOUT_MS,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     let settled = false;
+    let stalled = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearStall = () => {
+      if (stallTimer !== undefined) clearTimeout(stallTimer);
+      stallTimer = undefined;
+    };
+    // Re-armed by every byte that moves, and once more when the body is fully sent so the
+    // storage response gets the same window.
+    const armStall = () => {
+      clearStall();
+      stallTimer = setTimeout(() => {
+        stalled = true;
+        request.abort();
+      }, stallTimeoutMs);
+      (stallTimer as { unref?: () => void }).unref?.();
+    };
     const abort = () => request.abort();
     const fail = (error: Error) => {
       settled = true;
+      clearStall();
       signal?.removeEventListener("abort", abort);
       reject(error);
     };
@@ -343,21 +383,36 @@ export function uploadFilePart(
     }
     request.open("PUT", url, true);
     request.withCredentials = false;
-    request.timeout = 120000;
+    // No whole-request deadline: a slow part that is still moving is allowed to finish.
+    request.timeout = 0;
     request.setRequestHeader("Content-Type", contentType);
     signal?.addEventListener("abort", abort, { once: true });
-    // Byte-level progress for this part's body. Events after settlement or abort are ignored.
-    if (onProgress && request.upload)
+    if (request.upload) {
+      // Byte-level progress for this part's body. Events after settlement or abort are ignored.
       request.upload.onprogress = (event: ProgressEvent) => {
         if (settled || signal?.aborted) return;
-        onProgress(Math.min(event.loaded, chunk.size));
+        armStall();
+        onProgress?.(Math.min(event.loaded, chunk.size));
       };
+      request.upload.onload = () => {
+        if (!settled) armStall();
+      };
+    }
     request.onerror = () =>
-      fail(new Error("Part upload failed due to network error"));
-    request.ontimeout = () => fail(new Error("Part upload timed out"));
+      fail(new PartTransferError("Part upload failed due to network error", "network"));
+    request.ontimeout = () =>
+      fail(new PartTransferError("Part upload timed out", "stalled"));
     request.onabort = () =>
-      fail(new DOMException("Upload paused", "AbortError"));
+      fail(
+        stalled
+          ? new PartTransferError(`Part upload stalled: no data moved for ${Math.round(stallTimeoutMs / 1000)} s`, "stalled")
+          : new DOMException("Upload paused", "AbortError"),
+      );
     request.onload = () => {
+      if (request.status >= 500 || request.status === 429) {
+        fail(new PartTransferError(`Part upload failed with HTTP ${request.status}`, "server"));
+        return;
+      }
       if (request.status < 200 || request.status >= 300) {
         fail(new Error(`Part upload failed with HTTP ${request.status}`));
         return;
@@ -368,9 +423,11 @@ export function uploadFilePart(
         return;
       }
       settled = true;
+      clearStall();
       signal?.removeEventListener("abort", abort);
       resolve(etag);
     };
+    armStall();
     request.send(chunk);
   });
 }
@@ -423,6 +480,7 @@ async function uploadPartWithRetry(
           tracker.partProgress(number, loaded);
           emit();
         },
+        input.partStallTimeoutMs,
       );
       return { part_number: number, etag, size_bytes: chunk.size };
     } catch (error) {
