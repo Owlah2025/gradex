@@ -10,11 +10,14 @@ import {
   readSavedUpload,
   refreshSavedUpload,
   uploadResumable,
-  ResumeFileMismatchError,
   type ResumableInput,
-  type SavedUploadSummary,
 } from "@/lib/api/media-multipart";
-import { ThroughputMeter, type UploadProgress } from "@/lib/api/upload-progress";
+import {
+  ResumableUploadSession,
+  initialResumableState,
+  type ResumableState,
+  type SessionDependencies,
+} from "./resumable-upload-session";
 import {
   cancelledLine,
   resumingLine,
@@ -27,195 +30,47 @@ export function isPausedUpload(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-export type TransferReadout = {
-  progress: UploadProgress;
-  bytesPerSecond: number | null;
-  secondsRemaining: number | null;
+export type { TransferReadout } from "./resumable-upload-session";
+
+const browserDependencies: SessionDependencies = {
+  upload: uploadResumable,
+  hasSaved: hasResumableUpload,
+  readSaved: readSavedUpload,
+  refreshSaved: refreshSavedUpload,
+  cancelSaved: cancelResumableUpload,
+  acknowledgeSaved: acknowledgeResumableUpload,
+  csrf: currentCSRFToken,
+  describeError: describeApiError,
+  now: () => Date.now(),
 };
 
-// Progress events arrive per XHR many times a second; the readout is refreshed at most this often,
-// except when a part finishes, a retry starts or ends, or the upload reaches 100%.
-const READOUT_INTERVAL_MS = 150;
-
+/**
+ * React binding for one upload control. The lifecycle lives in ResumableUploadSession so that a
+ * control switching Lessons mid-upload, late server answers and the in-tab File are handled in one
+ * place that tests can drive directly.
+ */
 export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
-  const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState<SavedUploadSummary | null>(null);
-  const [running, setRunning] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelled, setCancelled] = useState(false);
-  const [resuming, setResuming] = useState<SavedUploadSummary | null>(null);
-  const [transfer, setTransfer] = useState<TransferReadout | null>(null);
-  const [fileAvailable, setFileAvailable] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const controller = useRef<AbortController | null>(null);
-  const operation = useRef<Promise<unknown> | null>(null);
-  // The File survives a pause in this tab, so Resume needs no picker. A reload loses it.
-  const lastFile = useRef<File | null>(null);
-  // Every recovery read belongs to one generation. A control switch, a new run, a cancel, an
-  // acknowledgement or an unmount starts a new one, so a late server answer for an earlier state
-  // (or another control) can never overwrite what is shown now.
-  const generation = useRef(0);
-  const invalidateRecovery = () => ++generation.current;
-
-  const reloadSaved = () => {
-    const ticket = invalidateRecovery();
-    const local = readSavedUpload(input);
-    setPending(hasResumableUpload(input));
-    setSaved(local);
-    if (!local) return;
-    // The server's part list replaces the local hint as soon as it answers.
-    void refreshSavedUpload(input).then((summary) => {
-      if (generation.current === ticket && !controller.current) setSaved(summary);
-    });
-  };
+  const [state, setState] = useState<ResumableState>(initialResumableState);
+  const session = useRef<ResumableUploadSession | null>(null);
+  if (!session.current) session.current = new ResumableUploadSession(browserDependencies, setState);
+  const current = session.current;
 
   useEffect(() => {
-    reloadSaved();
-    return () => {
-      invalidateRecovery();
-      controller.current?.abort(
-        new DOMException("Upload paused", "AbortError"),
-      );
-    };
-    // Recovery belongs to one course/revision/control.
+    current.setInput(input);
+    // Identity is courseID/revisionID/storageKeyId; the session ignores anything else changing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input.courseID, input.revisionID, input.storageKeyId]);
+  }, [current, input.courseID, input.revisionID, input.storageKeyId, input.lessonID, input.kind, input.locale]);
+  useEffect(() => () => current.dispose(), [current]);
 
-  const run = async (
-    file: File,
-    progress: (fraction: number) => void,
-    contentType?: string,
-  ) => {
-    if (controller.current) throw new Error("This upload is already running");
-    const active = new AbortController();
-    controller.current = active;
-    invalidateRecovery();
-    lastFile.current = file;
-    setFileAvailable(true);
-    setRunning(true);
-    setCancelled(false);
-    setResuming(null);
-    setTransfer(null);
-    setError(null);
-    const csrf = currentCSRFToken();
-    if (!csrf) {
-      controller.current = null;
-      setRunning(false);
-      throw new Error("Your session must be refreshed before uploading.");
-    }
-    const meter = new ThroughputMeter();
-    let lastReadout = 0;
-    let lastRetrying = false;
-    let lastCompleted = -1;
-    const task = uploadResumable(
-      file,
-      {
-        ...input,
-        csrf,
-        contentType,
-        signal: active.signal,
-        onVerifying: () => setVerifying(true),
-        onResuming: (summary) => setResuming(summary),
-      },
-      (fraction, detail) => {
-        const now = Date.now();
-        // Speed is measured from the first byte this run actually sends, not from the moment the
-        // run started (fingerprinting, session recovery and signing are not upload throughput).
-        if (detail.transferredBytes > detail.resumedFromBytes) meter.record(detail.reportedBytes, now);
-        const settled = detail.reportedBytes >= detail.totalBytes;
-        if (
-          now - lastReadout < READOUT_INTERVAL_MS &&
-          detail.retrying === lastRetrying &&
-          detail.completedBytes === lastCompleted &&
-          !settled
-        )
-          return;
-        lastReadout = now;
-        lastRetrying = detail.retrying;
-        lastCompleted = detail.completedBytes;
-        setTransfer({
-          progress: detail,
-          bytesPerSecond: meter.bytesPerSecond(),
-          secondsRemaining: meter.secondsRemaining(detail.totalBytes - detail.reportedBytes),
-        });
-        progress(fraction);
-      },
-    );
-    operation.current = task;
-    try {
-      const result = await task;
-      active.signal.throwIfAborted();
-      return result;
-    } catch (cause) {
-      // A refused file must never become the in-tab file that "Resume upload" would send.
-      if (cause instanceof ResumeFileMismatchError) {
-        lastFile.current = null;
-        setFileAvailable(false);
-      }
-      throw cause;
-    } finally {
-      controller.current = null;
-      operation.current = null;
-      setRunning(false);
-      setVerifying(false);
-      setResuming(null);
-      setTransfer(null);
-      reloadSaved();
-    }
-  };
-  const cancel = async () => {
-    invalidateRecovery();
-    setCancelling(true);
-    setError(null);
-    controller.current?.abort(new DOMException("Upload paused", "AbortError"));
-    try {
-      if (operation.current) await operation.current.catch(() => undefined);
-      const csrf = currentCSRFToken();
-      if (!csrf)
-        throw new Error("Your session must be refreshed before cancelling.");
-      await cancelResumableUpload({ ...input, csrf });
-      lastFile.current = null;
-      setFileAvailable(false);
-      setPending(false);
-      setSaved(null);
-      setCancelled(true);
-    } catch (cause) {
-      setError(describeApiError(cause, input.locale));
-    } finally {
-      setCancelling(false);
-    }
-  };
   return {
-    run,
-    pending,
-    saved,
-    running,
-    verifying,
-    cancelling,
-    cancelled,
-    resuming,
-    transfer,
-    fileAvailable,
-    /** The File picked in this tab, if any; resuming with it needs no picker. */
-    lastFile: () => lastFile.current,
-    error,
-    pause: () =>
-      controller.current?.abort(
-        new DOMException("Upload paused", "AbortError"),
-      ),
-    cancel,
-    acknowledge: (digest: string) => {
-      invalidateRecovery();
-      acknowledgeResumableUpload(
-        { ...input, csrf: currentCSRFToken() || "" },
-        digest,
-      );
-      lastFile.current = null;
-      setFileAvailable(false);
-      setPending(false);
-      setSaved(null);
-    },
+    ...state,
+    run: (file: File, progress: (fraction: number) => void, contentType?: string) =>
+      current.run(file, progress, contentType),
+    /** The File picked in this tab for this control, if any; resuming with it needs no picker. */
+    lastFile: () => current.lastFile(),
+    pause: () => current.pause(),
+    cancel: () => current.cancel(),
+    acknowledge: (digest: string) => current.acknowledge(digest),
   };
 }
 

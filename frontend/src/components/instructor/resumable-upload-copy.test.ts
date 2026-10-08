@@ -113,10 +113,9 @@ test("every caller of the shared hook shows verification as its own phase", () =
   }
 });
 
-test("late recovery answers cannot overwrite a newer state or another control", () => {
+test("the hook delegates its lifecycle to the executable session", () => {
+  // The lifecycle itself is exercised in resumable-upload-session.test.ts.
   const source = readFileSync(join(process.cwd(), "src/components/instructor/resumable-upload-controls.tsx"), "utf8");
-  assert.match(source, /if \(generation\.current === ticket && !controller\.current\) setSaved\(summary\);/);
-  // The generation advances on every transition that changes what should be shown.
-  for (const site of ["const ticket = invalidateRecovery();", "invalidateRecovery();\n      controller.current?.abort", "invalidateRecovery();\n    lastFile.current = file;", "invalidateRecovery();\n    setCancelling(true);", "invalidateRecovery();\n      acknowledgeResumableUpload("])
-    assert.ok(source.includes(site), site);
+  assert.match(source, /new ResumableUploadSession\(browserDependencies, setState\)/);
+  assert.match(source, /useEffect\(\(\) => \(\) => current\.dispose\(\), \[current\]\)/);
 });
