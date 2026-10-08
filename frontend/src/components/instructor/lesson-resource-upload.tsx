@@ -1,7 +1,7 @@
 "use client";
 
 import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { addLessonFile, deleteLessonFile, type LessonFileWire } from "@/lib/api/authoring";
 import {
   ACCEPTED_RESOURCE_CONTENT_TYPES,
@@ -20,7 +20,7 @@ import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
 
 type Phase = Extract<
   UploadPhase,
-  "IDLE" | "PREPARING" | "UPLOADING" | "CHECKING" | "ATTACHING" | "READY" | "FAILED"
+  "IDLE" | "PREPARING" | "UPLOADING" | "VERIFYING" | "CHECKING" | "ATTACHING" | "READY" | "FAILED"
 >;
 
 export type LessonResourceUploadProps = {
@@ -59,6 +59,10 @@ export function LessonResourceUpload({
 
   const busy = isUploadBusy(phase);
   const resumable = useResumableUpload({ courseID, revisionID, lessonID, kind: "RESOURCE", storageKeyId: "resource-" + lessonID, locale });
+  // Every byte is stored; the server is verifying, so no upload percentage is shown any more.
+  useEffect(() => {
+    if (resumable.verifying) setPhase("VERIFYING");
+  }, [resumable.verifying]);
   const resources = files.filter((file) => file.kind === "RESOURCE");
 
   const fail = (text: string) => {

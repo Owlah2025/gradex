@@ -22,6 +22,7 @@ type Phase =
   | "IDLE"
   | "PREPARING"
   | "UPLOADING"
+  | "VERIFYING"
   | "ATTACHING"
   | "PROCESSING"
   | "PROCESSING_BACKGROUND"
@@ -96,8 +97,12 @@ export function PublicPreviewUpload({
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState<string | null>(() => describeRecovered(previewAssetState));
   const activeAssetVersionID = useRef<string | null>(null);
-  const busy = ["PREPARING", "UPLOADING", "ATTACHING", "PROCESSING"].includes(phase);
+  const busy = ["PREPARING", "UPLOADING", "VERIFYING", "ATTACHING", "PROCESSING"].includes(phase);
   const resumable = useResumableUpload({ courseID, revisionID, kind: "PREVIEW", storageKeyId: "preview-" + courseID, locale });
+  // Every byte is stored; the server is verifying, so no upload percentage is shown any more.
+  useEffect(() => {
+    if (resumable.verifying) setPhase("VERIFYING");
+  }, [resumable.verifying]);
 
   /*
     The same single watch the Lesson video uses, for the same reason: a trusted
@@ -214,7 +219,9 @@ export function PublicPreviewUpload({
   // count while uploading, the worker's own account while processing, and no
   // number at all in between.
   const status =
-    phase === "PREPARING" || phase === "ATTACHING"
+    phase === "VERIFYING"
+      ? media.phase.VERIFYING
+      : phase === "PREPARING" || phase === "ATTACHING"
       ? t.processing
       : phase === "UPLOADING"
         ? `${t.upload} ${Math.round(progress * 100)}%`

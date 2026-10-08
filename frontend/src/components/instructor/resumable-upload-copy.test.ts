@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { ResumeFileMismatchError, type SavedUploadSummary } from "../../lib/api/media-multipart";
+import { ResumeFileMismatchError, UploadAlreadyRunningError, type SavedUploadSummary } from "../../lib/api/media-multipart";
 import {
   describeUploadError,
   remainingLabel,
@@ -94,4 +94,29 @@ test("file names keep their own direction inside Arabic sentences", () => {
   const ar = savedUploadCopy({ ...paused, fileName: "محاضرة.mp4" }, "ar", false);
   assert.ok(ar.instruction.includes("⁨“محاضرة.mp4”⁩"), JSON.stringify(ar.instruction));
   assert.ok(savedUploadCopy(paused, "en", false).instruction.includes("“lecture03.mp4”"));
+});
+
+test("an upload running elsewhere is explained in both languages", () => {
+  assert.equal(describeUploadError(new UploadAlreadyRunningError(), "en"), "This upload is already running in another tab or window.");
+  assert.match(describeUploadError(new UploadAlreadyRunningError(), "ar"), /علامة تبويب/);
+});
+
+test("every caller of the shared hook shows verification as its own phase", () => {
+  for (const relative of [
+    "src/components/instructor/lesson-video-upload.tsx",
+    "src/components/instructor/public-preview-upload.tsx",
+    "src/components/instructor/lesson-resource-upload.tsx",
+  ]) {
+    const source = readFileSync(join(process.cwd(), relative), "utf8");
+    assert.match(source, /if \(resumable\.verifying\) setPhase\("VERIFYING"\)/, relative);
+    assert.match(source, /const file = resumable\.lastFile\(\);/, relative);
+  }
+});
+
+test("late recovery answers cannot overwrite a newer state or another control", () => {
+  const source = readFileSync(join(process.cwd(), "src/components/instructor/resumable-upload-controls.tsx"), "utf8");
+  assert.match(source, /if \(generation\.current === ticket && !controller\.current\) setSaved\(summary\);/);
+  // The generation advances on every transition that changes what should be shown.
+  for (const site of ["const ticket = invalidateRecovery();", "invalidateRecovery();\n      controller.current?.abort", "invalidateRecovery();\n    lastFile.current = file;", "invalidateRecovery();\n    setCancelling(true);", "invalidateRecovery();\n      acknowledgeResumableUpload("])
+    assert.ok(source.includes(site), site);
 });

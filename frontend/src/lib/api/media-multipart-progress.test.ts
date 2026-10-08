@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ResumeFileMismatchError,
+  UploadAlreadyRunningError,
   cancelResumableUpload,
   readSavedUpload,
   refreshSavedUpload,
@@ -567,6 +568,82 @@ test("an already assembled session is finished without announcing a resume", asy
     assert.equal(announced, false);
     assert.equal(h.puts.get(1), 1);
   } finally {
+    h.restore();
+  }
+});
+
+test("a checkpoint another tab writes while this tab is fingerprinting is honoured", async () => {
+  const h = harness();
+  try {
+    // Fingerprinting is asynchronous. While it runs, "another tab" starts an upload for a
+    // different file under the same lesson by writing its checkpoint.
+    const task = uploadResumable(file(30, 3), input());
+    (globalThis.localStorage as Storage).setItem(
+      `gradex-multipart-v2:course-a:revision-a:video-a:${"f".repeat(64)}`,
+      JSON.stringify({
+        requestID: "22222222-2222-4222-8222-222222222222",
+        ticket: null,
+        parts: [],
+        file: { name: "other-tab.mp4", size: 30, type: "video/mp4" },
+        updatedAt: Date.now(),
+      }),
+    );
+    await assert.rejects(
+      task,
+      (error: unknown) => error instanceof ResumeFileMismatchError && error.savedFileName === "other-tab.mp4",
+    );
+    assert.equal(h.begins(), 0, "no second session was created");
+    assert.equal(h.puts.size, 0, "no bytes were sent");
+  } finally {
+    h.restore();
+  }
+});
+
+test("one upload per control: a second run is refused in this tab and, through Web Locks, in another", async () => {
+  const h = harness();
+  const held = new Set<string>();
+  const navigatorBefore = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      locks: {
+        request: async <T,>(name: string, options: { ifAvailable: boolean }, callback: (lock: unknown) => Promise<T>) => {
+          assert.equal(options.ifAvailable, true);
+          if (held.has(name)) return callback(null);
+          held.add(name);
+          try {
+            return await callback({ name });
+          } finally {
+            held.delete(name);
+          }
+        },
+      },
+    },
+  });
+  try {
+    const first = uploadResumable(file(10, 4), input());
+    await assert.rejects(
+      uploadResumable(file(10, 4), input()),
+      (error: unknown) => error instanceof UploadAlreadyRunningError,
+      "this tab refuses a second run for the same control",
+    );
+    // Another tab has its own module state but shares the browser's lock.
+    held.add("gradex-multipart-v2:course-a:revision-a:video-b:");
+    await assert.rejects(
+      uploadResumable(file(10, 5), input("video-b")),
+      (error: unknown) => error instanceof UploadAlreadyRunningError,
+      "a run holding the control lock in another tab refuses this one",
+    );
+    held.delete("gradex-multipart-v2:course-a:revision-a:video-b:");
+    await h.waitInflight(1);
+    h.part(1).progress(10);
+    h.part(1).load();
+    await first;
+    assert.equal(h.begins(), 1);
+    assert.equal(held.size, 0, "the lock is released when the run ends");
+  } finally {
+    if (navigatorBefore) Object.defineProperty(globalThis, "navigator", navigatorBefore);
+    else delete (globalThis as { navigator?: unknown }).navigator;
     h.restore();
   }
 });

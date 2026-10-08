@@ -70,6 +70,14 @@ export type SavedUploadSummary = {
   source: "local" | "server";
 };
 
+/** Another upload for the same control is already running here or in another tab. */
+export class UploadAlreadyRunningError extends Error {
+  constructor() {
+    super("This upload is already running in another tab or window.");
+    this.name = "UploadAlreadyRunningError";
+  }
+}
+
 /** The selected file is not the file the saved upload belongs to. Nothing was uploaded. */
 export class ResumeFileMismatchError extends Error {
   constructor(readonly savedFileName: string | null) {
@@ -462,7 +470,45 @@ async function transferParts(
   input.signal?.throwIfAborted();
 }
 
+type LockManagerLike = {
+  request: <T>(
+    name: string,
+    options: { ifAvailable: boolean },
+    callback: (lock: unknown) => Promise<T>,
+  ) => Promise<T>;
+};
+
+/*
+  One upload per control, across tabs. The checkpoint check below reads localStorage, which another
+  tab can write while this tab is still fingerprinting a large file; without a shared lock two tabs
+  could each start a session for different files under the same lesson. The Web Locks API is held
+  for the whole run where the browser provides it; elsewhere this tab's own set still serialises.
+*/
+async function withControlLock<T>(name: string, run: () => Promise<T>): Promise<T> {
+  const locks = (globalThis.navigator as { locks?: LockManagerLike } | undefined)?.locks;
+  if (!locks?.request) return run();
+  return locks.request(name, { ifAvailable: true }, async (lock) => {
+    if (!lock) throw new UploadAlreadyRunningError();
+    return run();
+  });
+}
+
 export async function uploadResumable(
+  file: File,
+  input: ResumableInput,
+  onProgress?: UploadProgressListener,
+): Promise<MultipartCompletionResult> {
+  const control = prefix(input);
+  if (activeUploads.has(control)) throw new UploadAlreadyRunningError();
+  activeUploads.add(control);
+  try {
+    return await withControlLock(control, () => uploadResumableExclusive(file, input, onProgress));
+  } finally {
+    activeUploads.delete(control);
+  }
+}
+
+async function uploadResumableExclusive(
   file: File,
   input: ResumableInput,
   onProgress?: UploadProgressListener,
@@ -478,89 +524,86 @@ export async function uploadResumable(
   // Full streaming fingerprint prevents splicing two same-name/same-size files after refresh.
   const digest = await sha256Hex(file, input.signal);
   const key = prefix(input) + digest;
+  // Fingerprinting takes a while; decide on the checkpoints as they are now, not as they were.
   // The file's own checkpoint always resumes, even beside an older one an earlier build left.
-  if (saved.length && !saved.some((entry) => entry.key === key))
-    throw new ResumeFileMismatchError(saved[0].checkpoint.file?.name ?? null);
-  if (activeUploads.has(key)) throw new Error("This upload is already running");
-  activeUploads.add(key);
-  try {
-    let checkpoint = readCheckpoint(key);
-    const description: CheckpointFile = {
-      name: file.name,
-      size: file.size,
-      type: input.contentType || file.type,
-    };
-    if (checkpoint?.ticket) {
-      const ticket = await getSession(
-        input,
-        checkpoint.ticket.asset_version_id,
-      );
-      checkpoint.ticket = ticket;
-      checkpoint.file = checkpoint.file || description;
-      // The server's part list wins over whatever this browser remembered.
-      if (ticket.status === "ACTIVE")
-        checkpoint.parts = ticket.parts.sort(
-          (a, b) => a.part_number - b.part_number,
-        );
-      if (ticket.status === "ABORTING" || ticket.status === "ABORTED")
-        throw new Error(
-          "This upload was cancelled. Clear it before starting again.",
-        );
-      if (ticket.status === "ACTIVE")
-        input.onResuming?.(summarizeCheckpoint(checkpoint, ticket));
-    } else {
-      checkpoint = checkpoint || {
-        requestID: crypto.randomUUID(),
-        ticket: null,
-        parts: [],
-      };
-      checkpoint.file = description;
-      persist(key, checkpoint);
-      checkpoint.ticket = await beginMultipartUpload({
-        ...input,
-        requestID: checkpoint.requestID,
-        contentType: input.contentType || file.type,
-        sizeBytes: file.size,
-      });
-      checkpoint.parts = checkpoint.ticket.parts;
-    }
-    persist(key, checkpoint);
-    const ticket = checkpoint.ticket;
-    if (!ticket) throw new Error("Upload session has not been created");
+  const current = savedCheckpoints(input);
+  if (current.length && !current.some((entry) => entry.key === key))
+    throw new ResumeFileMismatchError(current[0].checkpoint.file?.name ?? null);
+  let checkpoint = readCheckpoint(key);
+  const description: CheckpointFile = {
+    name: file.name,
+    size: file.size,
+    type: input.contentType || file.type,
+  };
+  if (checkpoint?.ticket) {
+    const ticket = await getSession(
+      input,
+      checkpoint.ticket.asset_version_id,
+    );
+    checkpoint.ticket = ticket;
+    checkpoint.file = checkpoint.file || description;
+    // The server's part list wins over whatever this browser remembered.
     if (ticket.status === "ACTIVE")
-      await transferParts(file, input, checkpoint, key, onProgress);
-    input.signal?.throwIfAborted();
-    let result = await completeMultipartUpload({
+      checkpoint.parts = ticket.parts.sort(
+        (a, b) => a.part_number - b.part_number,
+      );
+    if (ticket.status === "ABORTING" || ticket.status === "ABORTED")
+      throw new Error(
+        "This upload was cancelled. Clear it before starting again.",
+      );
+    if (ticket.status === "ACTIVE")
+      input.onResuming?.(summarizeCheckpoint(checkpoint, ticket));
+  } else {
+    checkpoint = checkpoint || {
+      requestID: crypto.randomUUID(),
+      ticket: null,
+      parts: [],
+    };
+    checkpoint.file = description;
+    persist(key, checkpoint);
+    checkpoint.ticket = await beginMultipartUpload({
       ...input,
-      ticket,
+      requestID: checkpoint.requestID,
       contentType: input.contentType || file.type,
       sizeBytes: file.size,
-      sha256Hex: digest,
-      parts: checkpoint.parts,
     });
-    const deadline = Date.now() + 16 * 60 * 1000;
-    if (result.state === "UPLOADED") input.onVerifying?.();
-    while (result.state === "UPLOADED") {
-      input.signal?.throwIfAborted();
-      if (Date.now() > deadline)
-        throw new Error(
-          "Verification is still pending. Reselect the same file later to check again.",
-        );
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const status = await authenticatedRequest<MultipartCompletionResult>(
-        `/media/uploads/${encodeURIComponent(ticket.asset_version_id)}/multipart/verification`,
-        "GET",
-        input.locale,
-      );
-      if (!status) throw new Error("Upload verification returned no status");
-      result = { ...result, ...status };
-    }
-    // Keep the checkpoint until the separate course-selection operation is acknowledged.
-    return result;
-  } finally {
-    activeUploads.delete(key);
+    checkpoint.parts = checkpoint.ticket.parts;
   }
+  persist(key, checkpoint);
+  const ticket = checkpoint.ticket;
+  if (!ticket) throw new Error("Upload session has not been created");
+  if (ticket.status === "ACTIVE")
+    await transferParts(file, input, checkpoint, key, onProgress);
+  input.signal?.throwIfAborted();
+  let result = await completeMultipartUpload({
+    ...input,
+    ticket,
+    contentType: input.contentType || file.type,
+    sizeBytes: file.size,
+    sha256Hex: digest,
+    parts: checkpoint.parts,
+  });
+  const deadline = Date.now() + 16 * 60 * 1000;
+  if (result.state === "UPLOADED") input.onVerifying?.();
+  while (result.state === "UPLOADED") {
+    input.signal?.throwIfAborted();
+    if (Date.now() > deadline)
+      throw new Error(
+        "Verification is still pending. Reselect the same file later to check again.",
+      );
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const status = await authenticatedRequest<MultipartCompletionResult>(
+      `/media/uploads/${encodeURIComponent(ticket.asset_version_id)}/multipart/verification`,
+      "GET",
+      input.locale,
+    );
+    if (!status) throw new Error("Upload verification returned no status");
+    result = { ...result, ...status };
+  }
+  // Keep the checkpoint until the separate course-selection operation is acknowledged.
+  return result;
 }
+
 
 export function acknowledgeResumableUpload(
   input: ResumableInput,

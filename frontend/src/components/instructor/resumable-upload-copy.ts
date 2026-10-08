@@ -1,5 +1,5 @@
 import type { SavedUploadSummary } from "../../lib/api/media-multipart";
-import { ResumeFileMismatchError } from "../../lib/api/media-multipart";
+import { ResumeFileMismatchError, UploadAlreadyRunningError } from "../../lib/api/media-multipart";
 import { describeApiError } from "../../lib/api/api-error";
 import { formatBytes, type UploadProgress } from "../../lib/api/upload-progress";
 
@@ -154,5 +154,9 @@ export function describeUploadError(error: unknown, locale: Locale): string {
       ? `هذا ليس الملف نفسه الخاص بالرفع المتوقف. اختر ${name ?? "الملف الأصلي"} للمتابعة، أو ألغِ الرفع المحفوظ وابدأ رفعاً جديداً.`
       : `This is not the same file as the paused upload. Select ${name ?? "the original file"} to continue, or cancel the saved upload and start a new one.`;
   }
+  if (error instanceof UploadAlreadyRunningError)
+    return locale === "ar"
+      ? "هذا الرفع قيد التشغيل في علامة تبويب أو نافذة أخرى."
+      : "This upload is already running in another tab or window.";
   return describeApiError(error, locale);
 }

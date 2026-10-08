@@ -52,24 +52,32 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
   const operation = useRef<Promise<unknown> | null>(null);
   // The File survives a pause in this tab, so Resume needs no picker. A reload loses it.
   const lastFile = useRef<File | null>(null);
+  // Every recovery read belongs to one generation. A control switch, a new run, a cancel, an
+  // acknowledgement or an unmount starts a new one, so a late server answer for an earlier state
+  // (or another control) can never overwrite what is shown now.
+  const generation = useRef(0);
+  const invalidateRecovery = () => ++generation.current;
 
   const reloadSaved = () => {
+    const ticket = invalidateRecovery();
     const local = readSavedUpload(input);
     setPending(hasResumableUpload(input));
     setSaved(local);
     if (!local) return;
     // The server's part list replaces the local hint as soon as it answers.
     void refreshSavedUpload(input).then((summary) => {
-      if (!controller.current) setSaved(summary);
+      if (generation.current === ticket && !controller.current) setSaved(summary);
     });
   };
 
   useEffect(() => {
     reloadSaved();
-    return () =>
+    return () => {
+      invalidateRecovery();
       controller.current?.abort(
         new DOMException("Upload paused", "AbortError"),
       );
+    };
     // Recovery belongs to one course/revision/control.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input.courseID, input.revisionID, input.storageKeyId]);
@@ -82,6 +90,7 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
     if (controller.current) throw new Error("This upload is already running");
     const active = new AbortController();
     controller.current = active;
+    invalidateRecovery();
     lastFile.current = file;
     setFileAvailable(true);
     setRunning(true);
@@ -98,6 +107,7 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
     const meter = new ThroughputMeter();
     let lastReadout = 0;
     let lastRetrying = false;
+    let lastCompleted = -1;
     const task = uploadResumable(
       file,
       {
@@ -117,11 +127,13 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
         if (
           now - lastReadout < READOUT_INTERVAL_MS &&
           detail.retrying === lastRetrying &&
+          detail.completedBytes === lastCompleted &&
           !settled
         )
           return;
         lastReadout = now;
         lastRetrying = detail.retrying;
+        lastCompleted = detail.completedBytes;
         setTransfer({
           progress: detail,
           bytesPerSecond: meter.bytesPerSecond(),
@@ -153,6 +165,7 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
     }
   };
   const cancel = async () => {
+    invalidateRecovery();
     setCancelling(true);
     setError(null);
     controller.current?.abort(new DOMException("Upload paused", "AbortError"));
@@ -193,6 +206,7 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
       ),
     cancel,
     acknowledge: (digest: string) => {
+      invalidateRecovery();
       acknowledgeResumableUpload(
         { ...input, csrf: currentCSRFToken() || "" },
         digest,

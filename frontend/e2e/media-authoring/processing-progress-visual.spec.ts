@@ -150,8 +150,10 @@ test("processing progress is real, visible, accessible, and localized", async ({
   //    not measured anything yet, so the bar is indeterminate and shows no
   //    percentage rather than a fabricated zero. Against local object storage
   //    the upload itself finishes faster than a screenshot, so what this frame
-  //    reliably captures is that honest indeterminate state.
-  await expect(phase).toContainText("Uploading", { timeout: 60_000 });
+  //    reliably captures is that honest indeterminate state. Once every byte is
+  //    stored the phase is "Verifying upload" rather than a lingering
+  //    "Uploading 100%", so a fast local upload may only be seen verifying.
+  await expect(phase).toHaveAttribute("data-upload-phase", /^(UPLOADING|VERIFYING)$/, { timeout: 60_000 });
   await page.getByTestId(`lesson-video-upload-${lessonID}`).screenshot({
     path: testInfo.outputPath("processing-indeterminate.png"),
   });
