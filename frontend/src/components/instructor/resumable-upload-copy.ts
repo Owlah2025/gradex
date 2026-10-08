@@ -216,6 +216,10 @@ export function describeUploadError(error: unknown, locale: Locale): string {
       ? `هذا ليس الملف نفسه الخاص بالرفع المتوقف. اختر ${name ?? "الملف الأصلي"} للمتابعة، أو ألغِ الرفع المحفوظ وابدأ رفعاً جديداً.`
       : `This is not the same file as the paused upload. Select ${name ?? "the original file"} to continue, or cancel the saved upload and start a new one.`;
   }
+  if (error instanceof PartTransferError && error.reason === "server")
+    return locale === "ar"
+      ? "توقف الرفع لأن خدمة التخزين غير متاحة مؤقتاً. كل ما رُفع محفوظ — استكمل الرفع بعد قليل."
+      : "The upload stopped because the storage service is temporarily unavailable. Everything already uploaded is saved — resume shortly.";
   if (error instanceof PartTransferError)
     return locale === "ar"
       ? "توقف الرفع لأن الاتصال انقطع أو أصبح بطيئاً جداً. كل ما رُفع محفوظ — استكمل الرفع للمتابعة."

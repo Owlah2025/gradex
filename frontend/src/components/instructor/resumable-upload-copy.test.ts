@@ -197,3 +197,14 @@ test("a connection that gives out is an interruption with saved progress, not a 
     assert.match(source, /if \(isConnectionInterruption\((error|cause)\)\) \{[^}]*setPhase\("IDLE"\)/, relative);
   }
 });
+
+test("an unavailable storage service is not blamed on the Instructor's connection", () => {
+  const busy = new PartTransferError("Part upload failed with HTTP 503", "server");
+  assert.equal(isConnectionInterruption(busy), true);
+  assert.equal(
+    describeUploadError(busy, "en"),
+    "The upload stopped because the storage service is temporarily unavailable. Everything already uploaded is saved — resume shortly.",
+  );
+  assert.match(describeUploadError(busy, "ar"), /خدمة التخزين غير متاحة مؤقتاً/);
+  assert.doesNotMatch(describeUploadError(busy, "en"), /connection/);
+});
