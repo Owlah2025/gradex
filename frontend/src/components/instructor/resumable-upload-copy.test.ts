@@ -158,3 +158,12 @@ test("a pause with every part saved says so instead of 'paused at 100%'", () => 
   assert.equal(all.instruction, "Resume to finish. Nothing will be uploaded again.");
   assert.match(savedUploadCopy({ ...paused, completedBytes: 625_000_000, percent: 100 }, "ar", false).title, /كل الأجزاء محفوظة/);
 });
+
+test("before any part is accepted the control says nothing is saved yet, not '0% · 0 B safely uploaded'", () => {
+  const start = { totalBytes: 42_000_000, completedBytes: 0, transferredBytes: 1_200_000, reportedBytes: 1_200_000 };
+  assert.equal(
+    savedForResumeLine(start, "en"),
+    "Nothing is saved for resume yet. Parts still transferring are lost if you refresh or close this page.",
+  );
+  assert.match(savedForResumeLine(start, "ar")!, /لم يُحفظ شيء للاستكمال بعد/);
+});

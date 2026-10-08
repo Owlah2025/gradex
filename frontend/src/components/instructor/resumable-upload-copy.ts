@@ -74,6 +74,10 @@ export function savedForResumeLine(
   const sent = progress.totalBytes <= 0 ? 100 : Math.floor((progress.reportedBytes / progress.totalBytes) * 100);
   if (saved >= sent) return null;
   const inFlight = progress.transferredBytes > progress.completedBytes;
+  if (progress.completedBytes <= 0)
+    return locale === "ar"
+      ? "لم يُحفظ شيء للاستكمال بعد. تضيع الأجزاء التي ما زالت قيد الإرسال إذا حدّثت الصفحة أو أغلقتها."
+      : "Nothing is saved for resume yet. Parts still transferring are lost if you refresh or close this page.";
   const bytes = bytesFor(progress.completedBytes, locale);
   if (locale === "ar")
     return `محفوظ للاستكمال: ${saved}% · ${bytes} مرفوعة بأمان.${inFlight ? " تضيع الأجزاء التي ما زالت قيد الإرسال إذا حدّثت الصفحة أو أغلقتها." : ""}`;
