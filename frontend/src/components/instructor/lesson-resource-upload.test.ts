@@ -16,7 +16,7 @@ test("Lesson Resource authoring keeps the D-088 upload lifecycle and supports re
     "resumable.run(file,",
     "useResumableUpload({ courseID, revisionID, lessonID, kind: \"RESOURCE\"",
     "checked.contentType",
-    "resumable.acknowledge(completion.sha256_hex)",
+    "resumable.acknowledge(completion)",
     "waitForProcessing(completion.asset_version_id, locale)",
     "addLessonFile({",
     "deleteLessonFile({",

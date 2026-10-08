@@ -220,7 +220,8 @@ test("byte progress, automatic retry, pause, reload recovery, wrong-file refusal
     // 1. Upload begins and progresses in real bytes.
     await fileInput.setInputFiles(file);
     await expect(control.getByTestId("resumable-transfer")).toBeVisible({ timeout: 30000 });
-    await expect(control.getByTestId("resumable-transfer")).toContainText(/MB \/ \d+(\.\d)? MB/);
+    // The readout format; the bytes themselves are asserted to advance below.
+    await expect(control.getByTestId("resumable-transfer")).toContainText(/^\d+(\.\d)? (B|KB|MB) \/ 42 MB/);
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __gx: { retrying: boolean } }).__gx.retrying), {
         message: "a transient part failure must show the automatic retry, not a failure",

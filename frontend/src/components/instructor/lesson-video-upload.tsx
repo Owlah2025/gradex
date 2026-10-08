@@ -163,7 +163,7 @@ export function LessonVideoUpload({
         locale,
         csrf,
       });
-      resumable.acknowledge(completionResult.sha256_hex);
+      resumable.acknowledge(completionResult);
       await onAttached();
       if (!completion.selected) {
         activeAssetVersionID.current = null;

@@ -171,7 +171,7 @@ export function PublicPreviewUpload({
         locale,
         csrf,
       });
-      resumable.acknowledge(completionResult.sha256_hex);
+      resumable.acknowledge(completionResult);
       await onChanged();
       if (!completion.selected) {
         // A newer completed upload already holds the revision. This upload is

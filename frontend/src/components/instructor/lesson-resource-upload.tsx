@@ -118,7 +118,7 @@ export function LessonResourceUpload({
       });
 
       setPhase("READY");
-      resumable.acknowledge(completion.sha256_hex);
+      resumable.acknowledge(completion);
       setMessage(media.resourceAttached);
       await onChanged();
     } catch (error) {

@@ -172,8 +172,7 @@ test("pause keeps the in-tab File for Resume; acknowledgement and a wrong file c
     sha256_hex: "d".repeat(64),
     provider_event_id: "multipart:asset-1",
   });
-  await ok;
-  f.session.acknowledge("d".repeat(64));
+  f.session.acknowledge(await ok);
   assert.equal(f.session.lastFile(), null);
   assert.equal(f.state().pending, false);
 });
@@ -231,17 +230,17 @@ test("an acknowledgement that arrives after a control switch clears the originat
   await settle();
   const digest = "e".repeat(64);
   f.runs[0].resolve(completion(digest));
-  await run;
+  const resultA = await run;
   // The attach request is in flight when the mounted control switches to Lesson B, which has its
   // own saved upload of a file with the same bytes.
   f.session.setInput(control("video-b"));
-  f.session.acknowledge(digest);
+  f.session.acknowledge(resultA);
   assert.deepEqual(acknowledged, ["video-a"], "A's acknowledgement clears A's checkpoint, not B's");
   assert.ok(f.saved.has("video-b"), "B's checkpoint survives");
   assert.equal(f.state().pending, true);
   assert.equal(f.state().saved?.assetVersionID, "asset-video-b");
-  // A second acknowledgement of the same digest is a no-op.
-  f.session.acknowledge(digest);
+  // A second acknowledgement of the same run is a no-op.
+  f.session.acknowledge(resultA);
   assert.deepEqual(acknowledged, ["video-a"]);
 });
 
@@ -251,12 +250,47 @@ test("an acknowledgement never interrupts a newer run on the same control", asyn
   const first = f.session.run(fileNamed("a.mp4"), () => undefined);
   await settle();
   f.runs[0].resolve(completion("1".repeat(64)));
-  await first;
+  const firstResult = await first;
   const second = f.session.run(fileNamed("b.mp4"), () => undefined);
   await settle();
-  f.session.acknowledge("1".repeat(64));
+  f.session.acknowledge(firstResult);
   assert.equal(f.state().running, true, "the newer run's state is untouched");
   assert.equal(f.session.lastFile()?.name, "b.mp4");
   f.session.pause();
   await assert.rejects(second);
+});
+
+test("identical bytes on two Lessons with out-of-order attachments: each acknowledgement clears its own checkpoint", async () => {
+  const f = fixture();
+  const acknowledged: string[] = [];
+  f.deps.acknowledgeSaved = (input) => {
+    acknowledged.push(input.storageKeyId);
+    f.saved.delete(input.storageKeyId);
+  };
+  const digest = "a".repeat(64);
+  // Lesson A completes; its attach request is still in flight.
+  f.session.setInput(control("video-a"));
+  const runA = f.session.run(fileNamed("same.mp4"), () => undefined);
+  await settle();
+  f.saved.set("video-a", summary("video-a", "same.mp4", 100));
+  f.runs[0].resolve(completion(digest));
+  const resultA = await runA;
+  // The control switches to Lesson B, which uploads the very same bytes and completes too.
+  f.saved.set("video-b", summary("video-b", "same.mp4", 0));
+  f.session.setInput(control("video-b"));
+  const runB = f.session.run(fileNamed("same.mp4"), () => undefined);
+  await settle();
+  f.runs[1].resolve(completion(digest));
+  const resultB = await runB;
+  // A's attachment returns last-but-one: it must not touch B.
+  f.session.acknowledge(resultA);
+  assert.deepEqual(acknowledged, ["video-a"]);
+  assert.ok(f.saved.has("video-b"), "B's checkpoint survives A's delayed acknowledgement");
+  assert.equal(f.session.lastFile()?.name, "same.mp4", "B keeps its own in-tab file");
+  assert.equal(f.state().pending, true);
+  // B's own acknowledgement then clears B.
+  f.session.acknowledge(resultB);
+  assert.deepEqual(acknowledged, ["video-a", "video-b"]);
+  assert.equal(f.state().pending, false);
+  assert.equal(f.session.lastFile(), null);
 });

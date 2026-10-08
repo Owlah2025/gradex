@@ -10,6 +10,7 @@ import {
   readSavedUpload,
   refreshSavedUpload,
   uploadResumable,
+  type MultipartCompletionResult,
   type ResumableInput,
 } from "@/lib/api/media-multipart";
 import {
@@ -70,7 +71,8 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
     lastFile: () => current.lastFile(),
     pause: () => current.pause(),
     cancel: () => current.cancel(),
-    acknowledge: (digest: string) => current.acknowledge(digest),
+    /** Pass the result object `run` returned; it identifies the run and the control it belonged to. */
+    acknowledge: (result: MultipartCompletionResult) => current.acknowledge(result),
   };
 }
 

@@ -77,10 +77,11 @@ export class ResumableUploadSession {
   private operation: Promise<unknown> | null = null;
   private retainedFile: File | null = null;
   private generation = 0;
-  // Completed runs awaiting acknowledgement, keyed by digest, remember the control they belong to.
+  // Completed runs awaiting acknowledgement remember the control they belong to, keyed by the
+  // result object that run returned — unique per run even when two Lessons upload identical bytes.
   // The caller acknowledges only after a separate attach request, by which time the mounted control
   // may show another Lesson; the acknowledgement must still clear the originating checkpoint.
-  private readonly completedRuns = new Map<string, { identity: string; input: SessionInput }>();
+  private readonly completedRuns = new WeakMap<MultipartCompletionResult, { identity: string; input: SessionInput }>();
 
   constructor(
     private readonly deps: SessionDependencies,
@@ -181,7 +182,7 @@ export class ResumableUploadSession {
       const result = await task;
       active.signal.throwIfAborted();
       if (!current()) throw new DOMException("Upload paused", "AbortError");
-      this.completedRuns.set(result.sha256_hex, { identity: identity!, input });
+      this.completedRuns.set(result, { identity: identity!, input });
       return result;
     } catch (cause) {
       // A refused file must never become the in-tab file that "Resume upload" would send.
@@ -232,11 +233,11 @@ export class ResumableUploadSession {
    * the completing run belonged to, never whichever control happens to be mounted now, and the
    * visible state changes only if that control is still the current one and nothing newer runs.
    */
-  acknowledge(digest: string): void {
-    const origin = this.completedRuns.get(digest);
+  acknowledge(result: MultipartCompletionResult): void {
+    const origin = this.completedRuns.get(result);
     if (!origin) return;
-    this.completedRuns.delete(digest);
-    this.deps.acknowledgeSaved({ ...origin.input, csrf: this.deps.csrf() || "" }, digest);
+    this.completedRuns.delete(result);
+    this.deps.acknowledgeSaved({ ...origin.input, csrf: this.deps.csrf() || "" }, result.sha256_hex);
     if (origin.identity !== this.identity || this.controller) return;
     this.generation++;
     this.retainedFile = null;
