@@ -2,6 +2,11 @@ import { authenticatedRequest } from "./http";
 import { ProblemError } from "./problem";
 import type { AssetKind, LocalisedInput } from "./media-upload";
 import { sha256Hex } from "./media-upload";
+import {
+  UploadProgressTracker,
+  progressFraction,
+  type UploadProgress,
+} from "./upload-progress";
 
 type Part = { part_number: number; etag: string; size_bytes?: number };
 export type MultipartUploadTicket = {
@@ -31,12 +36,51 @@ export type ResumableInput = LocalisedInput & {
   contentType?: string;
   signal?: AbortSignal;
   onVerifying?: () => void;
+  /** Called once the server confirmed which parts it already holds for a resumed upload. */
+  onResuming?: (summary: SavedUploadSummary) => void;
 };
+/** Non-sensitive description of the selected file. Never its bytes; never a signed URL. */
+type CheckpointFile = { name: string; size: number; type: string };
 type Checkpoint = {
   requestID: string;
   ticket: MultipartUploadTicket | null;
   parts: Part[];
+  /** Absent on checkpoints written before this field existed. */
+  file?: CheckpointFile;
+  updatedAt?: number;
 };
+export type UploadProgressListener = (fraction: number, progress: UploadProgress) => void;
+
+/**
+ * What the browser can safely say about a saved upload before the file is reselected.
+ *
+ * The local checkpoint is a hint; when a server session exists its part list replaces the local
+ * one (`source: "server"`). `percent` and `sizeBytes` are null for checkpoints written before the
+ * file description was stored.
+ */
+export type SavedUploadSummary = {
+  fileName: string | null;
+  sizeBytes: number | null;
+  completedBytes: number;
+  percent: number | null;
+  assetVersionID: string | null;
+  /** STARTING: no server session yet. PAUSED: parts can be resumed. FINISHING: all bytes are
+   * stored and only completion/verification remains. CANCELLED: the server session ended. */
+  status: "STARTING" | "PAUSED" | "FINISHING" | "CANCELLED";
+  source: "local" | "server";
+};
+
+/** The selected file is not the file the saved upload belongs to. Nothing was uploaded. */
+export class ResumeFileMismatchError extends Error {
+  constructor(readonly savedFileName: string | null) {
+    super(
+      savedFileName
+        ? `This is not the same file as the paused upload. Select ${savedFileName} to continue, or cancel the saved upload and start a new one.`
+        : "This is not the same file as the paused upload. Select the original file to continue, or cancel the saved upload and start a new one.",
+    );
+    this.name = "ResumeFileMismatchError";
+  }
+}
 const activeUploads = new Set<string>();
 const prefix = (
   input: Pick<ResumableInput, "courseID" | "revisionID" | "storageKeyId">,
@@ -47,6 +91,95 @@ export function hasResumableUpload(
   input: Pick<ResumableInput, "courseID" | "revisionID" | "storageKeyId">,
 ): boolean {
   return Object.keys(localStorage).some((key) => key.startsWith(prefix(input)));
+}
+
+function savedCheckpoints(
+  input: Pick<ResumableInput, "courseID" | "revisionID" | "storageKeyId">,
+): Array<{ key: string; checkpoint: Checkpoint }> {
+  return Object.keys(localStorage)
+    .filter((key) => key.startsWith(prefix(input)))
+    .map((key) => ({ key, checkpoint: readCheckpoint(key) }))
+    .filter((entry): entry is { key: string; checkpoint: Checkpoint } => entry.checkpoint !== null)
+    .sort((a, b) => (b.checkpoint.updatedAt || 0) - (a.checkpoint.updatedAt || 0));
+}
+
+function persist(key: string, checkpoint: Checkpoint): void {
+  checkpoint.updatedAt = Date.now();
+  localStorage.setItem(key, JSON.stringify(checkpoint));
+}
+
+/**
+ * Summarises one checkpoint. When `server` is given it is the authority on which parts exist and
+ * whether the session is still open; the local part list is used only when there is no server
+ * answer. Part sizes are derived from the stored part size and file size, not trusted from either.
+ */
+export function summarizeCheckpoint(
+  checkpoint: Pick<Checkpoint, "ticket" | "parts" | "file">,
+  server?: MultipartUploadTicket,
+): SavedUploadSummary {
+  const ticket = server || checkpoint.ticket;
+  const sizeBytes = checkpoint.file?.size ?? null;
+  const status: SavedUploadSummary["status"] = !ticket
+    ? "STARTING"
+    : ticket.status === "ABORTING" || ticket.status === "ABORTED"
+      ? "CANCELLED"
+      : ticket.status === "ACTIVE"
+        ? "PAUSED"
+        : "FINISHING";
+  const parts = server ? server.parts : checkpoint.parts;
+  let completedBytes = 0;
+  if (status === "FINISHING" && sizeBytes !== null) completedBytes = sizeBytes;
+  else if (status === "PAUSED" && ticket) {
+    for (const part of new Set(parts.map((p) => p.part_number))) {
+      const declared = parts.find((p) => p.part_number === part)?.size_bytes ?? 0;
+      const expected =
+        sizeBytes === null
+          ? declared
+          : Math.max(0, Math.min(ticket.part_size_bytes, sizeBytes - (part - 1) * ticket.part_size_bytes));
+      completedBytes += expected;
+    }
+    if (sizeBytes !== null) completedBytes = Math.min(completedBytes, sizeBytes);
+  }
+  return {
+    fileName: checkpoint.file?.name ?? null,
+    sizeBytes,
+    completedBytes,
+    percent:
+      sizeBytes === null
+        ? null
+        : sizeBytes === 0
+          ? 100
+          : Math.min(100, Math.floor((completedBytes / sizeBytes) * 100)),
+    assetVersionID: ticket?.asset_version_id ?? null,
+    status,
+    source: server ? "server" : "local",
+  };
+}
+
+/** The saved upload for this control from the browser checkpoint alone; no network. */
+export function readSavedUpload(
+  input: Pick<ResumableInput, "courseID" | "revisionID" | "storageKeyId">,
+): SavedUploadSummary | null {
+  const latest = savedCheckpoints(input)[0];
+  return latest ? summarizeCheckpoint(latest.checkpoint) : null;
+}
+
+/**
+ * The saved upload reconciled with the server session it names. Falls back to the local summary
+ * when the server cannot be reached, so a reload never shows a false 0%.
+ */
+export async function refreshSavedUpload(
+  input: Pick<ResumableInput, "courseID" | "revisionID" | "storageKeyId" | "locale">,
+): Promise<SavedUploadSummary | null> {
+  const latest = savedCheckpoints(input)[0];
+  if (!latest) return null;
+  if (!latest.checkpoint.ticket) return summarizeCheckpoint(latest.checkpoint);
+  try {
+    const server = await getSession(input, latest.checkpoint.ticket.asset_version_id);
+    return summarizeCheckpoint(latest.checkpoint, server);
+  } catch {
+    return summarizeCheckpoint(latest.checkpoint);
+  }
 }
 
 function readCheckpoint(key: string): Checkpoint | null {
@@ -106,7 +239,7 @@ export async function presignUploadPart(
 }
 
 async function getSession(
-  input: LocalisedInput,
+  input: Pick<LocalisedInput, "locale">,
   id: string,
 ): Promise<MultipartUploadTicket> {
   const ticket = await authenticatedRequest<MultipartUploadTicket>(
@@ -171,11 +304,14 @@ export function uploadFilePart(
   chunk: Blob,
   contentType: string,
   signal?: AbortSignal,
+  onProgress?: (loaded: number) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
+    let settled = false;
     const abort = () => request.abort();
     const fail = (error: Error) => {
+      settled = true;
       signal?.removeEventListener("abort", abort);
       reject(error);
     };
@@ -188,6 +324,12 @@ export function uploadFilePart(
     request.timeout = 120000;
     request.setRequestHeader("Content-Type", contentType);
     signal?.addEventListener("abort", abort, { once: true });
+    // Byte-level progress for this part's body. Events after settlement or abort are ignored.
+    if (onProgress && request.upload)
+      request.upload.onprogress = (event: ProgressEvent) => {
+        if (settled || signal?.aborted) return;
+        onProgress(Math.min(event.loaded, chunk.size));
+      };
     request.onerror = () =>
       fail(new Error("Part upload failed due to network error"));
     request.ontimeout = () => fail(new Error("Part upload timed out"));
@@ -203,6 +345,7 @@ export function uploadFilePart(
         fail(new Error("Storage returned no valid part ETag"));
         return;
       }
+      settled = true;
       signal?.removeEventListener("abort", abort);
       resolve(etag);
     };
@@ -221,11 +364,15 @@ function retryable(error: unknown): boolean {
   );
 }
 
+const PART_ATTEMPTS = 3;
+
 async function uploadPartWithRetry(
   file: File,
   input: ResumableInput,
   ticket: MultipartUploadTicket,
   number: number,
+  tracker: UploadProgressTracker,
+  emit: () => void,
 ): Promise<Part> {
   const start = (number - 1) * ticket.part_size_bytes;
   const chunk = file.slice(
@@ -245,10 +392,18 @@ async function uploadPartWithRetry(
         chunk,
         input.contentType || file.type,
         input.signal,
+        (loaded) => {
+          tracker.partProgress(number, loaded);
+          emit();
+        },
       );
       return { part_number: number, etag, size_bytes: chunk.size };
     } catch (error) {
-      if (attempt === 2 || !retryable(error)) throw error;
+      const willRetry = attempt < PART_ATTEMPTS - 1 && retryable(error);
+      // The failed attempt's bytes never reached the server; they stop counting before any retry.
+      tracker.partReset(number, willRetry);
+      if (!willRetry) throw error;
+      emit();
       await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
     }
   }
@@ -259,7 +414,7 @@ async function transferParts(
   input: ResumableInput,
   checkpoint: Checkpoint,
   key: string,
-  onProgress?: (fraction: number) => void,
+  onProgress?: UploadProgressListener,
 ) {
   const ticket = checkpoint.ticket;
   if (!ticket) throw new Error("Upload session has not been created");
@@ -268,33 +423,34 @@ async function transferParts(
   const pending = Array.from({ length: count }, (_, i) => i + 1).filter(
     (n) => !done.has(n),
   );
-  const report = () =>
-    onProgress?.(
-      Array.from(done.keys()).reduce(
-        (sum, n) =>
-          sum +
-          Math.min(
-            ticket.part_size_bytes,
-            file.size - (n - 1) * ticket.part_size_bytes,
-          ),
-        0,
-      ) / file.size,
-    );
-  report();
+  const tracker = new UploadProgressTracker(
+    file.size,
+    ticket.part_size_bytes,
+    Array.from(done.keys()),
+  );
   let failure: unknown;
+  // Nothing is reported once the run is stopping: a paused or failed upload must not keep moving.
+  const report = () => {
+    if (failure || input.signal?.aborted) return;
+    const progress = tracker.snapshot();
+    onProgress?.(progressFraction(progress), progress);
+  };
+  report();
   const worker = async () => {
     while (pending.length && !failure) {
       const number = pending.shift()!;
       try {
-        const part = await uploadPartWithRetry(file, input, ticket, number);
+        const part = await uploadPartWithRetry(file, input, ticket, number, tracker, report);
         done.set(number, part);
+        tracker.partCompleted(number);
         checkpoint.parts = Array.from(done.values()).sort(
           (a, b) => a.part_number - b.part_number,
         );
-        localStorage.setItem(key, JSON.stringify(checkpoint));
+        persist(key, checkpoint);
         report();
       } catch (error) {
         failure = error;
+        tracker.stopAll();
       }
     }
   };
@@ -309,21 +465,39 @@ async function transferParts(
 export async function uploadResumable(
   file: File,
   input: ResumableInput,
-  onProgress?: (fraction: number) => void,
+  onProgress?: UploadProgressListener,
 ): Promise<MultipartCompletionResult> {
+  // One saved upload per control. A file of a different size cannot be the saved one, so it is
+  // refused before spending time on a full fingerprint.
+  const saved = savedCheckpoints(input);
+  if (
+    saved.length &&
+    saved.every(({ checkpoint }) => checkpoint.file && checkpoint.file.size !== file.size)
+  )
+    throw new ResumeFileMismatchError(saved[0].checkpoint.file?.name ?? null);
   // Full streaming fingerprint prevents splicing two same-name/same-size files after refresh.
   const digest = await sha256Hex(file, input.signal);
   const key = prefix(input) + digest;
+  // The file's own checkpoint always resumes, even beside an older one an earlier build left.
+  if (saved.length && !saved.some((entry) => entry.key === key))
+    throw new ResumeFileMismatchError(saved[0].checkpoint.file?.name ?? null);
   if (activeUploads.has(key)) throw new Error("This upload is already running");
   activeUploads.add(key);
   try {
     let checkpoint = readCheckpoint(key);
+    const description: CheckpointFile = {
+      name: file.name,
+      size: file.size,
+      type: input.contentType || file.type,
+    };
     if (checkpoint?.ticket) {
       const ticket = await getSession(
         input,
         checkpoint.ticket.asset_version_id,
       );
       checkpoint.ticket = ticket;
+      checkpoint.file = checkpoint.file || description;
+      // The server's part list wins over whatever this browser remembered.
       if (ticket.status === "ACTIVE")
         checkpoint.parts = ticket.parts.sort(
           (a, b) => a.part_number - b.part_number,
@@ -332,13 +506,16 @@ export async function uploadResumable(
         throw new Error(
           "This upload was cancelled. Clear it before starting again.",
         );
+      if (ticket.status === "ACTIVE")
+        input.onResuming?.(summarizeCheckpoint(checkpoint, ticket));
     } else {
       checkpoint = checkpoint || {
         requestID: crypto.randomUUID(),
         ticket: null,
         parts: [],
       };
-      localStorage.setItem(key, JSON.stringify(checkpoint));
+      checkpoint.file = description;
+      persist(key, checkpoint);
       checkpoint.ticket = await beginMultipartUpload({
         ...input,
         requestID: checkpoint.requestID,
@@ -347,7 +524,7 @@ export async function uploadResumable(
       });
       checkpoint.parts = checkpoint.ticket.parts;
     }
-    localStorage.setItem(key, JSON.stringify(checkpoint));
+    persist(key, checkpoint);
     const ticket = checkpoint.ticket;
     if (!ticket) throw new Error("Upload session has not been created");
     if (ticket.status === "ACTIVE")

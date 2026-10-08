@@ -1,0 +1,158 @@
+import type { SavedUploadSummary } from "../../lib/api/media-multipart";
+import { ResumeFileMismatchError } from "../../lib/api/media-multipart";
+import { describeApiError } from "../../lib/api/api-error";
+import { formatBytes, type UploadProgress } from "../../lib/api/upload-progress";
+
+type Locale = "ar" | "en";
+
+/*
+  Byte figures are left-to-right runs ("1.6 MB"). Inside an Arabic sentence the bidi algorithm
+  otherwise splits the number from its unit ("MB / 25 MB 1.6"), so each figure is wrapped in a
+  left-to-right isolate (U+2066 … U+2069). English needs no isolates.
+*/
+const LRI = "\u2066";
+const PDI = "\u2069";
+/** A file name keeps its own direction inside the other language's sentence (U+2068 … U+2069). */
+export function fileNameFor(name: string, locale: Locale): string {
+  return locale === "ar" ? `\u2068“${name}”${PDI}` : `“${name}”`;
+}
+
+export function bytesFor(bytes: number, locale: Locale): string {
+  return locale === "ar" ? `${LRI}${formatBytes(bytes)}${PDI}` : formatBytes(bytes);
+}
+
+/** Live transfer readout: "425 MB / 625 MB · 8.4 MB/s · ~24 sec remaining". */
+export function transferLine(
+  progress: Pick<UploadProgress, "reportedBytes" | "totalBytes">,
+  bytesPerSecond: number | null,
+  secondsRemaining: number | null,
+  locale: Locale,
+): string {
+  const isolate = (text: string) => (locale === "ar" ? `${LRI}${text}${PDI}` : text);
+  const parts = [isolate(`${formatBytes(progress.reportedBytes)} / ${formatBytes(progress.totalBytes)}`)];
+  if (bytesPerSecond !== null && bytesPerSecond > 0) parts.push(isolate(`${formatBytes(bytesPerSecond)}/s`));
+  if (secondsRemaining !== null && progress.reportedBytes < progress.totalBytes)
+    parts.push(remainingLabel(secondsRemaining, locale));
+  return parts.join(" · ");
+}
+
+export function remainingLabel(seconds: number, locale: Locale): string {
+  const ar = locale === "ar";
+  if (seconds < 60) {
+    const value = Math.max(1, Math.round(seconds));
+    return ar ? `متبقٍ نحو ${value} ثانية` : `~${value} sec remaining`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return ar ? `متبقٍ نحو ${minutes} دقيقة` : `~${minutes} min remaining`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return ar
+    ? `متبقٍ نحو ${hours} ساعة${rest ? ` و${rest} دقيقة` : ""}`
+    : `~${hours} h${rest ? ` ${rest} min` : ""} remaining`;
+}
+
+export function retryingLine(locale: Locale): string {
+  return locale === "ar"
+    ? "انقطع الاتصال. تجري إعادة المحاولة تلقائياً…"
+    : "Connection interrupted. Retrying automatically…";
+}
+
+export function checkingLine(locale: Locale): string {
+  return locale === "ar" ? "جارٍ التحقق من الملف…" : "Checking file…";
+}
+
+export function resumingLine(summary: SavedUploadSummary, locale: Locale): string {
+  const ar = locale === "ar";
+  if (summary.percent === null)
+    return ar ? "جارٍ استكمال الرفع…" : "Resuming upload…";
+  return ar ? `جارٍ الاستكمال من ${summary.percent}%…` : `Resuming from ${summary.percent}%…`;
+}
+
+/**
+ * What a saved upload looks like before (or without) the file being reselected. Every number
+ * comes from the summary, which the server has reconciled when it could be reached.
+ */
+export function savedUploadCopy(
+  summary: SavedUploadSummary,
+  locale: Locale,
+  fileAvailable: boolean,
+): { title: string; detail: string | null; instruction: string; action: string } {
+  const ar = locale === "ar";
+  const name = summary.fileName ? fileNameFor(summary.fileName, locale) : null;
+  const action = fileAvailable
+    ? ar
+      ? "استكمال الرفع"
+      : "Resume upload"
+    : ar
+      ? "اختر الملف للاستكمال"
+      : "Choose file and resume";
+  if (summary.status === "CANCELLED") {
+    return {
+      title: ar ? "انتهى هذا الرفع المحفوظ أو أُلغي" : "This saved upload was cancelled or expired",
+      detail: null,
+      instruction: ar
+        ? "ألغِ الرفع المحفوظ لبدء رفع جديد."
+        : "Cancel the saved upload to start a new one.",
+      action,
+    };
+  }
+  const detail =
+    summary.sizeBytes !== null
+      ? ar
+        ? `تم حفظ ${bytesFor(summary.completedBytes, locale)} من ${bytesFor(summary.sizeBytes, locale)} بأمان.`
+        : `${formatBytes(summary.completedBytes)} of ${formatBytes(summary.sizeBytes)} is already safely uploaded.`
+      : summary.completedBytes > 0
+        ? ar
+          ? `تم حفظ ${bytesFor(summary.completedBytes, locale)} بأمان.`
+          : `${formatBytes(summary.completedBytes)} is already safely uploaded.`
+        : null;
+  if (summary.status === "FINISHING") {
+    return {
+      title: ar ? "اكتمل رفع الملف وينتظر التحقق" : "Upload finished — verification pending",
+      detail,
+      instruction: fileAvailable
+        ? ar
+          ? "تابع لإكمال التحقق. لن يُعاد رفع أي جزء."
+          : "Continue to finish verification. Nothing will be uploaded again."
+        : ar
+          ? `أعد اختيار ${name ?? "الملف نفسه"} لإكمال التحقق. لن يُعاد رفع أي جزء.`
+          : `Reselect ${name ?? "the same file"} to finish verification. Nothing will be uploaded again.`,
+      action,
+    };
+  }
+  const title =
+    summary.percent !== null
+      ? ar
+        ? `توقف الرفع مؤقتاً عند ${summary.percent}%`
+        : `Upload paused at ${summary.percent}%`
+      : ar
+        ? "توقف الرفع مؤقتاً"
+        : "Upload paused";
+  return {
+    title,
+    detail,
+    instruction: fileAvailable
+      ? ar
+        ? "استكمل للمتابعة. لن يُعاد رفع الأجزاء المكتملة."
+        : "Resume to continue. Completed parts will not be uploaded again."
+      : ar
+        ? `أعد اختيار ${name ?? "الملف نفسه"} للمتابعة. لن يُعاد رفع الأجزاء المكتملة.`
+        : `Reselect ${name ?? "the same file"} to continue. Completed parts will not be uploaded again.`,
+    action,
+  };
+}
+
+export function cancelledLine(locale: Locale): string {
+  return locale === "ar" ? "أُلغي الرفع." : "Upload cancelled.";
+}
+
+/** Upload errors as the Instructor reads them; the wrong-file refusal names the file to pick. */
+export function describeUploadError(error: unknown, locale: Locale): string {
+  if (error instanceof ResumeFileMismatchError) {
+    const name = error.savedFileName ? fileNameFor(error.savedFileName, locale) : null;
+    return locale === "ar"
+      ? `هذا ليس الملف نفسه الخاص بالرفع المتوقف. اختر ${name ?? "الملف الأصلي"} للمتابعة، أو ألغِ الرفع المحفوظ وابدأ رفعاً جديداً.`
+      : `This is not the same file as the paused upload. Select ${name ?? "the original file"} to continue, or cancel the saved upload and start a new one.`;
+  }
+  return describeApiError(error, locale);
+}

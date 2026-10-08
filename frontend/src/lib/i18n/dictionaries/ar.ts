@@ -2849,6 +2849,7 @@ export const ar: Dictionary = {
         PROCESSING: "جارٍ المعالجة",
         PROCESSING_BACKGROUND: "تستمر المعالجة في الخلفية",
         CHECKING: "جارٍ فحص الملف",
+        VERIFYING: "جارٍ التحقق من الرفع",
         ATTACHING: "جارٍ الإرفاق",
         READY: "جاهز",
         FAILED: "فشل الرفع",

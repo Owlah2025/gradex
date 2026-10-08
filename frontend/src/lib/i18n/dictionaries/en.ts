@@ -3021,6 +3021,7 @@ export const en = {
         PROCESSING: "Processing",
         PROCESSING_BACKGROUND: "Processing in background",
         CHECKING: "Checking the file",
+        VERIFYING: "Verifying upload",
         ATTACHING: "Attaching",
         READY: "Ready",
         FAILED: "Upload failed",

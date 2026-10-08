@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ResumableUploadControls, useResumableUpload, isPausedUpload } from "./resumable-upload-controls";
 import { clearPublicPreview } from "@/lib/api/authoring";
 import { describeApiError } from "@/lib/api/api-error";
+import { describeUploadError } from "./resumable-upload-copy";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,7 @@ export function PublicPreviewUpload({
       if (isPausedUpload(cause)) { setPhase("IDLE"); setMessage(null); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
-      setMessage(describeApiError(cause, locale) || t.failed);
+      setMessage(describeUploadError(cause, locale) || t.failed);
     }
   }
 
@@ -286,7 +287,11 @@ export function PublicPreviewUpload({
           </Button>
         ) : null}
       </div>
-      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => input.current?.click()} />
+      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => {
+          const file = resumable.lastFile();
+          if (file) void upload(file);
+          else input.current?.click();
+        }} />
       {status ? (
         /* A failure must not read like a success: different role, different ink. */
         <p

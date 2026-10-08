@@ -10,7 +10,7 @@ import {
   validateSelectedVideo,
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
-import { describeApiError } from "@/lib/api/api-error";
+import { describeUploadError } from "./resumable-upload-copy";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
 import { recoverLessonVideoPhase } from "./lesson-video-upload-state";
@@ -20,7 +20,9 @@ type Phase = Extract<
   UploadPhase,
   | "IDLE"
   | "PREPARING"
+  | "CHECKING"
   | "UPLOADING"
+  | "VERIFYING"
   | "PROCESSING"
   | "PROCESSING_BACKGROUND"
   | "ATTACHING"
@@ -116,6 +118,12 @@ export function LessonVideoUpload({
     } else setMessage(null);
   }, [assetState, assetVersionID, locale, media]);
 
+  // Upload and verification are different measurements: once every byte is stored the bar stops
+  // being an upload percentage and the phase says the server is verifying.
+  useEffect(() => {
+    if (resumable.verifying) setPhase("VERIFYING");
+  }, [resumable.verifying]);
+
   const run = async (file: File) => {
     const rejection = validateSelectedVideo(file, locale);
     if (rejection) {
@@ -133,7 +141,9 @@ export function LessonVideoUpload({
     setMessage(null);
     setProgress(0);
     try {
-      setPhase("PREPARING");
+      // A saved upload is checked (full fingerprint, then the server's part list) before anything
+      // moves, and progress then starts from what the server already holds, never from 0%.
+      setPhase(resumable.pending ? "CHECKING" : "PREPARING");
       const completionResult = await resumable.run(file, (fraction) => { setPhase("UPLOADING"); setProgress(fraction); });
       activeAssetVersionID.current = completionResult.asset_version_id;
 
@@ -175,7 +185,7 @@ export function LessonVideoUpload({
       if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
       activeAssetVersionID.current = null;
       setPhase("FAILED");
-      setMessage(describeApiError(error, locale));
+      setMessage(describeUploadError(error, locale));
     }
   };
 
@@ -211,8 +221,10 @@ export function LessonVideoUpload({
         labels={media}
         phaseTestID={`lesson-video-phase-${lessonID}`}
         messageTestID={`lesson-video-message-${lessonID}`}
+        quietIdle={resumable.pending || resumable.cancelled}
         onRetry={
-          phase === "FAILED"
+          // A saved upload is continued from the controls below, not restarted from here.
+          phase === "FAILED" && !resumable.pending
             ? () => {
                 setPhase("IDLE");
                 setMessage(null);
@@ -222,7 +234,16 @@ export function LessonVideoUpload({
             : undefined
         }
       />
-      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => fileInput.current?.click()} />
+      <ResumableUploadControls
+        upload={resumable}
+        locale={locale}
+        locked={busy && !resumable.running}
+        onReselect={() => {
+          const file = resumable.lastFile();
+          if (file) void run(file);
+          else fileInput.current?.click();
+        }}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   cancelResumableUpload,
   acknowledgeResumableUpload,
   uploadFilePart,
+  ResumeFileMismatchError,
   type ResumableInput,
   type MultipartUploadTicket,
 } from "./media-multipart";
@@ -317,10 +318,18 @@ test("completion response loss retains the same session and immutable completion
 test("same name and size with changed bytes cannot reuse another file's upload", async () => {
   const f = networkFixture();
   try {
-    await uploadResumable(picked(), input);
+    const first = await uploadResumable(picked(), input);
     const different = new File([new Uint8Array(20).fill(9)], "lecture.mp4", {
       type: "video/mp4",
     });
+    // While the first upload's checkpoint is unacknowledged, a different file is refused rather
+    // than silently becoming a second, parallel upload for the same control.
+    await assert.rejects(
+      uploadResumable(different, input),
+      (error: unknown) => error instanceof ResumeFileMismatchError,
+    );
+    assert.equal(f.counts().begins, 1);
+    acknowledgeResumableUpload(input, first.sha256_hex);
     await uploadResumable(different, input);
     assert.equal(f.counts().begins, 2);
   } finally {

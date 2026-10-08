@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
+import { describeUploadError } from "./resumable-upload-copy";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
@@ -118,7 +119,7 @@ export function LessonResourceUpload({
       await onChanged();
     } catch (error) {
       if (isPausedUpload(error)) { setPhase("IDLE"); setMessage(null); return; }
-      fail(describeApiError(error, locale));
+      fail(describeUploadError(error, locale));
     }
   };
 
@@ -207,7 +208,11 @@ export function LessonResourceUpload({
           event.target.value = "";
         }}
       />
-      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => fileInput.current?.click()} />
+      <ResumableUploadControls upload={resumable} locale={locale} locked={busy && !resumable.running} onReselect={() => {
+          const file = resumable.lastFile();
+          if (file) void run(file);
+          else fileInput.current?.click();
+        }} />
       <UploadStatus
         phase={phase}
         progress={progress}

@@ -14,6 +14,7 @@ export type UploadPhase =
   | "PROCESSING"
   | "PROCESSING_BACKGROUND"
   | "CHECKING"
+  | "VERIFYING"
   | "ATTACHING"
   | "READY"
   | "FAILED";
@@ -24,6 +25,7 @@ export function isUploadBusy(phase: UploadPhase): boolean {
     phase === "UPLOADING" ||
     phase === "PROCESSING" ||
     phase === "CHECKING" ||
+    phase === "VERIFYING" ||
     phase === "ATTACHING"
   );
 }
@@ -56,6 +58,7 @@ export function UploadStatus({
   phaseTestID,
   messageTestID,
   onRetry,
+  quietIdle = false,
 }: {
   phase: UploadPhase;
   /** 0–1, meaningful during UPLOADING only. */
@@ -71,6 +74,8 @@ export function UploadStatus({
   phaseTestID?: string;
   messageTestID?: string;
   onRetry?: () => void;
+  /** Omit the "No upload in progress" pill when something else (a saved upload) explains the state. */
+  quietIdle?: boolean;
 }) {
   const failed = phase === "FAILED";
   const busy = isUploadBusy(phase);
@@ -87,7 +92,7 @@ export function UploadStatus({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={cn("flex flex-wrap items-center gap-2", quietIdle && phase === "IDLE" && "sr-only")}>
         <span
           data-testid={phaseTestID}
           data-upload-phase={phase}
