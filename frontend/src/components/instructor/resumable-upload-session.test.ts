@@ -424,3 +424,19 @@ test("once every part is saved, nothing is at risk: no leave-page warning", () =
     true,
   );
 });
+
+test("while every part is still being signed nothing is on the wire: no prompt, and Pause stops at once", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  // The transfer has begun (its first snapshot is reported) but no byte has been sent yet.
+  f.runs[0].onProgress?.(0, progress(0));
+  assert.equal(f.state().transfer !== null, true);
+  assert.equal(transferInProgress(f.state()), false, "no leave-page prompt for bytes that do not exist");
+  f.session.pause();
+  assert.equal(timers.length, 0, "no 60 s wait when nothing is in flight");
+  assert.equal(f.runs[0].input.signal?.aborted, true);
+  await assert.rejects(run);
+});

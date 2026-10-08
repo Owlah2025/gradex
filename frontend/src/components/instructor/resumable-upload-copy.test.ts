@@ -167,3 +167,13 @@ test("before any part is accepted the control says nothing is saved yet, not '0%
   );
   assert.match(savedForResumeLine(start, "ar")!, /لم يُحفظ شيء للاستكمال بعد/);
 });
+
+test("the saved readout appears from the first in-flight byte, even below 1% of a large file", () => {
+  const early = { totalBytes: 200_000_000, completedBytes: 0, transferredBytes: 1_000_000, reportedBytes: 1_000_000 };
+  assert.equal(
+    savedForResumeLine(early, "en"),
+    "Nothing is saved for resume yet. Parts still transferring are lost if you refresh or close this page.",
+  );
+  const behindByUnderOnePercent = { totalBytes: 200_000_000, completedBytes: 100_000_000, transferredBytes: 100_500_000, reportedBytes: 100_500_000 };
+  assert.match(savedForResumeLine(behindByUnderOnePercent, "en")!, /^Saved for resume: 50% · 100 MB safely uploaded\./);
+});

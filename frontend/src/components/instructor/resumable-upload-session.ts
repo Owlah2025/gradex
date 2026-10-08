@@ -65,15 +65,16 @@ export type SessionDependencies = {
 export const DEFAULT_PAUSE_DRAIN_TIMEOUT_MS = 60_000;
 
 /**
- * Whether leaving the page now would discard work: bytes are being sent and the browser still has
- * to be here for them. Verification and processing run on the server and need no tab.
+ * Whether leaving the page now would discard work: bytes of parts not yet accepted are actually on
+ * the wire. Nothing is at risk while parts are only being signed, between parts, once every part is
+ * saved, or while the server verifies and processes (which needs no tab).
  */
 export function transferInProgress(state: Pick<ResumableState, "running" | "transfer" | "verifying">): boolean {
   return (
     state.running &&
     state.transfer !== null &&
     !state.verifying &&
-    state.transfer.progress.completedBytes < state.transfer.progress.totalBytes
+    state.transfer.progress.transferredBytes > state.transfer.progress.completedBytes
   );
 }
 

@@ -70,9 +70,10 @@ export function savedForResumeLine(
   progress: Pick<UploadProgress, "completedBytes" | "transferredBytes" | "reportedBytes" | "totalBytes">,
   locale: Locale,
 ): string | null {
+  // Visibility is decided on bytes, not on rounded percentages: 1 MB in flight on a 200 MB file is
+  // under 1% and must still say that nothing is saved yet. Only the displayed figure is rounded.
+  if (progress.reportedBytes <= progress.completedBytes) return null;
   const saved = durablePercent(progress);
-  const sent = progress.totalBytes <= 0 ? 100 : Math.floor((progress.reportedBytes / progress.totalBytes) * 100);
-  if (saved >= sent) return null;
   const inFlight = progress.transferredBytes > progress.completedBytes;
   if (progress.completedBytes <= 0)
     return locale === "ar"
