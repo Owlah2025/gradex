@@ -207,3 +207,56 @@ test("an unmount stops the transfer, and a remount of the same control starts cl
   assert.equal(f.state().running, false);
   assert.equal(f.state().saved?.fileName, "a.mp4");
 });
+
+const completion = (digest: string): MultipartCompletionResult => ({
+  state: "QUARANTINED",
+  duplicate: false,
+  asset_version_id: "asset-x",
+  storage_object_key: "k",
+  storage_object_version: 'etag:"x"',
+  sha256_hex: digest,
+  provider_event_id: "multipart:asset-x",
+});
+
+test("an acknowledgement that arrives after a control switch clears the originating checkpoint only", async () => {
+  const f = fixture();
+  const acknowledged: string[] = [];
+  f.deps.acknowledgeSaved = (input) => {
+    acknowledged.push(input.storageKeyId);
+    f.saved.delete(input.storageKeyId);
+  };
+  f.saved.set("video-b", summary("video-b", "same-bytes.mp4", 30));
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("same-bytes.mp4"), () => undefined);
+  await settle();
+  const digest = "e".repeat(64);
+  f.runs[0].resolve(completion(digest));
+  await run;
+  // The attach request is in flight when the mounted control switches to Lesson B, which has its
+  // own saved upload of a file with the same bytes.
+  f.session.setInput(control("video-b"));
+  f.session.acknowledge(digest);
+  assert.deepEqual(acknowledged, ["video-a"], "A's acknowledgement clears A's checkpoint, not B's");
+  assert.ok(f.saved.has("video-b"), "B's checkpoint survives");
+  assert.equal(f.state().pending, true);
+  assert.equal(f.state().saved?.assetVersionID, "asset-video-b");
+  // A second acknowledgement of the same digest is a no-op.
+  f.session.acknowledge(digest);
+  assert.deepEqual(acknowledged, ["video-a"]);
+});
+
+test("an acknowledgement never interrupts a newer run on the same control", async () => {
+  const f = fixture();
+  f.session.setInput(control("video-a"));
+  const first = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[0].resolve(completion("1".repeat(64)));
+  await first;
+  const second = f.session.run(fileNamed("b.mp4"), () => undefined);
+  await settle();
+  f.session.acknowledge("1".repeat(64));
+  assert.equal(f.state().running, true, "the newer run's state is untouched");
+  assert.equal(f.session.lastFile()?.name, "b.mp4");
+  f.session.pause();
+  await assert.rejects(second);
+});
