@@ -440,3 +440,25 @@ test("while every part is still being signed nothing is on the wire: no prompt, 
   assert.equal(f.runs[0].input.signal?.aborted, true);
   await assert.rejects(run);
 });
+
+test("the first in-flight bytes are acted on at once, even inside the readout throttle interval", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  let clock = 1_000_000;
+  f.deps.now = () => clock;
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[0].onProgress?.(0, progress(0)); // the transfer's first snapshot: nothing on the wire
+  assert.equal(transferInProgress(f.state()), false);
+  clock += 50; // well inside the 150 ms readout interval
+  f.runs[0].onProgress?.(0.0096, progress(0.96));
+  assert.equal(transferInProgress(f.state()), true, "the leave-page prompt is armed immediately");
+  f.session.pause();
+  assert.equal(f.state().pausing, true, "Pause drains instead of discarding the in-flight bytes");
+  assert.equal(f.runs[0].input.drain?.aborted, true);
+  assert.equal(f.runs[0].input.signal?.aborted, false);
+  assert.equal(timers.length, 1);
+  f.session.stopNow();
+  await assert.rejects(run);
+});

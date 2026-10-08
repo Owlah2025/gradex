@@ -164,6 +164,7 @@ export class ResumableUploadSession {
     let lastReadout = 0;
     let lastRetrying = false;
     let lastCompleted = -1;
+    let lastAtRisk = false;
     const task = this.deps.upload(
       file,
       {
@@ -182,6 +183,9 @@ export class ResumableUploadSession {
       (fraction, detail) => {
         if (!current()) return;
         const now = this.deps.now();
+        // A change in whether bytes are at risk is published at once (below), so Pause and the
+        // leave-page prompt never act on a readout that is one throttle interval old.
+        const atRisk = detail.transferredBytes > detail.completedBytes;
         // Speed is measured from the first byte this run actually sends, not from the moment the
         // run started (fingerprinting, session recovery and signing are not upload throughput).
         if (detail.transferredBytes > detail.resumedFromBytes) meter.record(detail.reportedBytes, now);
@@ -190,12 +194,14 @@ export class ResumableUploadSession {
           now - lastReadout < READOUT_INTERVAL_MS &&
           detail.retrying === lastRetrying &&
           detail.completedBytes === lastCompleted &&
+          atRisk === lastAtRisk &&
           !settled
         )
           return;
         lastReadout = now;
         lastRetrying = detail.retrying;
         lastCompleted = detail.completedBytes;
+        lastAtRisk = atRisk;
         this.update({
           transfer: {
             progress: detail,
