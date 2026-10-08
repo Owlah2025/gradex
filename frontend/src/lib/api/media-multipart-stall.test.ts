@@ -212,3 +212,41 @@ test("a stalled part is retried automatically and the upload completes", async (
     x.restore();
   }
 });
+
+test("a part whose request cannot even start fails as a connection problem and leaves no timer", async () => {
+  const saved = globalThis.XMLHttpRequest;
+  let aborted = false;
+  class Throwing {
+    timeout = -1;
+    withCredentials = false;
+    upload = { onprogress: null, onload: null };
+    onload = null;
+    onerror = null;
+    onabort: (() => void) | null = null;
+    ontimeout = null;
+    open() {}
+    setRequestHeader() {}
+    getResponseHeader() {
+      return null;
+    }
+    abort() {
+      aborted = true;
+      this.onabort?.();
+    }
+    send() {
+      throw new Error("InvalidStateError");
+    }
+  }
+  globalThis.XMLHttpRequest = Throwing as unknown as typeof XMLHttpRequest;
+  try {
+    const error = await uploadFilePart("https://storage.test/p/1", chunk, "video/mp4", undefined, undefined, 30).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+    assert.ok(error instanceof PartTransferError && error.reason === "network", String(error));
+    await wait(80); // past the stall window: a leaked timer would abort the request now
+    assert.equal(aborted, false, "the stall timer was cleared");
+  } finally {
+    globalThis.XMLHttpRequest = saved;
+  }
+});

@@ -428,7 +428,12 @@ export function uploadFilePart(
       resolve(etag);
     };
     armStall();
-    request.send(chunk);
+    try {
+      request.send(chunk);
+    } catch (cause) {
+      // A synchronous send failure must not leave the stall timer armed.
+      fail(new PartTransferError(`Part upload could not start: ${String(cause)}`, "network"));
+    }
   });
 }
 
