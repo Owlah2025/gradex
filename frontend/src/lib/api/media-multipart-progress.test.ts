@@ -31,7 +31,8 @@ type Inflight = {
   aborted: boolean;
 };
 
-function harness(options: { serverParts?: number[] } = {}) {
+function harness(options: { serverParts?: number[]; partBytes?: number } = {}) {
+  const partBytes = options.partBytes ?? PART;
   const saved = {
     fetch: globalThis.fetch,
     xhr: globalThis.XMLHttpRequest,
@@ -57,6 +58,7 @@ function harness(options: { serverParts?: number[] } = {}) {
   const inflight: Inflight[] = [];
   const requests: string[] = [];
   const deletes: string[] = [];
+  const completionBodies: Array<{ parts: Array<{ part_number: number; etag: string }>; size_bytes: number }> = [];
   let begins = 0;
 
   class XHR {
@@ -134,17 +136,18 @@ function harness(options: { serverParts?: number[] } = {}) {
         upload_id: `provider-${begins}`,
         storage_object_key: `quarantine/course/${asset}/source`,
         expires_at: new Date(Date.now() + 60000).toISOString(),
-        part_size_bytes: PART,
+        part_size_bytes: partBytes,
         status: "ACTIVE",
         parts: [],
       });
-      serverParts.set(asset, new Map((options.serverParts || []).map((n) => [n, PART])));
+      serverParts.set(asset, new Map((options.serverParts || []).map((n) => [n, partBytes])));
       return Response.json(ticketFor(asset), { status: 201 });
     }
     const asset = path.match(/uploads\/(asset-\d+)/)?.[1];
     if (path.includes("/parts/"))
       return Response.json({ url: `https://storage.test/${asset}/${path.split("/").at(-1)}` });
     if (path.endsWith("/completions")) {
+      completionBodies.push(JSON.parse(init?.body as string));
       sessions.get(asset!)!.status = "ASSEMBLED";
       return Response.json({ asset_version_id: asset, state: "QUARANTINED", duplicate: false, storage_object_version: 'etag:"whole"' });
     }
@@ -180,6 +183,7 @@ function harness(options: { serverParts?: number[] } = {}) {
     inflight,
     requests,
     deletes,
+    completionBodies,
     serverParts,
     sessions,
     begins: () => begins,

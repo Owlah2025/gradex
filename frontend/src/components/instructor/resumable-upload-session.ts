@@ -17,6 +17,8 @@ export type ResumableState = {
   pending: boolean;
   saved: SavedUploadSummary | null;
   running: boolean;
+  /** Pause was requested: no new parts start; parts in flight are finishing so they are saved. */
+  pausing: boolean;
   verifying: boolean;
   cancelling: boolean;
   cancelled: boolean;
@@ -30,6 +32,7 @@ export const initialResumableState: ResumableState = {
   pending: false,
   saved: null,
   running: false,
+  pausing: false,
   verifying: false,
   cancelling: false,
   cancelled: false,
@@ -52,7 +55,22 @@ export type SessionDependencies = {
   csrf: () => string | null;
   describeError: (error: unknown, locale: "ar" | "en") => string;
   now: () => number;
+  /** How long a graceful pause may wait for in-flight parts before stopping them outright. */
+  pauseDrainTimeoutMs?: number;
+  setTimer?: (callback: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
 };
+
+// Long enough for one 8 MiB part per worker on a slow (~150 KB/s) link; a pause never hangs longer.
+export const DEFAULT_PAUSE_DRAIN_TIMEOUT_MS = 60_000;
+
+/**
+ * Whether leaving the page now would discard work: bytes are being sent and the browser still has
+ * to be here for them. Verification and processing run on the server and need no tab.
+ */
+export function transferInProgress(state: Pick<ResumableState, "running" | "transfer" | "verifying">): boolean {
+  return state.running && state.transfer !== null && !state.verifying;
+}
 
 // Progress events arrive per XHR many times a second; the readout is refreshed at most this often,
 // except when a part finishes, a retry starts or ends, or the upload reaches 100%.
@@ -74,6 +92,8 @@ export class ResumableUploadSession {
   private input: SessionInput | null = null;
   private identity: string | null = null;
   private controller: AbortController | null = null;
+  private drain: AbortController | null = null;
+  private drainTimer: unknown = null;
   private operation: Promise<unknown> | null = null;
   private retainedFile: File | null = null;
   private generation = 0;
@@ -125,7 +145,9 @@ export class ResumableUploadSession {
     const csrf = this.deps.csrf();
     if (!csrf) throw new Error("Your session must be refreshed before uploading.");
     const active = new AbortController();
+    const drain = new AbortController();
     this.controller = active;
+    this.drain = drain;
     this.generation++;
     const identity = this.identity;
     const current = () => this.controller === active && this.identity === identity;
@@ -143,6 +165,7 @@ export class ResumableUploadSession {
         csrf,
         contentType,
         signal: active.signal,
+        drain: drain.signal,
         onVerifying: () => {
           if (current()) this.update({ verifying: true });
         },
@@ -192,17 +215,48 @@ export class ResumableUploadSession {
       }
       throw cause;
     } finally {
+      if (this.drain === drain) this.clearDrain();
       if (current()) {
         this.controller = null;
         this.operation = null;
-        this.update({ running: false, verifying: false, resuming: null, transfer: null });
+        this.update({ running: false, pausing: false, verifying: false, resuming: null, transfer: null });
         this.reloadSaved();
       }
     }
   }
 
+  /**
+   * Pause without throwing away bytes already on the wire. While parts are being sent, no new part
+   * starts and the ones in flight finish, so their bytes are saved; the run then ends as paused.
+   * The wait is bounded, and stopNow() ends it at once. Before any part is moving (checking the
+   * file, recovering the session) or while verifying, there is nothing to save and the run stops.
+   */
   pause(): void {
+    if (!this.controller) return;
+    if (!transferInProgress(this.state) || !this.drain) {
+      this.stopNow();
+      return;
+    }
+    if (this.drain.signal.aborted) return;
+    this.drain.abort();
+    this.update({ pausing: true });
+    const setTimer = this.deps.setTimer ?? ((callback: () => void, ms: number) => setTimeout(callback, ms));
+    this.drainTimer = setTimer(() => this.stopNow(), this.deps.pauseDrainTimeoutMs ?? DEFAULT_PAUSE_DRAIN_TIMEOUT_MS);
+  }
+
+  /** Stop immediately. Parts still in flight are discarded; completed parts stay saved. */
+  stopNow(): void {
+    this.clearDrain();
     this.controller?.abort(new DOMException("Upload paused", "AbortError"));
+  }
+
+  private clearDrain(): void {
+    if (this.drainTimer !== null) {
+      const clearTimer = this.deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+      clearTimer(this.drainTimer);
+      this.drainTimer = null;
+    }
+    this.drain = null;
   }
 
   async cancel(): Promise<void> {
@@ -210,6 +264,8 @@ export class ResumableUploadSession {
     const identity = this.identity;
     this.generation++;
     this.update({ cancelling: true, error: null });
+    // Cancel is a hard stop, never a graceful drain.
+    this.clearDrain();
     this.controller?.abort(new DOMException("Upload paused", "AbortError"));
     try {
       if (this.operation) await this.operation.catch(() => undefined);
@@ -259,6 +315,7 @@ export class ResumableUploadSession {
 
   private abandon(): void {
     this.generation++;
+    this.clearDrain();
     this.controller?.abort(new DOMException("Upload paused", "AbortError"));
     this.controller = null;
     this.operation = null;

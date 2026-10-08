@@ -9,6 +9,7 @@ import {
 } from "../../lib/api/media-multipart";
 import {
   ResumableUploadSession,
+  transferInProgress,
   type ResumableState,
   type SessionDependencies,
   type SessionInput,
@@ -293,4 +294,106 @@ test("identical bytes on two Lessons with out-of-order attachments: each acknowl
   assert.deepEqual(acknowledged, ["video-a", "video-b"]);
   assert.equal(f.state().pending, false);
   assert.equal(f.session.lastFile(), null);
+});
+
+function withTimers(f: ReturnType<typeof fixture>) {
+  const timers: Array<{ callback: () => void; ms: number; cleared: boolean }> = [];
+  f.deps.pauseDrainTimeoutMs = 60_000;
+  f.deps.setTimer = (callback, ms) => {
+    const timer = { callback, ms, cleared: false };
+    timers.push(timer);
+    return timer;
+  };
+  f.deps.clearTimer = (handle) => {
+    (handle as { cleared: boolean }).cleared = true;
+  };
+  return timers;
+}
+
+test("Pause while parts are on the wire drains them instead of aborting, within a bounded wait", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  const parked = f.runs[0];
+  parked.onProgress?.(0.4, progress(40));
+  assert.equal(transferInProgress(f.state()), true, "leaving the page now would discard in-flight parts");
+
+  f.session.pause();
+  assert.equal(f.state().pausing, true);
+  assert.equal(parked.input.drain?.aborted, true, "no new parts are scheduled");
+  assert.equal(parked.input.signal?.aborted, false, "parts in flight keep going so they are saved");
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 60_000);
+
+  // The parts do not finish in time: the bounded wait stops them.
+  timers[0].callback();
+  assert.equal(parked.input.signal?.aborted, true);
+  await assert.rejects(run);
+  assert.equal(f.state().pausing, false);
+  assert.equal(f.state().running, false);
+  assert.equal(transferInProgress(f.state()), false);
+});
+
+test("a drained pause that finishes in time clears its timer; Stop now ends it at once", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  f.session.setInput(control("video-a"));
+  const first = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[0].onProgress?.(0.4, progress(40));
+  f.session.pause();
+  f.runs[0].reject(new DOMException("Upload paused", "AbortError")); // drained and paused normally
+  await assert.rejects(first);
+  assert.equal(timers[0].cleared, true, "no stray timer aborts a later run");
+  assert.equal(f.state().pausing, false);
+
+  const second = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[1].onProgress?.(0.5, progress(50));
+  f.session.pause();
+  f.session.stopNow();
+  assert.equal(f.runs[1].input.signal?.aborted, true);
+  assert.equal(timers[1].cleared, true);
+  await assert.rejects(second);
+});
+
+test("before any byte moves, and while verifying, Pause stops at once (nothing in flight to save)", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  f.session.setInput(control("video-a"));
+  const checking = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.session.pause(); // still fingerprinting / recovering the session
+  assert.equal(f.runs[0].input.signal?.aborted, true);
+  assert.equal(timers.length, 0);
+  await assert.rejects(checking);
+
+  const verifying = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[1].onProgress?.(1, progress(100));
+  f.runs[1].input.onVerifying?.();
+  assert.equal(transferInProgress(f.state()), false, "verification needs no tab: no leave-page warning");
+  f.session.pause();
+  assert.equal(f.runs[1].input.signal?.aborted, true);
+  await assert.rejects(verifying);
+});
+
+test("Cancel during a draining pause is still an immediate, hard cancel", async () => {
+  const f = fixture();
+  const timers = withTimers(f);
+  f.saved.set("video-a", summary("video-a", "a.mp4"));
+  f.session.setInput(control("video-a"));
+  const run = f.session.run(fileNamed("a.mp4"), () => undefined);
+  await settle();
+  f.runs[0].onProgress?.(0.3, progress(30));
+  f.session.pause();
+  const cancelling = f.session.cancel();
+  assert.equal(f.runs[0].input.signal?.aborted, true, "cancel does not wait for parts to finish");
+  assert.equal(timers[0].cleared, true);
+  await assert.rejects(run);
+  await cancelling;
+  assert.deepEqual(f.cancelled, ["video-a"]);
+  assert.equal(f.state().cancelled, true);
 });

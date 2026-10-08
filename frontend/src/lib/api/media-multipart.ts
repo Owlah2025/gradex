@@ -35,6 +35,12 @@ export type ResumableInput = LocalisedInput & {
   storageKeyId: string;
   contentType?: string;
   signal?: AbortSignal;
+  /**
+   * A graceful pause. When aborted, no new part is started and a failed part is not retried, but
+   * parts already being sent are allowed to finish so their bytes are saved on the server. `signal`
+   * remains the hard stop.
+   */
+  drain?: AbortSignal;
   onVerifying?: () => void;
   /** Called once the server confirmed which parts it already holds for a resumed upload. */
   onResuming?: (summary: SavedUploadSummary) => void;
@@ -407,7 +413,8 @@ async function uploadPartWithRetry(
       );
       return { part_number: number, etag, size_bytes: chunk.size };
     } catch (error) {
-      const willRetry = attempt < PART_ATTEMPTS - 1 && retryable(error);
+      const willRetry =
+        attempt < PART_ATTEMPTS - 1 && retryable(error) && !input.drain?.aborted;
       // The failed attempt's bytes never reached the server; they stop counting before any retry.
       tracker.partReset(number, willRetry);
       if (!willRetry) throw error;
@@ -445,7 +452,8 @@ async function transferParts(
   };
   report();
   const worker = async () => {
-    while (pending.length && !failure) {
+    // A graceful pause stops new parts here; parts already in flight run to completion.
+    while (pending.length && !failure && !input.drain?.aborted) {
       const number = pending.shift()!;
       try {
         const part = await uploadPartWithRetry(file, input, ticket, number, tracker, report);
@@ -466,8 +474,15 @@ async function transferParts(
   await Promise.all(
     Array.from({ length: Math.min(3, pending.length) }, () => worker()),
   );
+  // A transient failure while finishing a requested pause is not an upload failure: that part
+  // was not saved and is simply sent again on Resume.
+  if (failure && input.drain?.aborted && retryable(failure))
+    throw new DOMException("Upload paused", "AbortError");
   if (failure) throw failure;
   input.signal?.throwIfAborted();
+  // A requested pause ends here, after the parts in flight were saved — even when none are left to
+  // send. Resume then has nothing to upload and goes straight to completion.
+  if (input.drain?.aborted) throw new DOMException("Upload paused", "AbortError");
 }
 
 type LockManagerLike = {

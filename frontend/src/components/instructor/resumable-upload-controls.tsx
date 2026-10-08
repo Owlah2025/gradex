@@ -16,12 +16,15 @@ import {
 import {
   ResumableUploadSession,
   initialResumableState,
+  transferInProgress,
   type ResumableState,
   type SessionDependencies,
 } from "./resumable-upload-session";
 import {
   cancelledLine,
+  pausingLine,
   resumingLine,
+  savedForResumeLine,
   retryingLine,
   savedUploadCopy,
   transferLine,
@@ -63,6 +66,20 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
   }, [current, input.courseID, input.revisionID, input.storageKeyId, input.lessonID, input.kind, input.locale]);
   useEffect(() => () => current.dispose(), [current]);
 
+  // While bytes are on the wire, leaving the page discards the parts still being sent (completed
+  // parts are saved and resumable). Browsers show their own wording for this prompt; the control
+  // itself says which part is safe. Nothing is asked once the server is verifying or processing.
+  const warnBeforeLeaving = transferInProgress(state);
+  useEffect(() => {
+    if (!warnBeforeLeaving) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [warnBeforeLeaving]);
+
   return {
     ...state,
     run: (file: File, progress: (fraction: number) => void, contentType?: string) =>
@@ -70,6 +87,8 @@ export function useResumableUpload(input: Omit<ResumableInput, "csrf">) {
     /** The File picked in this tab for this control, if any; resuming with it needs no picker. */
     lastFile: () => current.lastFile(),
     pause: () => current.pause(),
+    /** End a graceful pause at once; parts still in flight are discarded. */
+    stopNow: () => current.stopNow(),
     cancel: () => current.cancel(),
     /** Pass the result object `run` returned; it identifies the run and the control it belonged to. */
     acknowledge: (result: MultipartCompletionResult) => current.acknowledge(result),
@@ -111,12 +130,27 @@ export function ResumableUploadControls({
           className="text-xs tabular-nums text-muted-foreground"
           data-testid="resumable-transfer"
           data-reported-bytes={transfer.progress.reportedBytes}
+          data-completed-bytes={transfer.progress.completedBytes}
           data-total-bytes={transfer.progress.totalBytes}
         >
           {transferLine(transfer.progress, transfer.bytesPerSecond, transfer.secondsRemaining, locale)}
         </p>
       ) : null}
-      {upload.running && transfer?.progress.retrying ? (
+      {upload.running && transfer && !upload.verifying && savedForResumeLine(transfer.progress, locale) ? (
+        <p
+          className="text-xs tabular-nums text-muted-foreground"
+          data-testid="resumable-saved-for-resume"
+          data-completed-bytes={transfer.progress.completedBytes}
+        >
+          {savedForResumeLine(transfer.progress, locale)}
+        </p>
+      ) : null}
+      {upload.pausing ? (
+        <p role="status" className="text-xs font-medium text-foreground" data-testid="resumable-pausing">
+          {pausingLine(locale)}
+        </p>
+      ) : null}
+      {upload.running && transfer?.progress.retrying && !upload.pausing ? (
         <p role="status" className="text-xs font-medium text-foreground" data-testid="resumable-retrying">
           {retryingLine(locale)}
         </p>
@@ -155,7 +189,17 @@ export function ResumableUploadControls({
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2 [&>button]:h-auto [&>button]:min-h-9 [&>button]:max-w-full [&>button]:whitespace-normal [&>button]:py-1.5">
-        {upload.running && !upload.verifying ? (
+        {upload.running && !upload.verifying && upload.pausing ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={upload.stopNow}
+            disabled={upload.cancelling}
+          >
+            {ar ? "إيقاف الآن" : "Stop now"}
+          </Button>
+        ) : upload.running && !upload.verifying ? (
           <Button
             type="button"
             variant="outline"

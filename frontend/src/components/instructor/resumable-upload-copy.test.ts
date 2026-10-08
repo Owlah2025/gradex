@@ -5,6 +5,9 @@ import test from "node:test";
 import { ResumeFileMismatchError, UploadAlreadyRunningError, type SavedUploadSummary } from "../../lib/api/media-multipart";
 import {
   describeUploadError,
+  durablePercent,
+  pausingLine,
+  savedForResumeLine,
   remainingLabel,
   resumingLine,
   savedUploadCopy,
@@ -55,9 +58,9 @@ test("finished and cancelled saved uploads say so", () => {
 test("live transfer line shows bytes, speed and time remaining", () => {
   assert.equal(
     transferLine({ reportedBytes: 425_000_000, totalBytes: 625_000_000 }, 8_400_000, 24, "en"),
-    "425 MB / 625 MB · 8.4 MB/s · ~24 sec remaining",
+    "425 MB / 625 MB transferred · 8.4 MB/s · ~24 sec remaining",
   );
-  assert.equal(transferLine({ reportedBytes: 1, totalBytes: 2 }, null, null, "en"), "1 B / 2 B");
+  assert.equal(transferLine({ reportedBytes: 1, totalBytes: 2 }, null, null, "en"), "1 B / 2 B transferred");
   assert.equal(remainingLabel(150, "en"), "~3 min remaining");
   assert.equal(remainingLabel(3900, "en"), "~1 h 5 min remaining");
   assert.match(remainingLabel(24, "ar"), /24 ثانية/);
@@ -83,7 +86,7 @@ test("the Lesson video control resumes with the in-tab file, checks before resum
 
 test("Arabic byte figures are bidi-isolated so the number stays with its unit", () => {
   const line = transferLine({ reportedBytes: 1_600_000, totalBytes: 25_000_000 }, 1_100_000, 34, "ar");
-  assert.ok(line.startsWith("⁦1.6 MB / 25 MB⁩"), JSON.stringify(line));
+  assert.ok(line.startsWith("أُرسل ⁦1.6 MB / 25 MB⁩"), JSON.stringify(line));
   assert.ok(line.includes("⁦1.1 MB/s⁩"));
   const detail = savedUploadCopy(paused, "ar", false).detail!;
   assert.ok(detail.includes("⁦425 MB⁩") && detail.includes("⁦625 MB⁩"), JSON.stringify(detail));
@@ -118,4 +121,40 @@ test("the hook delegates its lifecycle to the executable session", () => {
   const source = readFileSync(join(process.cwd(), "src/components/instructor/resumable-upload-controls.tsx"), "utf8");
   assert.match(source, /new ResumableUploadSession\(browserDependencies, setState\)/);
   assert.match(source, /useEffect\(\(\) => \(\) => current\.dispose\(\), \[current\]\)/);
+});
+
+test("saved-for-resume is shown only when it differs from what was sent, and never calls in-flight bytes safe", () => {
+  const live = { totalBytes: 9_600_000, completedBytes: 1_211_392, transferredBytes: 7_711_392, reportedBytes: 7_711_392 };
+  assert.equal(durablePercent(live), 12, "rounded down: a saved figure is never overstated");
+  assert.equal(
+    savedForResumeLine(live, "en"),
+    "Saved for resume: 12% · 1.2 MB safely uploaded. Parts still transferring are lost if you refresh or close this page.",
+  );
+  const ar = savedForResumeLine(live, "ar")!;
+  assert.match(ar, /محفوظ للاستكمال: 12%/);
+  assert.ok(ar.includes("\u20661.2 MB\u2069"));
+  // Everything sent is saved: nothing to distinguish.
+  assert.equal(savedForResumeLine({ ...live, completedBytes: 7_711_392 }, "en"), null);
+  // A retry dropped in-flight bytes but the bar holds: the saved line has no in-flight warning.
+  assert.equal(
+    savedForResumeLine({ totalBytes: 100, completedBytes: 40, transferredBytes: 40, reportedBytes: 70 }, "en"),
+    "Saved for resume: 40% · 40 B safely uploaded.",
+  );
+  assert.equal(pausingLine("en"), "Finishing the current upload parts so your progress can be saved…");
+  assert.match(pausingLine("ar"), /لحفظ تقدمك/);
+});
+
+test("the hook warns before leaving only while bytes are on the wire", () => {
+  const source = readFileSync(join(process.cwd(), "src/components/instructor/resumable-upload-controls.tsx"), "utf8");
+  assert.match(source, /const warnBeforeLeaving = transferInProgress\(state\);/);
+  assert.match(source, /window\.addEventListener\("beforeunload", warn\);/);
+  assert.match(source, /return \(\) => window\.removeEventListener\("beforeunload", warn\);/);
+  assert.match(source, /onClick=\{upload\.stopNow\}/);
+});
+
+test("a pause with every part saved says so instead of 'paused at 100%'", () => {
+  const all = savedUploadCopy({ ...paused, completedBytes: 625_000_000, percent: 100 }, "en", true);
+  assert.equal(all.title, "Upload paused — every part is saved");
+  assert.equal(all.instruction, "Resume to finish. Nothing will be uploaded again.");
+  assert.match(savedUploadCopy({ ...paused, completedBytes: 625_000_000, percent: 100 }, "ar", false).title, /كل الأجزاء محفوظة/);
 });

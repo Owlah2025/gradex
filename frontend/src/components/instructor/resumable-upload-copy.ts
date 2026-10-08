@@ -21,7 +21,10 @@ export function bytesFor(bytes: number, locale: Locale): string {
   return locale === "ar" ? `${LRI}${formatBytes(bytes)}${PDI}` : formatBytes(bytes);
 }
 
-/** Live transfer readout: "425 MB / 625 MB · 8.4 MB/s · ~24 sec remaining". */
+/**
+ * Live transfer readout: "425 MB / 625 MB transferred · 8.4 MB/s · ~24 sec remaining".
+ * "Transferred" includes bytes of parts still in flight; see savedForResumeLine for what is safe.
+ */
 export function transferLine(
   progress: Pick<UploadProgress, "reportedBytes" | "totalBytes">,
   bytesPerSecond: number | null,
@@ -29,7 +32,8 @@ export function transferLine(
   locale: Locale,
 ): string {
   const isolate = (text: string) => (locale === "ar" ? `${LRI}${text}${PDI}` : text);
-  const parts = [isolate(`${formatBytes(progress.reportedBytes)} / ${formatBytes(progress.totalBytes)}`)];
+  const figures = isolate(`${formatBytes(progress.reportedBytes)} / ${formatBytes(progress.totalBytes)}`);
+  const parts = [locale === "ar" ? `أُرسل ${figures}` : `${figures} transferred`];
   if (bytesPerSecond !== null && bytesPerSecond > 0) parts.push(isolate(`${formatBytes(bytesPerSecond)}/s`));
   if (secondsRemaining !== null && progress.reportedBytes < progress.totalBytes)
     parts.push(remainingLabel(secondsRemaining, locale));
@@ -49,6 +53,37 @@ export function remainingLabel(seconds: number, locale: Locale): string {
   return ar
     ? `متبقٍ نحو ${hours} ساعة${rest ? ` و${rest} دقيقة` : ""}`
     : `~${hours} h${rest ? ` ${rest} min` : ""} remaining`;
+}
+
+/** Whole percent, rounded down: a saved figure is never overstated. */
+export function durablePercent(progress: Pick<UploadProgress, "completedBytes" | "totalBytes">): number {
+  if (progress.totalBytes <= 0) return 100;
+  return Math.min(100, Math.floor((progress.completedBytes / progress.totalBytes) * 100));
+}
+
+/**
+ * The part of the transfer that would survive a refresh, shown only when it differs from what has
+ * been sent: bytes of parts the storage provider has fully accepted. In-flight bytes are never
+ * called saved.
+ */
+export function savedForResumeLine(
+  progress: Pick<UploadProgress, "completedBytes" | "transferredBytes" | "reportedBytes" | "totalBytes">,
+  locale: Locale,
+): string | null {
+  const saved = durablePercent(progress);
+  const sent = progress.totalBytes <= 0 ? 100 : Math.floor((progress.reportedBytes / progress.totalBytes) * 100);
+  if (saved >= sent) return null;
+  const inFlight = progress.transferredBytes > progress.completedBytes;
+  const bytes = bytesFor(progress.completedBytes, locale);
+  if (locale === "ar")
+    return `محفوظ للاستكمال: ${saved}% · ${bytes} مرفوعة بأمان.${inFlight ? " تضيع الأجزاء التي ما زالت قيد الإرسال إذا حدّثت الصفحة أو أغلقتها." : ""}`;
+  return `Saved for resume: ${saved}% · ${bytes} safely uploaded.${inFlight ? " Parts still transferring are lost if you refresh or close this page." : ""}`;
+}
+
+export function pausingLine(locale: Locale): string {
+  return locale === "ar"
+    ? "جارٍ إنهاء أجزاء الرفع الحالية لحفظ تقدمك…"
+    : "Finishing the current upload parts so your progress can be saved…";
 }
 
 export function retryingLine(locale: Locale): string {
@@ -117,6 +152,20 @@ export function savedUploadCopy(
         : ar
           ? `أعد اختيار ${name ?? "الملف نفسه"} لإكمال التحقق. لن يُعاد رفع أي جزء.`
           : `Reselect ${name ?? "the same file"} to finish verification. Nothing will be uploaded again.`,
+      action,
+    };
+  }
+  if (summary.percent === 100) {
+    return {
+      title: ar ? "توقف الرفع مؤقتاً — كل الأجزاء محفوظة" : "Upload paused — every part is saved",
+      detail,
+      instruction: fileAvailable
+        ? ar
+          ? "استكمل لإنهاء الرفع. لن يُعاد رفع أي جزء."
+          : "Resume to finish. Nothing will be uploaded again."
+        : ar
+          ? `أعد اختيار ${name ?? "الملف نفسه"} لإنهاء الرفع. لن يُعاد رفع أي جزء.`
+          : `Reselect ${name ?? "the same file"} to finish. Nothing will be uploaded again.`,
       action,
     };
   }
