@@ -181,6 +181,30 @@ async function serveCourse(
   await page.route("**/api/v1/me/academic-profile**", (route) =>
     route.fulfill({ status: 401, json: UNAUTHORIZED }),
   );
+  // D-117: the confirmation reads the Student's own profile for their WhatsApp
+  // number and their own requests for one already waiting. A signed-in fixture
+  // Student has a number on file and nothing pending; anonymous gets 401.
+  const signedIn = access.status === 200;
+  await page.route("**/api/v1/me/profile", (route) =>
+    signedIn
+      ? route.fulfill({
+          json: {
+            display_name: "Fixture Student",
+            email: "fixture-student@example.test",
+            locale,
+            status: "ACTIVE",
+            whatsapp_number: "+96550012345",
+          },
+        })
+      : route.fulfill({ status: 401, json: UNAUTHORIZED }),
+  );
+  await page.route("**/api/v1/me/purchase-requests", (route) =>
+    route.request().method() === "GET"
+      ? signedIn
+        ? route.fulfill({ json: { purchase_requests: [] } })
+        : route.fulfill({ status: 401, json: UNAUTHORIZED })
+      : route.fallback(),
+  );
 }
 
 async function openCourse(page: Page, locale: Locale) {
@@ -750,22 +774,35 @@ test("WhatsApp opens only after the explicit confirmation, with a server-built h
   await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
   watch.assertQuiet();
 
-  // The handoff opens beside Gradex rather than on top of it. The URL is taken
-  // from the navigation request, which is the handoff destination even when the
-  // real wa.me would redirect onwards.
+  // The number on file is shown, not asked for again.
+  await expect(page.getByTestId("purchase-contact-current")).toContainText("+965");
+  await expect(page.getByTestId("purchase-contact-number")).toHaveCount(0);
+
+  // D-117: confirming saves the request and shows a success state with the
+  // reference. Nothing opens on its own.
   const gradexURL = page.url();
+  const pagesBefore = page.context().pages().length;
+  await page.getByTestId("purchase-request-submit").click();
+  await expect(page.getByTestId("purchase-handoff")).toBeVisible();
+  await expect(page.getByTestId("purchase-handoff-reference")).toHaveText("GRX-ABCDEF0123456789");
+  expect(page.context().pages().length).toBe(pagesBefore);
+
+  // WhatsApp opens beside Gradex when the Student presses the link. The URL is
+  // taken from the navigation request, which is the handoff destination even
+  // when the real wa.me would redirect onwards.
   const opened = page.context().waitForEvent("page");
   const handoffRequest = page.context().waitForEvent("request", (request) =>
     request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
   );
-  await page.getByTestId("purchase-request-submit").click();
+  await page.getByTestId("purchase-handoff-link").click();
   const handoffPage = await opened;
   expect((await handoffRequest).url()).toBe("https://wa.me/15550000000?text=Hello");
   // The Course page the Student was reading is still open and unchanged.
   expect(handoffPage).not.toBe(page);
   expect(page.isClosed()).toBe(false);
   expect(page.url()).toBe(gradexURL);
-  await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
+  await expect(page.getByTestId("purchase-handoff")).toBeVisible();
+  await handoffPage.waitForLoadState("domcontentloaded");
   await handoffPage.close();
 
   // The body carries the Course and nothing else. An address here would decide

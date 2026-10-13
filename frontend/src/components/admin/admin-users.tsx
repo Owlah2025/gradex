@@ -43,6 +43,7 @@ import {
   WorkspacePageHeader,
   WorkspaceToolbar,
 } from "@/components/layout/workspace-page";
+import { AdminDirectoryContact } from "@/components/contact/admin-contact";
 
 type DirectoryDraft = {
   q: string;
@@ -51,6 +52,9 @@ type DirectoryDraft = {
   institutionId: string;
   joinedFrom: string;
   joinedTo: string;
+  /** D-117 contact filters; either narrows the directory to Students. */
+  whatsapp: "" | "PROVIDED" | "MISSING";
+  pendingPayment: boolean;
 };
 
 const EMPTY_DRAFT: DirectoryDraft = {
@@ -60,6 +64,8 @@ const EMPTY_DRAFT: DirectoryDraft = {
   institutionId: "",
   joinedFrom: "",
   joinedTo: "",
+  whatsapp: "",
+  pendingPayment: false,
 };
 
 const PAGE_LIMIT = 20;
@@ -67,6 +73,7 @@ const PAGE_LIMIT = 20;
 export function AdminUsers() {
   const { locale, t } = useLocale();
   const copy = t.adminUsers;
+  const contactCopy = t.contact;
   const [draft, setDraft] = useState<DirectoryDraft>(EMPTY_DRAFT);
   const [filters, setFilters] = useState<AdminAccountFilters>({ page: 1, limit: PAGE_LIMIT });
   const [result, setResult] = useState<AdminAccountPage | null>(null);
@@ -138,7 +145,9 @@ export function AdminUsers() {
       filters.status ||
       filters.institutionId ||
       filters.joinedFrom ||
-      filters.joinedTo,
+      filters.joinedTo ||
+      filters.whatsapp ||
+      filters.pendingPayment,
   );
 
   const downloadExport = async () => {
@@ -250,6 +259,29 @@ export function AdminUsers() {
               />
             </Field>
           </div>
+          <Field label={contactCopy.filterLabel} htmlFor="admin-users-whatsapp" className="lg:col-span-2">
+            <Select
+              id="admin-users-whatsapp"
+              value={draft.whatsapp}
+              onChange={(event) => updateDraft("whatsapp", event.target.value as DirectoryDraft["whatsapp"])}
+              data-testid="admin-users-whatsapp-filter"
+            >
+              <option value="">{contactCopy.filterAll}</option>
+              <option value="PROVIDED">{contactCopy.filterProvided}</option>
+              <option value="MISSING">{contactCopy.filterMissing}</option>
+            </Select>
+          </Field>
+          <label className="flex min-h-11 items-center gap-2 self-end text-sm font-semibold sm:col-span-2 lg:col-span-2" htmlFor="admin-users-pending-payment">
+            <input
+              id="admin-users-pending-payment"
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={draft.pendingPayment}
+              onChange={(event) => updateDraft("pendingPayment", event.target.checked)}
+              data-testid="admin-users-pending-payment-filter"
+            />
+            {contactCopy.filterPendingPayment}
+          </label>
           <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-6">
             <Button type="submit">{copy.applyFilters}</Button>
             <Button type="button" variant="outline" onClick={clearFilters}>
@@ -350,6 +382,7 @@ function AccountTable({
   locale: "ar" | "en";
   copy: ReturnType<typeof useLocale>["t"]["adminUsers"];
 }) {
+  const contactLabel = useLocale().t.contact.sectionTitle;
   return (
     <TableContainer>
       <Table>
@@ -360,6 +393,7 @@ function AccountTable({
             <TableHeaderCell scope="col">{copy.roleLabel}</TableHeaderCell>
             <TableHeaderCell scope="col">{copy.statusLabel}</TableHeaderCell>
             <TableHeaderCell scope="col">{copy.institutionLabel}</TableHeaderCell>
+            <TableHeaderCell scope="col">{contactLabel}</TableHeaderCell>
             <TableHeaderCell scope="col">{copy.joined}</TableHeaderCell>
             <TableHeaderCell scope="col">{copy.lastActivity}</TableHeaderCell>
             <TableHeaderCell scope="col">{copy.open}</TableHeaderCell>
@@ -376,6 +410,13 @@ function AccountTable({
                 <AccountStatusBadge account={account} copy={copy} />
               </TableCell>
               <TableCell>{account.institution_label || copy.noInstitution}</TableCell>
+              <TableCell>
+                <AdminDirectoryContact
+                  role={account.role}
+                  number={account.whatsapp_number}
+                  pendingPaymentRequests={account.pending_payment_requests}
+                />
+              </TableCell>
               <TableCell>
                 <time dateTime={account.created_at}>{formatDate(account.created_at, locale)}</time>
               </TableCell>
@@ -410,6 +451,7 @@ function AccountCard({
   locale: "ar" | "en";
   copy: ReturnType<typeof useLocale>["t"]["adminUsers"];
 }) {
+  const contactLabel = useLocale().t.contact.sectionTitle;
   return (
     <article className="rounded-lg border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -425,6 +467,18 @@ function AccountCard({
           <dt>{copy.institutionLabel}:</dt>
           <dd className="font-semibold text-foreground">{account.institution_label || copy.noInstitution}</dd>
         </div>
+        {account.role === "STUDENT" ? (
+          <div className="flex flex-wrap gap-2">
+            <dt>{contactLabel}:</dt>
+            <dd>
+              <AdminDirectoryContact
+                role={account.role}
+                number={account.whatsapp_number}
+                pendingPaymentRequests={account.pending_payment_requests}
+              />
+            </dd>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <dt>{copy.joined}:</dt>
           <dd><time dateTime={account.created_at}>{formatDate(account.created_at, locale)}</time></dd>

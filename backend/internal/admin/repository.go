@@ -198,8 +198,20 @@ func validateAccountDirectoryRequest(req AccountDirectoryRequest) error {
 	if req.JoinedFrom != nil && req.JoinedTo != nil && !req.JoinedFrom.Before(*req.JoinedTo) {
 		return ErrInvalidInput
 	}
+	switch req.WhatsApp {
+	case "", WhatsAppFilterProvided, WhatsAppFilterMissing:
+	default:
+		return ErrInvalidInput
+	}
 	return nil
 }
+
+// pendingPaymentRequestMatch is the purchase-request ownership rule shared by
+// the directory filter and its per-row count: the owning Account, or — for a
+// request that predates authenticated purchase — the Account with its address.
+const pendingPaymentRequestMatch = `pr.state = 'WAITING_PAYMENT' AND (
+		pr.requester_account_id = a.id
+		OR (pr.requester_account_id IS NULL AND pr.normalized_email = a.normalized_email))`
 
 func validateAuditEventRequest(req AuditEventRequest) error {
 	if err := validateIdentityRead(req.Principal); err != nil {
@@ -271,6 +283,18 @@ func accountWhere(req AccountDirectoryRequest) (string, []any, []string) {
 	}
 	if req.JoinedTo != nil {
 		add("joinedTo", "a.created_at < $%d", *req.JoinedTo)
+	}
+	switch req.WhatsApp {
+	case WhatsAppFilterProvided:
+		conditions = append(conditions, "a.role = 'STUDENT' AND a.contact_phone IS NOT NULL")
+		filterKeys = append(filterKeys, "whatsapp")
+	case WhatsAppFilterMissing:
+		conditions = append(conditions, "a.role = 'STUDENT' AND a.contact_phone IS NULL")
+		filterKeys = append(filterKeys, "whatsapp")
+	}
+	if req.PendingPayment {
+		conditions = append(conditions, "a.role = 'STUDENT' AND EXISTS (SELECT 1 FROM purchase_requests pr WHERE "+pendingPaymentRequestMatch+")")
+		filterKeys = append(filterKeys, "pendingPayment")
 	}
 	return strings.Join(conditions, " AND "), args, filterKeys
 }
@@ -355,7 +379,7 @@ func queryAccounts(
 	)
 	SELECT a.id::text, a.display_name, a.email, a.role::text, a.status::text,
 		a.locale, a.email_verified_at IS NOT NULL, a.created_at, i.name_ar, i.name_en,
-		activity.last_activity_at
+		activity.last_activity_at, a.contact_phone, pending.count
 	FROM account_page
 	JOIN accounts a ON a.id = account_page.id
 	LEFT JOIN student_academic_profiles sap ON sap.account_id = a.id
@@ -365,6 +389,11 @@ func queryAccounts(
 		FROM sessions s
 		WHERE s.account_id = a.id
 	) activity ON TRUE
+	LEFT JOIN LATERAL (
+		SELECT count(*)::int AS count
+		FROM purchase_requests pr
+		WHERE a.role = 'STUDENT' AND `+pendingPaymentRequestMatch+`
+	) pending ON TRUE
 	ORDER BY a.created_at DESC, a.id DESC`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("querying account directory: %w", err)
@@ -378,7 +407,7 @@ func queryAccounts(
 		var institutionAr, institutionEn *string
 		if err := rows.Scan(&account.ID, &account.DisplayName, &account.Email, &role, &status,
 			&locale, &account.EmailVerified, &account.CreatedAt, &institutionAr, &institutionEn,
-			&account.LastSignInActivityAt); err != nil {
+			&account.LastSignInActivityAt, &account.WhatsAppNumber, &account.PendingPaymentRequests); err != nil {
 			return nil, fmt.Errorf("scanning account directory row: %w", err)
 		}
 		account.Role = identity.Role(role)

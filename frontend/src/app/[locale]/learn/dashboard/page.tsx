@@ -23,6 +23,7 @@ import { hasPendingAccess, pendingAccessSummary } from "@/components/learning/pe
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { AcademicProfilePrompt } from "@/components/learning/academic-profile-prompt";
+import { ContactNumberPrompt } from "@/components/contact/contact-number-prompt";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -83,6 +84,11 @@ export default async function LearningDashboardPage({ params }: { params: Promis
               reached, never a redirect: onboarding is personalisation, not a gate,
               and it renders only for a Student who has made no decision yet. */}
           <div className="mt-8">
+            {/* D-117 contact reminder: derived from the Student's own profile,
+                shown only while no number is on file, and never a gate. */}
+            <div className="mb-6 empty:hidden">
+              <ContactNumberPrompt />
+            </div>
             <AcademicProfilePrompt />
           </div>
 

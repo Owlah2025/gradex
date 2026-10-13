@@ -18,8 +18,22 @@ student_counts AS (
         count(*) FILTER (WHERE a.role = 'STUDENT') AS total,
         count(*) FILTER (WHERE a.role = 'STUDENT' AND a.status = 'ACTIVE') AS active,
         count(*) FILTER (WHERE a.role = 'STUDENT' AND a.status = 'PENDING_VERIFICATION') AS pending_verification,
-        count(*) FILTER (WHERE a.role = 'STUDENT' AND a.status = 'SUSPENDED') AS suspended
+        count(*) FILTER (WHERE a.role = 'STUDENT' AND a.status = 'SUSPENDED') AS suspended,
+        count(*) FILTER (WHERE a.role = 'STUDENT' AND a.contact_phone IS NOT NULL) AS whatsapp_provided,
+        count(*) FILTER (WHERE a.role = 'STUDENT' AND a.contact_phone IS NULL) AS whatsapp_missing
     FROM accounts a
+),
+-- A waiting request is reachable through its own snapshot or, for one that
+-- predates D-117, through the requesting Student's current number.
+waiting_payment_contact AS (
+    SELECT count(*) FILTER (
+        WHERE COALESCE(pr.contact_phone, requester.contact_phone) IS NULL
+    ) AS without_contact
+    FROM purchase_requests pr
+    LEFT JOIN accounts requester ON requester.role = 'STUDENT' AND (
+        requester.id = pr.requester_account_id
+        OR (pr.requester_account_id IS NULL AND requester.normalized_email = pr.normalized_email))
+    WHERE pr.state = 'WAITING_PAYMENT'
 ),
 registration_counts AS (
     SELECT
@@ -146,6 +160,8 @@ metric_rows AS (
     UNION ALL SELECT 11, 'students.active', to_jsonb(student_counts.active), 'students.active' FROM student_counts
     UNION ALL SELECT 12, 'students.pending_verification', to_jsonb(student_counts.pending_verification), 'students.pending_verification' FROM student_counts
     UNION ALL SELECT 13, 'students.suspended', to_jsonb(student_counts.suspended), 'students.suspended' FROM student_counts
+    UNION ALL SELECT 14, 'students.whatsapp_provided', to_jsonb(student_counts.whatsapp_provided), 'students.whatsapp_contact' FROM student_counts
+    UNION ALL SELECT 15, 'students.whatsapp_missing', to_jsonb(student_counts.whatsapp_missing), 'students.whatsapp_contact' FROM student_counts
     UNION ALL SELECT 20, 'registrations.new_7d', to_jsonb(registration_counts.new_7d), 'registrations.new' FROM registration_counts
     UNION ALL SELECT 21, 'registrations.new_30d', to_jsonb(registration_counts.new_30d), 'registrations.new' FROM registration_counts
     UNION ALL SELECT 30, 'signed_in_activity.today', to_jsonb(sign_in_activity.today), 'signed_in_activity' FROM sign_in_activity
@@ -171,6 +187,7 @@ metric_rows AS (
     UNION ALL SELECT 71, 'purchase_requests.invitation_created', to_jsonb((SELECT count(*) FROM purchase_requests WHERE state = 'INVITATION_CREATED')), 'purchase_requests.state'
     UNION ALL SELECT 72, 'purchase_requests.access_granted', to_jsonb((SELECT count(*) FROM purchase_requests WHERE state = 'ACCESS_GRANTED')), 'purchase_requests.state'
     UNION ALL SELECT 73, 'purchase_requests.cancelled', to_jsonb((SELECT count(*) FROM purchase_requests WHERE state = 'CANCELLED')), 'purchase_requests.state'
+    UNION ALL SELECT 74, 'purchase_requests.waiting_payment_without_contact', to_jsonb(waiting_payment_contact.without_contact), 'purchase_requests.contact' FROM waiting_payment_contact
     UNION ALL SELECT 80, 'access_invitations.pending_student_acceptance', to_jsonb((SELECT count(*) FROM course_access_invitations WHERE state = 'PENDING_STUDENT_ACCEPTANCE')), 'access_invitations.state'
     UNION ALL SELECT 81, 'access_invitations.pending_admin_approval', to_jsonb((SELECT count(*) FROM course_access_invitations WHERE state = 'PENDING_ADMIN_APPROVAL')), 'access_invitations.state'
     UNION ALL SELECT 82, 'access_invitations.approved', to_jsonb((SELECT count(*) FROM course_access_invitations WHERE state = 'APPROVED')), 'access_invitations.state'
@@ -204,7 +221,7 @@ func (r *Repository) GetMetricsOverview(ctx context.Context, request MetricsOver
 	}
 	defer rows.Close()
 
-	metrics := make([]Metric, 0, 41)
+	metrics := make([]Metric, 0, 44)
 	var asOf time.Time
 	for rows.Next() {
 		var key, definitionKey string

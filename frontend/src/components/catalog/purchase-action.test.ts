@@ -16,18 +16,21 @@ function readSource(relative: string): string {
 const panel = () => readSource("components/catalog/purchase-action.tsx");
 
 const bundle = () => readSource("components/catalog/bundle-detail.tsx");
-const handoff = () => readSource("lib/browser/external-handoff.ts");
+const handoff = () => readSource("components/contact/purchase-handoff.tsx");
 
-test("WhatsApp is reached from the confirmation and from nowhere else", () => {
+test("WhatsApp is reached from the confirmed request and from nowhere else", () => {
   const source = panel();
   // The old form navigated to WhatsApp on the first press of a button labelled
   // "I want to buy", before anything had been confirmed and before any request
-  // existed. The handoff is still downstream of the confirm handler.
+  // existed. The handoff is still downstream of the confirm handler, and the
+  // success state renders only from the server's confirmed answer.
   const confirmBody = source.slice(source.indexOf("async function confirm()"));
   assert.match(
     confirmBody,
-    /createStudentPurchaseRequest\(courseId, locale\)[\s\S]*handoff\.complete\(result\.whatsapp_url\)/,
+    /await createStudentPurchaseRequest\([\s\S]*?\);[\s\S]*setCreated\(result\)/,
   );
+  const catchBody = confirmBody.slice(confirmBody.indexOf("} catch"), confirmBody.indexOf("} finally"));
+  assert.ok(!catchBody.includes("setCreated"), "a failed request renders the success state");
   // The URL is the server's, never assembled here.
   assert.ok(!source.includes("wa.me"), "the panel builds a WhatsApp URL itself");
 });
@@ -35,7 +38,7 @@ test("WhatsApp is reached from the confirmation and from nowhere else", () => {
 test("neither purchase surface navigates the Gradex page away", () => {
   // This is the whole point of the change: pressing "buy" used to replace the
   // page the Student was reading. Nothing may navigate the current document.
-  for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()]] as const) {
+  for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()], ["handoff", handoff()]] as const) {
     assert.ok(
       !/window\.location\.assign\(/.test(source),
       `${name} still navigates the Gradex document away`,
@@ -45,56 +48,47 @@ test("neither purchase surface navigates the Gradex page away", () => {
   }
 });
 
-test("both purchase surfaces open the handoff context inside the click", () => {
-  // Opening it after the await spends the user activation the popup needs, so
-  // the open must appear before the request in both handlers.
-  for (const [name, source, call] of [
-    ["course panel", panel(), "createStudentPurchaseRequest("],
-    ["bundle detail", bundle(), "createStudentBundlePurchaseRequest("],
-  ] as const) {
-    assert.match(source, /import \{ openHandoffContext \} from "@\/lib\/browser\/external-handoff"/);
-    const openedAt = source.indexOf("openHandoffContext()");
-    const requestedAt = source.indexOf(call);
-    assert.ok(openedAt > 0, `${name} never opens a handoff context`);
-    assert.ok(
-      openedAt < requestedAt,
-      `${name} opens the handoff context after the request, losing user activation`,
-    );
+test("D-117: no surface opens a window around the request; WhatsApp is a link the Student presses", () => {
+  // A window opened during the click and pointed at WhatsApp after the await is
+  // what popup blockers, in-app browsers and app-switching defeated. The
+  // handoff is now an ordinary link with a real href, pressed after the
+  // request is saved, and pressable again.
+  for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()], ["handoff", handoff()]] as const) {
+    assert.ok(!/window\.open\(/.test(source), `${name} opens a window automatically`);
+    assert.ok(!source.includes("external-handoff"), `${name} still uses the automatic handoff context`);
   }
-});
-
-test("the handoff opens a separate context and severs its opener", () => {
-  const source = handoff();
-  assert.match(source, /window\.open\(""\s*,\s*"_blank"\)/);
-  // `noopener` in the features string makes Chrome return null, so the opener
-  // is severed on the handle instead. Both reach the same end state.
-  assert.ok(!/window\.open\([^)]*noopener/.test(source), "the handle would be discarded by noopener");
-  assert.match(source, /\.opener = null/);
-  const complete = source.slice(source.indexOf("complete(url: string)"));
-  assert.ok(
-    complete.indexOf(".opener = null") < complete.indexOf("location.replace(url)"),
-    "the opener is severed after navigation, leaving the external page a window reference",
-  );
-});
-
-test("a failed request leaves no orphan blank context", () => {
+  const link = handoff();
+  assert.match(link, /href=\{whatsappURL\}/);
+  assert.match(link, /target="_blank"/, "the handoff does not open a separate context");
+  assert.match(link, /rel="noopener noreferrer"/, "the handoff is not a safe external link");
+  // Only a server-built https wa.me URL is ever rendered as a destination.
   for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()]] as const) {
-    const catchBody = source.slice(source.indexOf("} catch"));
-    assert.ok(catchBody.includes("handoff.abandon()"), `${name} leaves a blank tab open on failure`);
+    assert.match(source, /pendingHandoffURL\(/, `${name} renders an unchecked handoff URL`);
   }
-  assert.match(handoff(), /abandon\(\)[\s\S]*\.close\(\)/);
 });
 
-test("a blocked popup falls back to a safe explicit link", () => {
-  for (const [name, source, testID] of [
-    ["course panel", panel(), "purchase-handoff-fallback"],
-    ["bundle detail", bundle(), "bundle-handoff-fallback"],
+test("D-117: the contact is settled before any request is created", () => {
+  for (const [name, source, call] of [
+    ["course panel", panel(), "await createStudentPurchaseRequest("],
+    ["bundle detail", bundle(), "await createStudentBundlePurchaseRequest("],
   ] as const) {
-    assert.ok(source.includes(`data-testid="${testID}"`), `${name} has no fallback link`);
-    const anchor = source.slice(source.indexOf(`data-testid="${testID}"`) - 400, source.indexOf(`data-testid="${testID}"`) + 80);
-    assert.match(anchor, /target="_blank"/, `${name} fallback does not open a new context`);
-    assert.match(anchor, /rel="noopener noreferrer"/, `${name} fallback is not a safe external link`);
+    const plannedAt = source.indexOf("contact.plan()");
+    const blockedAt = source.indexOf('plan.kind === "blocked"');
+    const requestedAt = source.indexOf(call);
+    assert.ok(plannedAt > 0 && blockedAt > plannedAt, `${name} never plans the contact`);
+    assert.ok(blockedAt < requestedAt, `${name} can create a request before the contact is known`);
+    assert.match(source, /<PurchaseContactSection/, `${name} never asks for a number`);
+    // A server refusal naming the number is shown on the number field.
+    assert.match(source, /contactProblem\(caught\)/, `${name} hides the contact refusal`);
   }
+});
+
+test("D-117: a request already waiting for payment offers its WhatsApp link again", () => {
+  const source = panel();
+  assert.match(source, /useOwnPurchaseRequests\(locale, authenticated\)/);
+  assert.match(source, /data-testid="purchase-pending"/);
+  assert.match(source, /variant="pending"/);
+  assert.match(bundle(), /existing\?\.state === "WAITING_PAYMENT"[\s\S]*<PurchaseHandoff/);
 });
 
 test("an anonymous visitor is sent into the auth journey, not into a request", () => {
@@ -152,8 +146,12 @@ test("the panel collects no email address at all", () => {
   assert.ok(!/validEmail/.test(source), "the panel validates an email address");
   const client = readSource("lib/api/access.ts");
   const call = client.slice(client.indexOf("export async function createStudentPurchaseRequest"));
-  assert.match(call, /\{ course_id: courseId \}/);
+  assert.match(call, /\{ course_id: courseId, \.\.\.contactBody\(contact\) \}/);
   assert.ok(!call.slice(0, call.indexOf("}")).includes("email"), "the client sends an email");
+  // D-117: the only addition is the Student's own WhatsApp number.
+  const body = client.slice(client.indexOf("function contactBody"));
+  assert.match(body.slice(0, body.indexOf("\n}")), /\{ whatsapp_number: contact\.whatsappNumber \}/);
+  assert.ok(!body.slice(0, body.indexOf("\n}")).includes("email"), "the contact body carries an email");
 });
 
 test("a double submit cannot create two purchase requests", () => {
@@ -180,8 +178,6 @@ test("both dictionaries carry every purchase message the panel can render", () =
     "failed",
     "alreadyActive",
     "notPurchasable",
-    "handoffBlocked",
-    "handoffFallback",
   ] as const) {
     assert.equal(typeof en.access.purchase[key], "string", `English access.purchase.${key}`);
     assert.equal(typeof ar.access.purchase[key], "string", `Arabic access.purchase.${key}`);

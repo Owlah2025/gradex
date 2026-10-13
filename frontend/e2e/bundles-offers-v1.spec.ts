@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { installIssuedSession, issueRotatingSession } from "./rotating-students";
+import { provideWhatsAppIfAsked } from "./student-journey";
 
 const bundle = {
   id: "30000000-0000-0000-0000-000000000001",
@@ -34,6 +35,11 @@ async function mockSession(page: Page, role: "STUDENT" | "ADMIN" | "ANONYMOUS") 
     ? route.fulfill({ status: 401, json: { type: "https://api.gradex.com/problems/authentication-required", status: 401 } })
     : route.fulfill({ json: { status: "ACTIVE", role, csrf_token: "csrf-token", display_name: "Test User", idle_expires_at: new Date(Date.now() + 3600000).toISOString(), absolute_expires_at: new Date(Date.now() + 7200000).toISOString() } }));
   await page.route("**/api/v1/me/academic-profile", (route) => route.fulfill({ status: 404, json: { status: 404 } }));
+  // D-117: the mocked Student already gave a WhatsApp number, so the request
+  // body stays the Bundle identity alone.
+  await page.route("**/api/v1/me/profile", (route) => role === "STUDENT"
+    ? route.fulfill({ json: { display_name: "Test User", email: "student@example.test", locale: "en", status: "ACTIVE", whatsapp_number: "+96550012345" } })
+    : route.fulfill({ status: 401, json: { type: "https://api.gradex.com/problems/authentication-required", status: 401 } }));
 }
 
 async function expectAxeClean(page: Page, label: string) {
@@ -210,6 +216,7 @@ test("real Bundle request grants all snapshot Courses after one Admin confirmati
     await expect(studentPage.getByRole("heading", { level: 1, name: "Computer Engineering Starter Pack" })).toBeVisible();
     await expect(studentPage.locator("del")).toContainText("75.000 KWD");
     const created = studentPage.waitForResponse((response) => response.url().endsWith("/api/v1/me/purchase-requests") && response.request().method() === "POST");
+    await provideWhatsAppIfAsked(studentPage, "bundle", "bundle-purchase-request");
     await studentPage.getByRole("button", { name: "Request Bundle purchase" }).click();
     expect((await created).status()).toBe(201);
 
@@ -279,6 +286,8 @@ test("real Course offer is quoted once while Course fulfillment stays invitation
       }
       await route.fulfill({ response, json: body });
     });
+    // D-117: this seeded Student has no WhatsApp number yet, so it is given here.
+    await provideWhatsAppIfAsked(studentPage, "purchase", "purchase-request-submit");
     await studentPage.getByTestId("purchase-request-submit").click();
     await expect.poll(() => createdQuote).not.toBeNull();
     expect(createdQuote!.status).toBe(201);
@@ -331,6 +340,7 @@ async function requestRealBundle(page: Page) {
   await page.goto(realBundle.path);
   await expect(page.getByRole("heading", { level: 1, name: realBundle.title })).toBeVisible();
   const created = page.waitForResponse((response) => response.url().endsWith("/api/v1/me/purchase-requests") && response.request().method() === "POST");
+  await provideWhatsAppIfAsked(page, "bundle", "bundle-purchase-request");
   await page.getByRole("button", { name: "Request Bundle purchase" }).click();
   expect((await created).status()).toBe(201);
 }

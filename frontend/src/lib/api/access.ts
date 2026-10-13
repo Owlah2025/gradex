@@ -132,6 +132,12 @@ export interface PurchaseRequest {
   payment_confirmed_at?: string | null;
   invitation_created_at?: string | null;
   access_granted_at?: string | null;
+  /** The E.164 number captured with this request; null for requests that predate D-117. */
+  contact_whatsapp_number?: string | null;
+  /** Admin list only: the requesting Student's current profile number. */
+  requester_whatsapp_number?: string | null;
+  /** Student's own reads only: the payment handoff, present while the request waits for payment. */
+  whatsapp_url?: string;
 }
 
 export interface BundlePurchaseItem {
@@ -425,6 +431,7 @@ export async function createStudentPurchaseRequest(
   courseId: string,
   lang: "ar" | "en" = "en",
   csrf?: string,
+  contact: PurchaseContact = {},
 ) {
   const token = await resolveCSRF(csrf);
   return authenticatedRequest<PurchaseRequestCreated>(
@@ -432,7 +439,7 @@ export async function createStudentPurchaseRequest(
     "POST",
     lang,
     token,
-    { course_id: courseId },
+    { course_id: courseId, ...contactBody(contact) },
   ) as Promise<PurchaseRequestCreated>;
 }
 
@@ -440,6 +447,7 @@ export async function createStudentBundlePurchaseRequest(
   bundleId: string,
   lang: "ar" | "en" = "en",
   csrf?: string,
+  contact: PurchaseContact = {},
 ) {
   const token = await resolveCSRF(csrf);
   return authenticatedRequest<PurchaseRequestCreated>(
@@ -447,8 +455,20 @@ export async function createStudentBundlePurchaseRequest(
     "POST",
     lang,
     token,
-    { bundle_id: bundleId },
+    { bundle_id: bundleId, ...contactBody(contact) },
   ) as Promise<PurchaseRequestCreated>;
+}
+
+/**
+ * The one Student-supplied value a purchase request accepts (D-117): the
+ * Student's own WhatsApp number, sent only when the Student typed one. Without
+ * it the server uses the number already on the Student's profile, and refuses
+ * the request when there is none, so a request can never be unreachable.
+ */
+export type PurchaseContact = { whatsappNumber?: string };
+
+function contactBody(contact: PurchaseContact): { whatsapp_number?: string } {
+  return contact.whatsappNumber ? { whatsapp_number: contact.whatsappNumber } : {};
 }
 
 export async function listStudentPurchaseRequests(
@@ -467,6 +487,8 @@ export async function listAdminPurchaseRequests(
     limit?: number;
     query?: string;
     state?: PurchaseRequestState;
+    /** Requests with ("AVAILABLE") or without ("MISSING") a usable WhatsApp number. */
+    contact?: "AVAILABLE" | "MISSING";
   } = {},
   lang: "ar" | "en" = "en",
 ) {
@@ -476,6 +498,7 @@ export async function listAdminPurchaseRequests(
   });
   if (options.query) params.set("q", options.query);
   if (options.state) params.set("state", options.state);
+  if (options.contact) params.set("contact", options.contact);
   return authenticatedRequest<PurchaseRequestListResponse>(
     `/admin/purchase-requests?${params}`,
     "GET",

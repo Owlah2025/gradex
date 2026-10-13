@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,12 +30,20 @@ type AccountProfile struct {
 	Locale          Locale          `json:"locale"`
 	Status          string          `json:"status"`
 	AcademicProfile *AcademicLabels `json:"academic_profile,omitempty"`
+	// WhatsAppNumber is the Student's own number in E.164, or null when none
+	// was provided. It is "provided", never "verified": Gradex does not
+	// confirm that the number belongs to the Student.
+	WhatsAppNumber          *string    `json:"whatsapp_number"`
+	WhatsAppNumberUpdatedAt *time.Time `json:"whatsapp_number_updated_at,omitempty"`
 }
 
 type AccountProfileUpdateRequest struct {
 	AccountID   string
 	DisplayName *string
 	Locale      *Locale
+	// WhatsAppNumber replaces the Student's number. It cannot clear one: a
+	// provided number is what keeps a pending purchase reachable.
+	WhatsAppNumber *string
 }
 
 type AccountProfileService struct {
@@ -74,19 +83,20 @@ func (s *AccountProfileService) Update(
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var role, currentDisplayName, currentLocale string
+	var currentWhatsApp *string
 	if err := tx.QueryRow(ctx, `
-		SELECT role::text, display_name, locale::text
+		SELECT role::text, display_name, locale::text, contact_phone
 		FROM accounts
 		WHERE id = $1::uuid AND role = 'STUDENT'
 		FOR UPDATE
-	`, request.AccountID).Scan(&role, &currentDisplayName, &currentLocale); err != nil {
+	`, request.AccountID).Scan(&role, &currentDisplayName, &currentLocale, &currentWhatsApp); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrAccountProfileNotFound
 		}
 		return nil, fmt.Errorf("locking student account profile: %w", err)
 	}
 
-	changedFields := make([]string, 0, 2)
+	changedFields := make([]string, 0, 3)
 	var displayName any
 	if request.DisplayName != nil {
 		normalized, err := ValidateDisplayName(*request.DisplayName)
@@ -107,19 +117,35 @@ func (s *AccountProfileService) Update(
 		}
 	}
 
+	var whatsAppNumber any
+	if request.WhatsAppNumber != nil {
+		normalized, err := NormalizeWhatsAppNumber(*request.WhatsAppNumber)
+		if err != nil {
+			return nil, err
+		}
+		if currentWhatsApp == nil || *currentWhatsApp != normalized {
+			whatsAppNumber = normalized
+			changedFields = append(changedFields, "whatsapp_number")
+		}
+	}
+
 	var revision int
 	if err := tx.QueryRow(ctx, `
 		UPDATE accounts
 		SET display_name = COALESCE($2, display_name),
 			locale = COALESCE($3, locale),
+			contact_phone = COALESCE($4, contact_phone),
+			contact_phone_updated_at = CASE WHEN $4::text IS NULL THEN contact_phone_updated_at ELSE now() END,
 			revision = revision + 1,
 			updated_at = now()
 		WHERE id = $1::uuid AND role = 'STUDENT'
 		RETURNING revision
-	`, request.AccountID, displayName, locale).Scan(&revision); err != nil {
+	`, request.AccountID, displayName, locale, whatsAppNumber).Scan(&revision); err != nil {
 		return nil, fmt.Errorf("updating student account profile: %w", err)
 	}
 
+	// Field names only. The number itself never enters the audit trail, which
+	// is readable far more widely than the profile it describes.
 	metadata, err := json.Marshal(map[string]any{"changed_fields": changedFields})
 	if err != nil {
 		return nil, fmt.Errorf("encoding account profile audit metadata: %w", err)
@@ -147,7 +173,7 @@ func validateAccountProfileUpdate(request AccountProfileUpdateRequest) error {
 	if strings.TrimSpace(request.AccountID) == "" {
 		return ErrAccountProfileInvalid
 	}
-	if request.DisplayName == nil && request.Locale == nil {
+	if request.DisplayName == nil && request.Locale == nil && request.WhatsAppNumber == nil {
 		return ErrAccountProfileInvalid
 	}
 	if request.DisplayName != nil {
@@ -157,6 +183,11 @@ func validateAccountProfileUpdate(request AccountProfileUpdateRequest) error {
 	}
 	if request.Locale != nil && !request.Locale.Valid() {
 		return ErrInvalidLocale
+	}
+	if request.WhatsAppNumber != nil {
+		if _, err := NormalizeWhatsAppNumber(*request.WhatsAppNumber); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -181,7 +212,8 @@ func readAccountProfile(ctx context.Context, q interface {
 					END
 			END,
 			CASE WHEN a.locale = 'ar' THEN program.name_ar ELSE program.name_en END,
-			student.current_level
+			student.current_level,
+			a.contact_phone, a.contact_phone_updated_at
 		FROM accounts a
 		LEFT JOIN student_academic_profiles student ON student.account_id = a.id
 		LEFT JOIN institutions institution ON institution.id = student.institution_id
@@ -193,6 +225,7 @@ func readAccountProfile(ctx context.Context, q interface {
 	`, accountID).Scan(
 		&profile.DisplayName, &profile.Email, &locale, &status,
 		&institution, &collegeUnit, &program, &level,
+		&profile.WhatsAppNumber, &profile.WhatsAppNumberUpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

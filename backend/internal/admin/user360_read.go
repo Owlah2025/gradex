@@ -121,13 +121,14 @@ func queryUser360Identity(ctx context.Context, tx pgx.Tx, locale identity.Locale
 	err := tx.QueryRow(ctx, `
 		SELECT a.id::text, a.display_name, a.email, a.role::text, a.status::text,
 		       a.locale, a.email_verified_at IS NOT NULL, a.created_at,
-		       MAX(s.last_activity_at)
+		       MAX(s.last_activity_at), a.contact_phone, a.contact_phone_updated_at
 		  FROM accounts a
 		  LEFT JOIN sessions s ON s.account_id = a.id
 		 WHERE a.id = $1::uuid
 		 GROUP BY a.id`, accountID).Scan(
 		&view.ID, &view.DisplayName, &view.Email, &role, &status, &accountLocale,
 		&view.EmailVerified, &view.CreatedAt, &view.LastSignInActivityAt,
+		&view.WhatsAppNumber, &view.WhatsAppNumberUpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User360Identity{}, ErrAccountNotFound

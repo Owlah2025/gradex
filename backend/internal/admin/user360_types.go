@@ -49,6 +49,10 @@ type User360Identity struct {
 	CreatedAt              time.Time              `json:"created_at"`
 	LastSignInActivityAt   *time.Time             `json:"last_sign_in_activity_at,omitempty"`
 	LastLearningActivityAt *time.Time             `json:"last_learning_activity_at,omitempty"`
+	// The Student's provided WhatsApp number in E.164, or null. "Provided",
+	// never "verified": Gradex does not confirm ownership.
+	WhatsAppNumber          *string    `json:"whatsapp_number"`
+	WhatsAppNumberUpdatedAt *time.Time `json:"whatsapp_number_updated_at,omitempty"`
 }
 
 type AcademicProfile struct {
@@ -124,6 +128,9 @@ type UserPurchaseRequest struct {
 	State           string     `json:"state"`
 	RequestedAt     time.Time  `json:"requested_at"`
 	AccessGrantedAt *time.Time `json:"access_granted_at,omitempty"`
+	// The number captured with this request; null for requests that predate
+	// D-117, where the Student's current number is the fallback.
+	ContactWhatsAppNumber *string `json:"contact_whatsapp_number"`
 }
 
 type SecurityEvent struct {

@@ -17,6 +17,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.26.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/redis/go-redis/v9 v9.21.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/image v0.40.0
@@ -70,5 +71,5 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

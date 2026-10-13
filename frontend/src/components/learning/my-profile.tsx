@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ContactNumberCard } from "@/components/contact/contact-number-card";
 
 export function MyProfile() {
   const { locale, t } = useLocale();
@@ -103,6 +104,8 @@ export function MyProfile() {
           </Field>
         </CardContent>
       </Card>
+
+      <ContactNumberCard profile={profile} onSaved={setProfile} />
 
       <Card>
         <CardHeader><CardTitle>{copy.languageTitle}</CardTitle></CardHeader>

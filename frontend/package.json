@@ -35,6 +35,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "hls.js": "1.6.15",
+    "libphonenumber-js": "1.13.15",
     "lucide-react": "^0.417.0",
     "next": "15.5.21",
     "next-themes": "^0.3.0",

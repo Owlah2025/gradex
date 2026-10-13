@@ -163,7 +163,10 @@ export type PurchaseHandoff = {
  */
 export const WHATSAPP_STUB = "<!doctype html><title>WhatsApp handoff stub</title>";
 
-export async function completePurchaseConfirmation(page: Page): Promise<PurchaseHandoff> {
+export async function completePurchaseConfirmation(
+  page: Page,
+  options: { whatsappNational?: string } = {},
+): Promise<PurchaseHandoff> {
   let persistedPayload: PurchaseHandoff["response"] | undefined;
   await page.route("**/api/v1/me/purchase-requests", async (route) => {
     if (route.request().method() !== "POST") {
@@ -180,37 +183,74 @@ export async function completePurchaseConfirmation(page: Page): Promise<Purchase
       new URL(response.url()).pathname === "/api/v1/me/purchase-requests" &&
       response.request().method() === "POST",
   );
-  // WhatsApp now opens in its own browsing context, so the handoff arrives as a
-  // new page rather than as a navigation of this one. Both facts are awaited
-  // together: a page must appear, and the wa.me navigation must belong to it
-  // rather than to the Course page.
-  //
-  // The URL is read off the navigation request instead of the opened page.
-  // wa.me answers a real browser with a redirect to api.whatsapp.com, so the
-  // page's settled URL is not reliably the handoff URL, while the request that
-  // started it always is.
+
+  // D-117: a Student with no WhatsApp number on file is asked for one before
+  // anything is created. A Student who already gave one is shown it instead.
+  const submit = page.getByTestId("purchase-request-submit");
+  await expect(submit).toBeEnabled();
+  const numberField = page.getByTestId("purchase-contact-number");
+  if (await numberField.isVisible()) {
+    await numberField.fill(options.whatsappNational ?? "5001 2345");
+  }
+
   const gradexURL = page.url();
+  const pagesBefore = page.context().pages().length;
+  await submit.click();
+  const persistedResponse = await persisted;
+  expect(persistedResponse.status()).toBe(201);
+  expect(persistedPayload).toBeDefined();
+
+  // The success state renders from the server's confirmed answer, with the
+  // reference it returned. Nothing opened on its own: the handoff is a link.
+  const handoff = page.getByTestId("purchase-handoff");
+  await expect(handoff).toBeVisible();
+  await expect(page.getByTestId("purchase-handoff-reference")).toHaveText(persistedPayload!.reference);
+  expect(page.context().pages().length).toBe(pagesBefore);
+  expect(page.url()).toBe(gradexURL);
+
+  // The Student presses the link. It opens a separate browsing context; the
+  // Course page stays exactly where it was. The URL is read off the navigation
+  // request: wa.me answers a real browser with a redirect, so the opened page's
+  // settled URL is not reliably the handoff URL.
+  const link = page.getByTestId("purchase-handoff-link");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(link).toHaveAttribute("href", persistedPayload!.whatsapp_url);
   const opened = page.context().waitForEvent("page");
   const handoffRequest = page.context().waitForEvent("request", (request) =>
     request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
   );
-  await page.getByTestId("purchase-request-submit").click();
-  const persistedResponse = await persisted;
-  expect(persistedResponse.status()).toBe(201);
+  await link.click();
   const handoffPage = await opened;
   const handoffURL = (await handoffRequest).url();
 
-  // The Student did not lose the page they were reading.
   expect(handoffPage).not.toBe(page);
   expect(page.isClosed()).toBe(false);
   expect(page.url()).toBe(gradexURL);
+  // Pressing it again is allowed: the link is not consumed.
+  await expect(link).toBeVisible();
 
-  // The popup is announced before its wa.me navigation commits. Closing it mid-commit has left
-  // `close()` waiting until the test timed out, so let the stubbed handoff finish loading first.
   await handoffPage.waitForLoadState("domcontentloaded");
   await handoffPage.close();
-  expect(persistedPayload).toBeDefined();
   return { response: persistedPayload!, handoffURL };
+}
+
+/**
+ * D-117: a Student with no WhatsApp number on file is asked for one inside the
+ * confirmation. Waits for the confirm control to become usable (it waits for
+ * the profile read), then fills the number only if the field is shown.
+ */
+export async function provideWhatsAppIfAsked(
+  page: Page,
+  prefix: "purchase" | "bundle",
+  submitTestID: string,
+  national = "5001 2345",
+): Promise<boolean> {
+  await expect(page.getByTestId(submitTestID)).toBeEnabled();
+  const field = page.getByTestId(`${prefix}-contact-number`);
+  if (!(await field.isVisible())) return false;
+  await field.fill(national);
+  return true;
 }
 
 /**

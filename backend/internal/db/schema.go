@@ -97,8 +97,11 @@ const (
 	// APIRequiredSchemaVersion is the readiness floor for the complete API
 	// application tier. Migration tooling and API readiness share this authority.
 	DurableMultipartSchemaVersion = 57
-	APIRequiredSchemaVersion      = DurableMultipartSchemaVersion
-	MaxSchemaVersion              = DurableMultipartSchemaVersion
+	// D-117 Student WhatsApp contact and the purchase-request contact
+	// snapshot. Expand-only; the API reads both columns, so it is the floor.
+	StudentWhatsAppContactSchemaVersion = DurableMultipartSchemaVersion + 1
+	APIRequiredSchemaVersion            = StudentWhatsAppContactSchemaVersion
+	MaxSchemaVersion                    = StudentWhatsAppContactSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

@@ -28,6 +28,8 @@ import {
 import { ProblemError } from "@/lib/api/problem";
 import { AccessRecord } from "@/components/access/access-records";
 import { byStudentPriority } from "@/components/access/access-state";
+import { ContactNumberPrompt } from "@/components/contact/contact-number-prompt";
+import { PendingPaymentRequests } from "@/components/contact/pending-payment-requests";
 
 /**
  * Student Course access.
@@ -230,6 +232,11 @@ export default function StudentCourseAccessPage() {
         </h1>
         <p className="mt-2 text-muted-foreground">{labels.intro}</p>
       </header>
+
+      {/* D-117: a Student with no contact number is reminded here, and every
+          request still waiting for payment offers its WhatsApp link again. */}
+      <ContactNumberPrompt className="mb-6" />
+      <PendingPaymentRequests />
 
       {/* The token-dependent half. Present only when the Student followed an invitation link. */}
       {invitationId ? (

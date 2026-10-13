@@ -17,6 +17,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { AdminRequestContact } from "@/components/contact/admin-contact";
 import { LoadingState } from "@/components/common/loading-state";
 import { StatusBadge } from "@/components/common/status-badge";
 import {
@@ -58,6 +60,10 @@ type Pending = { kind: "confirm" | "cancel"; request: PurchaseRequest };
 export function PurchaseRequestsPanel() {
   const { locale, t } = useLocale();
   const copy = t.adminAccess.purchases;
+  const contactCopy = t.contact;
+  // D-117: requests with no usable WhatsApp number — neither captured on the
+  // request nor on the Student's profile — are the ones nobody can follow up.
+  const [contact, setContact] = React.useState<"" | "AVAILABLE" | "MISSING">("");
 
   const [requests, setRequests] = React.useState<PurchaseRequest[]>([]);
   const [query, setQuery] = React.useState("");
@@ -75,7 +81,7 @@ export function PurchaseRequestsPanel() {
     async (search: string) => {
       setState("loading");
       try {
-        const result = await listAdminPurchaseRequests({ query: search }, locale);
+        const result = await listAdminPurchaseRequests({ query: search, contact: contact || undefined }, locale);
         setRequests(result?.purchase_requests ?? []);
         setAppliedQuery(search);
         setState("ready");
@@ -83,7 +89,7 @@ export function PurchaseRequestsPanel() {
         setState("failed");
       }
     },
-    [locale],
+    [contact, locale],
   );
 
   // The listing is locale-invariant except for the Course title the server resolves, so it is read
@@ -143,6 +149,21 @@ export function PurchaseRequestsPanel() {
           <Button type="submit" variant="outline" size="sm">
             {copy.search}
           </Button>
+          <label className="sr-only" htmlFor="purchase-request-contact">
+            {contactCopy.requestsFilterLabel}
+          </label>
+          <Select
+            id="purchase-request-contact"
+            controlSize="sm"
+            className="w-48"
+            value={contact}
+            onChange={(event) => setContact(event.target.value as "" | "AVAILABLE" | "MISSING")}
+            data-testid="purchase-request-contact-filter"
+          >
+            <option value="">{contactCopy.requestsFilterAll}</option>
+            <option value="MISSING">{contactCopy.requestsFilterMissing}</option>
+            <option value="AVAILABLE">{contactCopy.requestsFilterAvailable}</option>
+          </Select>
         </form>
       }
     >
@@ -186,6 +207,7 @@ export function PurchaseRequestsPanel() {
               <TableRow>
                 <TableHeaderCell scope="col">{copy.reference}</TableHeaderCell>
                 <TableHeaderCell scope="col">{copy.student}</TableHeaderCell>
+                <TableHeaderCell scope="col">{contactCopy.requestsFilterLabel}</TableHeaderCell>
                 <TableHeaderCell scope="col">{copy.course}</TableHeaderCell>
                 <TableHeaderCell scope="col">{copy.price}</TableHeaderCell>
                 <TableHeaderCell scope="col">{copy.requested}</TableHeaderCell>
@@ -203,6 +225,12 @@ export function PurchaseRequestsPanel() {
                   </TableHeaderCell>
                   <TableCell>
                     <bdi>{request.email}</bdi>
+                  </TableCell>
+                  <TableCell>
+                    <AdminRequestContact
+                      snapshot={request.contact_whatsapp_number}
+                      profileNumber={request.requester_whatsapp_number}
+                    />
                   </TableCell>
                   <TableCell>
                     <bdi>{request.target_kind === "BUNDLE" ? request.bundle_title : (request.course_title || copy.course)}</bdi>

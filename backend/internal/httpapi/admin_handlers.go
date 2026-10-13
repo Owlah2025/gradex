@@ -156,23 +156,42 @@ func parseAccountDirectoryFilters(
 		return adminread.AccountDirectoryRequest{}, false
 	}
 
+	whatsApp := strings.TrimSpace(c.Query("whatsapp"))
+	switch whatsApp {
+	case "", adminread.WhatsAppFilterProvided, adminread.WhatsAppFilterMissing:
+	default:
+		writeProblem(c, problem.ValidationFailed())
+		return adminread.AccountDirectoryRequest{}, false
+	}
+	pendingPayment := false
+	switch strings.TrimSpace(c.Query("pendingPayment")) {
+	case "":
+	case "true":
+		pendingPayment = true
+	default:
+		writeProblem(c, problem.ValidationFailed())
+		return adminread.AccountDirectoryRequest{}, false
+	}
+
 	locale, ok := requestedLocale(c.GetHeader("Accept-Language"))
 	if !ok {
 		writeProblem(c, problem.ValidationFailed())
 		return adminread.AccountDirectoryRequest{}, false
 	}
 	return adminread.AccountDirectoryRequest{
-		Principal:     principal,
-		CorrelationID: requestid.FromContext(c.Request.Context()),
-		Locale:        locale,
-		Query:         query,
-		Role:          role,
-		Status:        status,
-		InstitutionID: institutionID,
-		JoinedFrom:    joinedFrom,
-		JoinedTo:      joinedTo,
-		Page:          page,
-		Limit:         limit,
+		Principal:      principal,
+		CorrelationID:  requestid.FromContext(c.Request.Context()),
+		Locale:         locale,
+		Query:          query,
+		Role:           role,
+		Status:         status,
+		InstitutionID:  institutionID,
+		JoinedFrom:     joinedFrom,
+		JoinedTo:       joinedTo,
+		WhatsApp:       whatsApp,
+		PendingPayment: pendingPayment,
+		Page:           page,
+		Limit:          limit,
 	}, true
 }
 

@@ -42,8 +42,9 @@ type moderationReasonBody struct {
 }
 
 type accountProfileBody struct {
-	DisplayName *string          `json:"display_name"`
-	Locale      *identity.Locale `json:"locale"`
+	DisplayName    *string          `json:"display_name"`
+	Locale         *identity.Locale `json:"locale"`
+	WhatsAppNumber *string          `json:"whatsapp_number"`
 }
 
 func (h *profileHandlers) getInstructorProfile(c *gin.Context) {
@@ -223,9 +224,10 @@ func (h *profileHandlers) getAccountProfile(c *gin.Context) {
 func (h *profileHandlers) updateAccountProfile(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*accountProfileBody)
 	profile, err := h.foundation.account.Update(c.Request.Context(), identity.AccountProfileUpdateRequest{
-		AccountID:   c.GetString(ctxUserIDKey),
-		DisplayName: body.DisplayName,
-		Locale:      body.Locale,
+		AccountID:      c.GetString(ctxUserIDKey),
+		DisplayName:    body.DisplayName,
+		Locale:         body.Locale,
+		WhatsAppNumber: body.WhatsAppNumber,
 	})
 	if err != nil {
 		writeAccountProfileError(c, err)
@@ -280,6 +282,8 @@ func writeAccountProfileError(c *gin.Context, err error) {
 		writeProblem(c, problem.NotAuthorized())
 	case errors.Is(err, identity.ErrAccountProfileInvalid), errors.Is(err, identity.ErrInvalidLocale):
 		writeProblem(c, problem.ValidationFailed())
+	case errors.Is(err, identity.ErrInvalidWhatsAppNumber):
+		writeProblem(c, invalidWhatsAppNumberProblem())
 	case errors.Is(err, identity.ErrInvalidDisplayName):
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
 			Code: "INVALID_DISPLAY_NAME", Detail: "Use 2 to 50 supported letters.",
@@ -288,6 +292,14 @@ func writeAccountProfileError(c *gin.Context, err error) {
 	default:
 		writeProblem(c, problem.Internal(""))
 	}
+}
+
+// invalidWhatsAppNumberProblem never echoes the submitted value.
+func invalidWhatsAppNumberProblem() problem.Problem {
+	return problem.ValidationFailed().WithViolations(problem.Violation{
+		Code: "INVALID_WHATSAPP_NUMBER", Detail: "Enter a valid mobile number, including its country code.",
+		Location: problem.LocationBody, Parameter: "whatsapp_number",
+	})
 }
 
 func instructorprofileNotFoundProblem() problem.Problem {

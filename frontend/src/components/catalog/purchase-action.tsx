@@ -6,13 +6,21 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
-import { createStudentPurchaseRequest } from "@/lib/api/access";
+import { createStudentPurchaseRequest, type PurchaseRequestCreated } from "@/lib/api/access";
 import { ProblemError } from "@/lib/api/problem";
 import { formatFils } from "@/lib/formatters/currency";
 import type { PublicPrice } from "@/lib/api/public-catalog";
 import { PriceDisplay } from "./price-display";
 import { withReturnTo } from "@/lib/identity/return-to";
-import { openHandoffContext } from "@/lib/browser/external-handoff";
+import { useLocale } from "@/lib/i18n/locale-provider";
+import { PurchaseHandoff } from "@/components/contact/purchase-handoff";
+import {
+  PurchaseContactSection,
+  useOwnPurchaseRequests,
+  usePurchaseContact,
+} from "@/components/contact/purchase-contact";
+import { contactProblem, pendingHandoffURL } from "@/components/contact/contact-state";
+import { ContactNumberPrompt } from "@/components/contact/contact-number-prompt";
 
 type Labels = Dictionary["access"]["purchase"];
 
@@ -41,6 +49,16 @@ export const purchaseIntentParameter = "purchase";
  * intent. A signed-in Student is shown what they are about to request — the
  * title and the price, both from the server's own representation of the Course —
  * and nothing is created and nothing is opened until they confirm.
+ *
+ * D-117 adds the Student's WhatsApp number to that confirmation. A Student who
+ * has none is asked for it before anything is created, and the server saves it
+ * with the request, so the Gradex team can reach every request whether or not
+ * WhatsApp ever opens. WhatsApp is then one explicit press on a real link in the
+ * success state, never a window opened around the request: that automatic
+ * window is what popup blockers, in-app browsers and app-switching defeated,
+ * leaving a saved request the Student could not see and nobody could follow up.
+ * A request already waiting for payment is shown with its link again instead of
+ * a second confirmation.
  */
 export function PurchaseAction({
   courseId,
@@ -66,13 +84,13 @@ export function PurchaseAction({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { t } = useLocale();
+  const contactLabels = t.contact;
   const [error, setError] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
-  // Set only when the browser refused the handoff context. The request has
-  // already succeeded at that point, so the Student is given the destination
-  // to press rather than being told the purchase failed.
-  const [fallbackURL, setFallbackURL] = React.useState<string | null>(null);
+  // The server's answer, set only once the request is persisted. The success
+  // state is never shown on anything less.
+  const [created, setCreated] = React.useState<PurchaseRequestCreated | null>(null);
   // `submitting` is state and does not close the window between two submits
   // dispatched in the same render pass. This does, and it matters: the second
   // one would reach a route that creates operational work.
@@ -87,6 +105,14 @@ export function PurchaseAction({
     if (intended) setOpen(true);
   }, [intended]);
 
+  const contact = usePurchaseContact(locale, authenticated && open);
+  // A request for this Course already waiting for payment is shown with its
+  // WhatsApp link again, so a Student whose WhatsApp never opened can continue.
+  const ownRequests = useOwnPurchaseRequests(locale, authenticated);
+  const pending = ownRequests?.find(
+    (request) => request.target_kind !== "BUNDLE" && request.course_id === courseId && pendingHandoffURL(request),
+  );
+
   /** Where the auth journey must return to: this Course, still buying. */
   const destination = React.useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -96,28 +122,40 @@ export function PurchaseAction({
 
   async function confirm() {
     if (inFlight.current) return;
+    // The contact is settled before anything is created: a request with no
+    // way to reach its Student is the failure this panel exists to prevent.
+    const plan = contact.plan();
+    if (plan.kind === "blocked") {
+      contact.setError(plan.reason);
+      return;
+    }
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
-    setNotice(null);
-    setFallbackURL(null);
-    // Opened here, synchronously, while the click's user activation is still
-    // live — after the await below it would be gone and the popup refused.
-    // Gradex itself is never navigated: this page stays exactly where it is.
-    const handoff = openHandoffContext();
     try {
-      const result = await createStudentPurchaseRequest(courseId, locale);
-      // The URL is the server's. This only decides where it is opened.
-      if (!handoff.complete(result.whatsapp_url)) {
-        setFallbackURL(result.whatsapp_url);
-        setNotice(labels.handoffBlocked);
+      const result = await createStudentPurchaseRequest(
+        courseId,
+        locale,
+        undefined,
+        plan.kind === "send" ? { whatsappNumber: plan.e164 } : {},
+      );
+      if (plan.kind === "send") contact.remember(plan.e164);
+      // The handoff URL is the server's, and the success state renders only
+      // from this confirmed answer.
+      if (pendingHandoffURL(result)) {
+        setCreated(result);
+      } else {
+        setError(labels.failed);
       }
-      setSubmitting(false);
-      inFlight.current = false;
     } catch (caught) {
-      // No destination was ever produced, so the blank context is orphaned.
-      handoff.abandon();
-      setError(purchaseMessage(caught, labels));
+      const reason = contactProblem(caught);
+      if (reason) {
+        contact.setError(reason);
+        if (!contact.editing) contact.setEditing(true);
+      } else {
+        setError(purchaseMessage(caught, labels));
+      }
+    } finally {
       setSubmitting(false);
       inFlight.current = false;
     }
@@ -161,6 +199,39 @@ export function PurchaseAction({
     );
   }
 
+  if (created) {
+    return (
+      <div className={panelClassName(className)} data-testid="purchase-confirmation">
+        <PurchaseHandoff
+          variant={created.reused ? "pending" : "created"}
+          target="course"
+          reference={created.reference}
+          whatsappURL={pendingHandoffURL(created) ?? ""}
+          locale={locale}
+          labels={contactLabels}
+        />
+      </div>
+    );
+  }
+
+  if (pending) {
+    return (
+      <div className={panelClassName(className)} data-testid="purchase-pending">
+        <PurchaseHandoff
+          variant="pending"
+          target="course"
+          reference={pending.reference}
+          whatsappURL={pendingHandoffURL(pending) ?? ""}
+          locale={locale}
+          labels={contactLabels}
+        />
+        {/* A request from before D-117 may have no number behind it. The
+            reminder renders only when the Student's profile has none. */}
+        <ContactNumberPrompt className="mt-4" />
+      </div>
+    );
+  }
+
   if (!open) {
     return (
       <Button
@@ -184,11 +255,6 @@ export function PurchaseAction({
         {labels.heading}
       </h2>
 
-      {notice ? (
-        <div className="mt-3">
-          <Alert tone="info" title={notice} />
-        </div>
-      ) : null}
       {error ? (
         <div className="mt-3">
           <Alert tone="error" title={error} />
@@ -217,28 +283,20 @@ export function PurchaseAction({
 
       <p className="mt-4 text-sm leading-6 text-muted-foreground">{labels.intro}</p>
 
-      {/* Only rendered where the browser refused to open the handoff context.
-          The request already exists, so this is the same destination the
-          context would have been pointed at, offered as an explicit press. */}
-      {fallbackURL ? (
-        <p className="mt-4 text-sm leading-6">
-          <a
-            href={fallbackURL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-primary underline underline-offset-4"
-            data-testid="purchase-handoff-fallback"
-          >
-            {labels.handoffFallback}
-          </a>
-        </p>
-      ) : null}
+      {/* The Student's WhatsApp number: shown when on file, asked for when not. */}
+      <PurchaseContactSection
+        contact={contact}
+        locale={locale}
+        labels={contactLabels}
+        disabled={submitting}
+        idPrefix="purchase"
+      />
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Button
           type="button"
           onClick={confirm}
-          disabled={submitting}
+          disabled={submitting || contact.status === "loading"}
           data-testid="purchase-request-submit"
         >
           {submitting ? labels.submitting : labels.submit}
@@ -250,6 +308,7 @@ export function PurchaseAction({
           onClick={() => {
             setOpen(false);
             setError(null);
+            contact.setError(null);
             // The flag comes out of the address bar with the panel, so a
             // reload after cancelling does not reopen what was cancelled.
             if (intended) {

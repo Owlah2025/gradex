@@ -40,9 +40,20 @@ type AccountDirectoryRequest struct {
 	InstitutionID string
 	JoinedFrom    *time.Time
 	JoinedTo      *time.Time
-	Page          int
-	Limit         int
+	// WhatsApp narrows to Students who have ("PROVIDED") or have not
+	// ("MISSING") given a WhatsApp number. Either value implies STUDENT.
+	WhatsApp string
+	// PendingPayment narrows to Students with a purchase request still
+	// waiting for payment.
+	PendingPayment bool
+	Page           int
+	Limit          int
 }
+
+const (
+	WhatsAppFilterProvided = "PROVIDED"
+	WhatsAppFilterMissing  = "MISSING"
+)
 
 type AccountDirectoryEntry struct {
 	ID                   string                 `json:"id"`
@@ -55,6 +66,10 @@ type AccountDirectoryEntry struct {
 	CreatedAt            time.Time              `json:"created_at"`
 	InstitutionLabel     string                 `json:"institution_label"`
 	LastSignInActivityAt *time.Time             `json:"last_sign_in_activity_at,omitempty"`
+	// Student contact for the Admin directory only. The CSV export writes an
+	// explicit column list and deliberately leaves both out.
+	WhatsAppNumber         *string `json:"whatsapp_number,omitempty"`
+	PendingPaymentRequests int     `json:"pending_payment_requests"`
 }
 
 type AccountDirectoryResult struct {

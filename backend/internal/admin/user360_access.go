@@ -160,7 +160,7 @@ func queryPurchaseRequests(ctx context.Context, tx pgx.Tx, locale identity.Local
 		SELECT pr.id::text, pr.reference_code, COALESCE(live.title_ar, draft.title_ar, ''),
 		       COALESCE(live.title_en, draft.title_en, ''),
 		       COALESCE(CASE WHEN $3 = 'ar' THEN b.title_ar ELSE b.title_en END, ''),
-		       pr.state, pr.requested_at, pr.access_granted_at
+		       pr.state, pr.requested_at, pr.access_granted_at, pr.contact_phone
 		  FROM purchase_requests pr
 		  LEFT JOIN courses c ON c.id = pr.course_id
 		  LEFT JOIN course_revisions live ON live.id = c.live_revision_id
@@ -181,7 +181,7 @@ func queryPurchaseRequests(ctx context.Context, tx pgx.Tx, locale identity.Local
 		var item UserPurchaseRequest
 		var titleAr, titleEn string
 		if err := rows.Scan(&item.ID, &item.Reference, &titleAr, &titleEn, &item.BundleTitle,
-			&item.State, &item.RequestedAt, &item.AccessGrantedAt); err != nil {
+			&item.State, &item.RequestedAt, &item.AccessGrantedAt, &item.ContactWhatsAppNumber); err != nil {
 			return nil, fmt.Errorf("scanning account purchase request: %w", err)
 		}
 		item.CourseTitle = localizedTitle(locale, titleAr, titleEn)

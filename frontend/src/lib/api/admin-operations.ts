@@ -17,6 +17,10 @@ export type AdminAccount = {
   created_at: string;
   institution_label: string;
   last_sign_in_activity_at?: string | null;
+  /** Student directory rows only: the provided WhatsApp number (E.164). */
+  whatsapp_number?: string | null;
+  /** Student directory rows only. */
+  pending_payment_requests?: number;
 };
 
 export type AdminAccountPage = {
@@ -34,6 +38,10 @@ export type AdminAccountFilters = {
   institutionId?: string;
   joinedFrom?: string;
   joinedTo?: string;
+  /** Students who have ("PROVIDED") or have not ("MISSING") given a WhatsApp number. */
+  whatsapp?: "PROVIDED" | "MISSING" | "";
+  /** Students with a purchase request still waiting for payment. */
+  pendingPayment?: boolean;
   page?: number;
   limit?: number;
 };
@@ -141,6 +149,9 @@ export type AuditLabelSet = {
 
 export type User360Identity = AdminAccount & {
   last_learning_activity_at?: string | null;
+  /** E.164, or null when not provided. Present on Student identities. */
+  whatsapp_number?: string | null;
+  whatsapp_number_updated_at?: string | null;
 };
 
 export type UserCourse = {
@@ -204,6 +215,8 @@ export type UserPurchaseRequest = {
   state: string;
   requested_at: string;
   access_granted_at?: string | null;
+  /** Captured with the request; null for requests that predate D-117. */
+  contact_whatsapp_number?: string | null;
 };
 
 export type AdminDevice = {
@@ -308,6 +321,8 @@ export function buildAdminAccountQuery(filters: AdminAccountFilters): string {
   setText(query, "institutionId", filters.institutionId);
   setLocalDateBoundary(query, "joinedFrom", filters.joinedFrom, false);
   setLocalDateBoundary(query, "joinedTo", filters.joinedTo, true);
+  setText(query, "whatsapp", filters.whatsapp);
+  if (filters.pendingPayment) query.set("pendingPayment", "true");
   setNumber(query, "page", filters.page);
   setNumber(query, "limit", filters.limit);
   return query.toString();

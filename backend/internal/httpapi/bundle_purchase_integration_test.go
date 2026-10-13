@@ -29,7 +29,12 @@ func newBundlePurchaseFixture(t *testing.T) (*access.Repository, *pgxpool.Pool, 
 	t.Helper()
 	ts, pool, adminID, _, firstCourseID, _, studentToken := setupAdminAccessAPIServer(t)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `UPDATE accounts SET email_verified_at=now() WHERE id=$1::uuid`, bundlePurchaseStudentID); err != nil {
+	// D-117: a purchase request needs a reachable Student, so the fixture
+	// Student has provided a WhatsApp number. Requests made without one are
+	// covered by whatsapp_contact_integration_test.go.
+	if _, err := pool.Exec(ctx, `
+		UPDATE accounts SET email_verified_at=now(), contact_phone='+96550012345', contact_phone_updated_at=now()
+		WHERE id=$1::uuid`, bundlePurchaseStudentID); err != nil {
 		t.Fatalf("verifying Student: %v", err)
 	}
 	courses := []string{
@@ -336,7 +341,7 @@ func TestCourseConfirmationGrantsAccessDirectlyAndStaysDistinctFromBundle(t *tes
 		t.Fatal(err)
 	}
 	request, err := repo.CreateStudentPurchaseRequest(ctx, access.CreateStudentPurchaseRequestParams{
-		CourseID: courseID, StudentAccountID: bundlePurchaseStudentID, Now: time.Now().UTC(),
+		CourseID: courseID, StudentAccountID: bundlePurchaseStudentID, WhatsAppNumber: "+965 5001 2345", Now: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -60,6 +60,11 @@ var (
 	ErrCourseAlreadyAccessible = errors.New("course access is already active")
 	ErrBundleNotPurchasable    = errors.New("bundle is not available for purchase requests")
 	ErrBundleSnapshotInvalid   = errors.New("bundle purchase snapshot is incomplete or not grantable")
+
+	// ErrPurchaseContactRequired means the Student has no WhatsApp number on
+	// their profile and supplied none with the request. A request nobody can
+	// follow up on is the failure D-117 exists to remove, so none is created.
+	ErrPurchaseContactRequired = errors.New("a WhatsApp number is required to request a purchase")
 )
 
 // PurchaseRequest stores facts Gradex knows about an external/manual sale. It
@@ -94,6 +99,19 @@ type PurchaseRequest struct {
 	PaymentConfirmedByAccountID *string              `json:"-"`
 	RequesterAccountID          *string              `json:"-"`
 	BundleItems                 []BundlePurchaseItem `json:"bundle_items,omitempty"`
+	// ContactWhatsAppNumber is the E.164 number the Student gave for this
+	// request, captured when it was created. NULL on requests that predate
+	// D-117; those are reachable through RequesterWhatsAppNumber instead.
+	ContactWhatsAppNumber *string `json:"contact_whatsapp_number"`
+	// RequesterWhatsAppNumber is the requesting Student's current profile
+	// number. Populated only by the Admin list, never by Student reads.
+	RequesterWhatsAppNumber *string `json:"requester_whatsapp_number,omitempty"`
+	// WhatsAppURL is the sales handoff for a request still waiting for
+	// payment. Populated only on the requesting Student's own reads.
+	WhatsAppURL string `json:"whatsapp_url,omitempty"`
+	// Created reports whether the Student purchase call inserted this row
+	// rather than reusing a live one. Never serialized.
+	Created bool `json:"-"`
 }
 
 type BundlePurchaseItem struct {
@@ -120,21 +138,34 @@ type CreatePurchaseRequestParams struct {
 type CreateStudentPurchaseRequestParams struct {
 	CourseID         string
 	StudentAccountID string
-	Now              time.Time
+	// WhatsAppNumber is optional raw input. When present it is validated,
+	// saved to the Student's own profile, and snapshotted onto the request in
+	// the same transaction. When absent the profile number is used.
+	WhatsAppNumber string
+	Now            time.Time
 }
 
 type CreateStudentBundlePurchaseRequestParams struct {
 	BundleID         string
 	StudentAccountID string
+	WhatsAppNumber   string
 	Now              time.Time
 }
 
 type ListPurchaseRequestsFilter struct {
-	Query  string
-	State  *PurchaseRequestState
-	Limit  int
-	Offset int
+	Query string
+	State *PurchaseRequestState
+	// Contact narrows to requests with ("AVAILABLE") or without ("MISSING") a
+	// usable WhatsApp number: the snapshot, else the requester's profile.
+	Contact string
+	Limit   int
+	Offset  int
 }
+
+const (
+	PurchaseContactAvailable = "AVAILABLE"
+	PurchaseContactMissing   = "MISSING"
+)
 
 type ConfirmPurchaseRequestParams struct {
 	PurchaseRequestID string
@@ -282,7 +313,7 @@ func (r *Repository) CreateStudentPurchaseRequest(
 	}
 	defer tx.Rollback(ctx)
 
-	email, normalizedEmail, err := lockPurchaseRequesterTx(ctx, tx, params.StudentAccountID)
+	requester, err := lockPurchaseRequesterTx(ctx, tx, params.StudentAccountID)
 	if err != nil {
 		return PurchaseRequest{}, err
 	}
@@ -297,9 +328,13 @@ func (r *Repository) CreateStudentPurchaseRequest(
 	if entitled {
 		return PurchaseRequest{}, ErrCourseAlreadyAccessible
 	}
+	contact, err := resolvePurchaseContactTx(ctx, tx, params.StudentAccountID, requester, params.WhatsAppNumber, now)
+	if err != nil {
+		return PurchaseRequest{}, err
+	}
 
 	request, created, err := createOrReuseStudentPurchaseRequestTx(
-		ctx, tx, params.CourseID, params.StudentAccountID, email, normalizedEmail, now,
+		ctx, tx, params.CourseID, params.StudentAccountID, requester.email, requester.normalizedEmail, contact, now,
 	)
 	if err != nil {
 		return PurchaseRequest{}, err
@@ -333,32 +368,99 @@ func (r *Repository) CreateStudentPurchaseRequest(
 	if err := tx.Commit(ctx); err != nil {
 		return PurchaseRequest{}, fmt.Errorf("committing purchase request: %w", err)
 	}
+	request.Created = created
 	return request, nil
 }
 
+type purchaseRequester struct {
+	email           string
+	normalizedEmail string
+	whatsAppNumber  *string
+}
+
 // lockPurchaseRequesterTx revalidates and locks the Account so suspension,
-// verification, and role changes serialize with purchase creation.
+// verification, role changes, and a concurrent profile edit of the WhatsApp
+// number all serialize with purchase creation.
 func lockPurchaseRequesterTx(
 	ctx context.Context,
 	tx pgx.Tx,
 	studentAccountID string,
-) (string, string, error) {
-	var email, normalizedEmail, role, status string
+) (purchaseRequester, error) {
+	var requester purchaseRequester
+	var role, status string
 	var verifiedAt *time.Time
 	err := tx.QueryRow(ctx, `
-		SELECT email, normalized_email, role::text, status::text, email_verified_at
+		SELECT email, normalized_email, role::text, status::text, email_verified_at, contact_phone
 		  FROM accounts WHERE id = $1::uuid FOR UPDATE
-	`, studentAccountID).Scan(&email, &normalizedEmail, &role, &status, &verifiedAt)
+	`, studentAccountID).Scan(
+		&requester.email, &requester.normalizedEmail, &role, &status, &verifiedAt, &requester.whatsAppNumber,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrPurchaseRequesterNotEligible
+		return purchaseRequester{}, ErrPurchaseRequesterNotEligible
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("locking purchase requester: %w", err)
+		return purchaseRequester{}, fmt.Errorf("locking purchase requester: %w", err)
 	}
 	if role != "STUDENT" || status != "ACTIVE" || verifiedAt == nil {
-		return "", "", ErrPurchaseRequesterNotEligible
+		return purchaseRequester{}, ErrPurchaseRequesterNotEligible
 	}
-	return email, normalizedEmail, nil
+	return requester, nil
+}
+
+// resolvePurchaseContactTx decides the WhatsApp number a new request carries.
+//
+// A number supplied with the request is validated and becomes the Student's
+// profile number in this same transaction, so a request is never persisted
+// with a number the profile does not also hold, and a failed request saves
+// nothing. Without one, the profile number is used. With neither, the request
+// is refused: D-117 exists so that a persisted request is always reachable
+// whether or not WhatsApp ever opened.
+func resolvePurchaseContactTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	studentAccountID string,
+	requester purchaseRequester,
+	supplied string,
+	now time.Time,
+) (string, error) {
+	if strings.TrimSpace(supplied) == "" {
+		if requester.whatsAppNumber == nil || !identity.IsE164WhatsAppNumber(*requester.whatsAppNumber) {
+			return "", ErrPurchaseContactRequired
+		}
+		return *requester.whatsAppNumber, nil
+	}
+	normalized, err := identity.NormalizeWhatsAppNumber(supplied)
+	if err != nil {
+		return "", err
+	}
+	if requester.whatsAppNumber != nil && *requester.whatsAppNumber == normalized {
+		return normalized, nil
+	}
+	var revision int
+	if err := tx.QueryRow(ctx, `
+		UPDATE accounts
+		   SET contact_phone = $2, contact_phone_updated_at = $3,
+		       revision = revision + 1, updated_at = $3
+		 WHERE id = $1::uuid AND role = 'STUDENT'
+		RETURNING revision
+	`, studentAccountID, normalized, now).Scan(&revision); err != nil {
+		return "", fmt.Errorf("saving purchase contact number: %w", err)
+	}
+	// The same audit action a profile edit writes, naming the field and never
+	// the value.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor, action, module,
+			target_type, target_id, target_revision, reason, metadata
+		) VALUES (
+			$1::uuid, 'STUDENT', $1::text, 'ACCOUNT_PROFILE_UPDATED', 'IDENTITY_AND_ACCESS',
+			'ACCOUNT', $1::text, $2, 'Student provided a WhatsApp number with a purchase request',
+			'{"changed_fields":["whatsapp_number"]}'::jsonb
+		)
+	`, studentAccountID, revision); err != nil {
+		return "", fmt.Errorf("auditing purchase contact number: %w", err)
+	}
+	return normalized, nil
 }
 
 func studentHasActiveAccessTx(
@@ -394,7 +496,7 @@ func studentHasActiveAccessTx(
 func createOrReuseStudentPurchaseRequestTx(
 	ctx context.Context,
 	tx pgx.Tx,
-	courseID, studentAccountID, email, normalizedEmail string,
+	courseID, studentAccountID, email, normalizedEmail, contact string,
 	now time.Time,
 ) (PurchaseRequest, bool, error) {
 	var request PurchaseRequest
@@ -403,7 +505,7 @@ func createOrReuseStudentPurchaseRequestTx(
 		INSERT INTO purchase_requests (
 			id, reference_code, course_id, email, normalized_email, requester_account_id,
 			course_title_ar, course_title_en, price_minor_units, regular_price_minor_units, currency, state,
-			requested_at, created_at, updated_at
+			requested_at, created_at, updated_at, contact_phone
 		)
 		SELECT
 			$1::uuid,
@@ -411,7 +513,7 @@ func createOrReuseStudentPurchaseRequestTx(
 			c.id, $2, $3, $6::uuid,
 			cr.title_ar, cr.title_en, COALESCE(price.offer_price_minor_units, price.new_value_minor_units),
 			price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
-			$4, $4, $4
+			$4, $4, $4, $7
 		  FROM courses c
 		  JOIN course_revisions cr ON cr.id = c.live_revision_id
 		  JOIN LATERAL (
@@ -425,22 +527,26 @@ func createOrReuseStudentPurchaseRequestTx(
 		ON CONFLICT (course_id, requester_account_id)
 			WHERE requester_account_id IS NOT NULL
 			  AND state IN ('WAITING_PAYMENT', 'INVITATION_CREATED')
-		DO UPDATE SET updated_at = purchase_requests.updated_at
+		DO UPDATE SET updated_at = purchase_requests.updated_at,
+		              -- Reuse fills a snapshot the request predates and never
+		              -- replaces one it already carries.
+		              contact_phone = COALESCE(
+		                  purchase_requests.contact_phone, EXCLUDED.contact_phone)
 		RETURNING (xmax = 0) AS created, id::text, reference_code, course_id::text, email, normalized_email,
 		          price_minor_units, currency, state, invitation_id::text,
 		          requested_at, payment_confirmed_at, invitation_created_at,
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
 		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		          bundle_title_ar, bundle_title_en, requester_account_id::text
-	`, uuid.NewString(), email, normalizedEmail, now, courseID, studentAccountID).Scan(
+		          bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
+	`, uuid.NewString(), email, normalizedEmail, now, courseID, studentAccountID, contact).Scan(
 		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
 		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
-		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID, &request.ContactWhatsAppNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseRequest{}, false, ErrCourseNotPurchasable
@@ -453,7 +559,7 @@ func createOrReuseStudentPurchaseRequestTx(
 		// Admin queue for one sale.
 		var constraintErr *pgconn.PgError
 		if errors.As(err, &constraintErr) && constraintErr.ConstraintName == "purchase_requests_one_active_course_email" {
-			existing, adoptErr := adoptExistingPurchaseRequestTx(ctx, tx, courseID, normalizedEmail, studentAccountID)
+			existing, adoptErr := adoptExistingPurchaseRequestTx(ctx, tx, courseID, normalizedEmail, studentAccountID, contact)
 			if adoptErr != nil {
 				return PurchaseRequest{}, false, adoptErr
 			}
@@ -473,11 +579,12 @@ func createOrReuseStudentPurchaseRequestTx(
 func adoptExistingPurchaseRequestTx(
 	ctx context.Context,
 	tx pgx.Tx,
-	courseID, normalizedEmail, studentAccountID string,
+	courseID, normalizedEmail, studentAccountID, contact string,
 ) (PurchaseRequest, error) {
 	row := tx.QueryRow(ctx, `
 		UPDATE purchase_requests
-		   SET requester_account_id = COALESCE(requester_account_id, $3::uuid)
+		   SET requester_account_id = COALESCE(requester_account_id, $3::uuid),
+		       contact_phone = COALESCE(contact_phone, $4)
 		 WHERE course_id = $1::uuid
 		   AND normalized_email = $2
 		   AND state IN ('WAITING_PAYMENT', 'INVITATION_CREATED')
@@ -487,8 +594,8 @@ func adoptExistingPurchaseRequestTx(
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
 		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		          bundle_title_ar, bundle_title_en, requester_account_id::text
-	`, courseID, normalizedEmail, studentAccountID)
+		          bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
+	`, courseID, normalizedEmail, studentAccountID, contact)
 	request, err := scanPurchaseRequest(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseRequest{}, ErrPurchaseRequestNotFound
@@ -539,7 +646,7 @@ func createOrReusePurchaseRequestTx(
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
 		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		          bundle_title_ar, bundle_title_en, requester_account_id::text
+		          bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
 	`, uuid.NewString(), email, normalizedEmail, now, courseID).Scan(
 		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
@@ -547,7 +654,7 @@ func createOrReusePurchaseRequestTx(
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
 		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
-		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID, &request.ContactWhatsAppNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseRequest{}, false, ErrCourseNotPurchasable
@@ -575,12 +682,26 @@ func (r *Repository) ListPurchaseRequests(ctx context.Context, filter ListPurcha
 	if filter.State != nil && filter.State.Valid() {
 		state = string(*filter.State)
 	}
+	contact := filter.Contact
+	if contact != PurchaseContactAvailable && contact != PurchaseContactMissing {
+		contact = ""
+	}
+	// The requester is the owning Account, or — for a request that predates
+	// authenticated purchase — the Student Account with the request's address,
+	// the same match payment confirmation uses to choose a recipient.
+	from := `purchase_requests p
+		LEFT JOIN accounts requester ON requester.role = 'STUDENT' AND (
+			requester.id = p.requester_account_id
+			OR (p.requester_account_id IS NULL AND requester.normalized_email = p.normalized_email))`
 	where := `($1 = '' OR p.reference_code ILIKE '%' || $1 || '%' OR p.normalized_email ILIKE '%' || $1 || '%'
 		OR COALESCE(p.course_title_ar, '') ILIKE '%' || $1 || '%' OR COALESCE(p.course_title_en, '') ILIKE '%' || $1 || '%'
 		OR COALESCE(p.bundle_title_ar, '') ILIKE '%' || $1 || '%' OR COALESCE(p.bundle_title_en, '') ILIKE '%' || $1 || '%')
-		AND ($2 = '' OR p.state = $2)`
+		AND ($2 = '' OR p.state = $2)
+		AND ($3 = ''
+			OR ($3 = 'AVAILABLE' AND COALESCE(p.contact_phone, requester.contact_phone) IS NOT NULL)
+			OR ($3 = 'MISSING' AND COALESCE(p.contact_phone, requester.contact_phone) IS NULL))`
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM purchase_requests p WHERE `+where, query, state).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM `+from+` WHERE `+where, query, state, contact).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting purchase requests: %w", err)
 	}
 	rows, err := r.pool.Query(ctx, `
@@ -590,21 +711,24 @@ func (r *Repository) ListPurchaseRequests(ctx context.Context, filter ListPurcha
 		       p.access_granted_at, p.cancelled_at, COALESCE(p.course_title_ar, ''), COALESCE(p.course_title_en, ''),
 		       p.access_ends_at_snapshot, p.payment_confirmed_by_account_id::text,
 		       p.regular_price_minor_units, p.target_kind, p.bundle_id::text, p.bundle_revision,
-		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text
-		  FROM purchase_requests p
+		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text, p.contact_phone,
+		       requester.contact_phone
+		  FROM `+from+`
 		 WHERE `+where+`
 		 ORDER BY p.requested_at DESC
-		 LIMIT $3 OFFSET $4`, query, state, limit, offset)
+		 LIMIT $4 OFFSET $5`, query, state, contact, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing purchase requests: %w", err)
 	}
 	defer rows.Close()
 	items := make([]PurchaseRequest, 0)
 	for rows.Next() {
-		request, err := scanPurchaseRequest(rows)
+		var requesterNumber *string
+		request, err := scanPurchaseRequest(rows, &requesterNumber)
 		if err != nil {
 			return nil, 0, err
 		}
+		request.RequesterWhatsAppNumber = requesterNumber
 		items = append(items, request)
 	}
 	if err := rows.Err(); err != nil {
@@ -627,7 +751,7 @@ func (r *Repository) ListStudentPurchaseRequests(ctx context.Context, studentAcc
 		       p.access_granted_at, p.cancelled_at, COALESCE(p.course_title_ar, ''), COALESCE(p.course_title_en, ''),
 		       p.access_ends_at_snapshot, p.payment_confirmed_by_account_id::text,
 		       p.regular_price_minor_units, p.target_kind, p.bundle_id::text, p.bundle_revision,
-		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text
+		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text, p.contact_phone
 		FROM purchase_requests p WHERE p.requester_account_id=$1::uuid
 		ORDER BY p.requested_at DESC, p.id DESC LIMIT 100
 	`, studentAccountID)
@@ -685,17 +809,17 @@ func (r *Repository) hydrateBundlePurchaseItems(ctx context.Context, requests []
 	return rows.Err()
 }
 
-func scanPurchaseRequest(row interface{ Scan(...any) error }) (PurchaseRequest, error) {
+func scanPurchaseRequest(row interface{ Scan(...any) error }, extra ...any) (PurchaseRequest, error) {
 	var request PurchaseRequest
-	if err := row.Scan(
+	if err := row.Scan(append([]any{
 		&request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
 		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
-		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
-	); err != nil {
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID, &request.ContactWhatsAppNumber,
+	}, extra...)...); err != nil {
 		return PurchaseRequest{}, fmt.Errorf("scanning purchase request: %w", err)
 	}
 	return request, nil
@@ -1107,7 +1231,7 @@ func lockPurchaseRequest(ctx context.Context, tx pgx.Tx, id string) (PurchaseReq
 		       access_granted_at, cancelled_at, COALESCE(course_title_ar, ''), COALESCE(course_title_en, ''),
 		       access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		       regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		       bundle_title_ar, bundle_title_en, requester_account_id::text
+		       bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
 		  FROM purchase_requests WHERE id = $1::uuid FOR UPDATE
 	`, id)
 	request, err := scanPurchaseRequest(row)
@@ -1287,7 +1411,7 @@ func lockPurchaseRequestByInvitation(ctx context.Context, tx pgx.Tx, invitationI
 		       access_granted_at, cancelled_at, COALESCE(course_title_ar, ''), COALESCE(course_title_en, ''),
 		       access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		       regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		       bundle_title_ar, bundle_title_en, requester_account_id::text
+		       bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
 		  FROM purchase_requests WHERE invitation_id = $1::uuid FOR UPDATE
 	`, invitationID)
 	return scanPurchaseRequest(row)
@@ -1318,7 +1442,9 @@ func WhatsAppHandoffURL(number string, request PurchaseRequest, locale identity.
 	if locale == identity.LocaleArabic {
 		message = fmt.Sprintf("مرحبًا، أريد شراء كورس %s على Gradex.\nالسعر: %s\nالبريد الإلكتروني: %s\nرقم الطلب: %s", title, price, request.Email, request.ReferenceCode)
 	}
-	return "https://wa.me/" + number + "?text=" + url.QueryEscape(message), nil
+	// %20 rather than "+" for spaces: some WhatsApp clients render a literal
+	// "+" from a form-encoded query. A real "+" is still escaped as %2B.
+	return "https://wa.me/" + number + "?text=" + strings.ReplaceAll(url.QueryEscape(message), "+", "%20"), nil
 }
 
 func formatKWD(minorUnits int64) string {

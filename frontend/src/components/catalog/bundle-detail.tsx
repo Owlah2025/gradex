@@ -18,10 +18,14 @@ import {
   createStudentBundlePurchaseRequest,
   listStudentPurchaseRequests,
   type PurchaseRequest,
+  type PurchaseRequestCreated,
 } from "@/lib/api/access";
 import { ProblemError } from "@/lib/api/problem";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { openHandoffContext } from "@/lib/browser/external-handoff";
+import { PurchaseHandoff } from "@/components/contact/purchase-handoff";
+import { PurchaseContactSection, usePurchaseContact } from "@/components/contact/purchase-contact";
+import { contactProblem, pendingHandoffURL } from "@/components/contact/contact-state";
+import { ContactNumberPrompt } from "@/components/contact/contact-number-prompt";
 
 type State = { kind: "loading" } | { kind: "ready"; bundle: PublicBundle } | { kind: "missing" } | { kind: "failed" };
 type PurchaseHistoryState =
@@ -37,10 +41,11 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
   const [history, setHistory] = useState<PurchaseHistoryState>({ kind: "loading" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Set only where the browser refused the handoff context; the request has
-  // already succeeded, so the destination is offered as a link instead.
-  const [fallbackURL, setFallbackURL] = useState<string | null>(null);
+  // Set only from the server's confirmed answer (D-117): the success state and
+  // its WhatsApp link never render on anything less.
+  const [created, setCreated] = useState<PurchaseRequestCreated | null>(null);
   const inFlight = useRef(false);
+  const contact = usePurchaseContact(routeLocale, history.kind === "ready");
 
   const loadHistory = useCallback(async () => {
     setHistory({ kind: "loading" });
@@ -71,23 +76,38 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
 
   async function requestPurchase(bundle: PublicBundle) {
     if (inFlight.current || history.kind !== "ready") return;
+    // As on the Course panel: a request is never created without a way to
+    // reach its Student, and WhatsApp is one explicit press afterwards.
+    const plan = contact.plan();
+    if (plan.kind === "blocked") {
+      contact.setError(plan.reason);
+      return;
+    }
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
-    setFallbackURL(null);
-    // Opened synchronously, inside the click, while the user activation that
-    // permits it is still live. Gradex is never navigated away from.
-    const handoff = openHandoffContext();
     try {
-      const result = await createStudentBundlePurchaseRequest(bundle.id, routeLocale);
-      if (!handoff.complete(result.whatsapp_url)) {
-        setFallbackURL(result.whatsapp_url);
+      const result = await createStudentBundlePurchaseRequest(
+        bundle.id,
+        routeLocale,
+        undefined,
+        plan.kind === "send" ? { whatsappNumber: plan.e164 } : {},
+      );
+      if (plan.kind === "send") contact.remember(plan.e164);
+      if (pendingHandoffURL(result)) {
+        setCreated(result);
+      } else {
+        setError(t.bundles.failed);
       }
-      setSubmitting(false);
-      inFlight.current = false;
-    } catch {
-      handoff.abandon();
-      setError(t.bundles.failed);
+    } catch (caught) {
+      const reason = contactProblem(caught);
+      if (reason) {
+        contact.setError(reason);
+        if (!contact.editing) contact.setEditing(true);
+      } else {
+        setError(t.bundles.failed);
+      }
+    } finally {
       setSubmitting(false);
       inFlight.current = false;
     }
@@ -140,20 +160,18 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
                 <PriceDisplay price={bundle.price} locale={routeLocale} className="mt-4" />
                 <p className="mt-4 text-sm leading-6 text-muted-foreground">{t.bundles.paymentBody}</p>
                 {error ? <div className="mt-4"><Alert tone="error" title={error} /></div> : null}
-                {/* Only where the browser refused the handoff context. The request
-                    exists; this offers the same server-built destination to press. */}
-                {fallbackURL ? (
-                  <p className="mt-4 text-sm leading-6">
-                    <a
-                      href={fallbackURL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold text-primary underline underline-offset-4"
-                      data-testid="bundle-handoff-fallback"
-                    >
-                      {t.bundles.handoffFallback}
-                    </a>
-                  </p>
+                {created ? (
+                  <div className="mt-4">
+                    <PurchaseHandoff
+                      variant={created.reused ? "pending" : "created"}
+                      target="bundle"
+                      reference={created.reference}
+                      whatsappURL={pendingHandoffURL(created) ?? ""}
+                      locale={routeLocale}
+                      labels={t.contact}
+                      testID="bundle-handoff"
+                    />
+                  </div>
                 ) : null}
                 {history.kind === "loading" ? (
                   <p
@@ -180,14 +198,42 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
                     </Alert>
                   </div>
                 ) : null}
-                {existing?.state === "WAITING_PAYMENT" ? <div className="mt-4"><Alert tone="info" title={t.bundles.pending} /></div> : null}
+                {/* A request already waiting for payment keeps its WhatsApp link, so a
+                    Student whose WhatsApp never opened can continue from here. */}
+                {!created && existing?.state === "WAITING_PAYMENT" ? (
+                  pendingHandoffURL(existing) ? (
+                    <div className="mt-4">
+                      <PurchaseHandoff
+                        variant="pending"
+                        target="bundle"
+                        reference={existing.reference}
+                        whatsappURL={pendingHandoffURL(existing) ?? ""}
+                        locale={routeLocale}
+                        labels={t.contact}
+                        testID="bundle-handoff"
+                      />
+                      <ContactNumberPrompt className="mt-4" />
+                    </div>
+                  ) : (
+                    <div className="mt-4"><Alert tone="info" title={t.bundles.pending} /></div>
+                  )
+                ) : null}
                 {existing?.state === "ACCESS_GRANTED" ? <div className="mt-4"><Alert tone="success" title={t.bundles.granted} /></div> : null}
                 {history.kind === "anonymous" ? (
                   <Button asChild className="mt-5 w-full"><Link href={`/login?returnTo=${encodeURIComponent(pathname ?? `/${locale}/catalog`)}`}>{t.access.purchase.signIn}</Link></Button>
-                ) : existing ? null : (
-                  <Button type="button" className="mt-5 w-full" disabled={submitting || history.kind !== "ready"} onClick={() => void requestPurchase(bundle)} data-testid="bundle-purchase-request">
-                    {submitting ? t.access.purchase.submitting : t.bundles.request}
-                  </Button>
+                ) : existing || created ? null : (
+                  <>
+                    <PurchaseContactSection
+                      contact={contact}
+                      locale={routeLocale}
+                      labels={t.contact}
+                      disabled={submitting}
+                      idPrefix="bundle"
+                    />
+                    <Button type="button" className="mt-5 w-full" disabled={submitting || history.kind !== "ready" || contact.status === "loading"} onClick={() => void requestPurchase(bundle)} data-testid="bundle-purchase-request">
+                      {submitting ? t.access.purchase.submitting : t.bundles.request}
+                    </Button>
+                  </>
                 )}
               </aside>
             </article>

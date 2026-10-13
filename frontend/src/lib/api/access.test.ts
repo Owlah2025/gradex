@@ -296,6 +296,11 @@ test("access API client forwards requests to correct backend endpoints", async (
       request.url.includes("/me/purchase-requests"),
     );
     assert.deepEqual(studentPurchase?.body, { course_id: "c-1" });
+    // D-117: the Student's own WhatsApp number is the one value the browser may
+    // add, and only when the Student typed one.
+    await createStudentPurchaseRequest("c-2", "en", "csrf-token-123", { whatsappNumber: "+96550012345" });
+    const withContact = requests.filter((request) => request.url.includes("/me/purchase-requests")).at(-1);
+    assert.deepEqual(withContact?.body, { course_id: "c-2", whatsapp_number: "+96550012345" });
     // The absence of an email field is the security property, not a detail: a
     // client-supplied address on this route would let any caller aim someone
     // else's Course access at a mailbox they control.

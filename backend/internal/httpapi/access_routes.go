@@ -71,9 +71,15 @@ type rejectInvitationBody struct {
 // Course access is eventually sent, so it must come from the authenticated
 // Account rather than from the request body. There is no price field for the
 // same reason — the amount is read from the Course.
+//
+// The one Student-supplied value is the WhatsApp number (D-117). It is not an
+// address that decides anything about access: it is the Student's own contact,
+// validated server-side, saved to their own profile, and snapshotted onto the
+// request so an Admin can reach them whether or not WhatsApp ever opened.
 type createStudentPurchaseRequestBody struct {
-	CourseID string `json:"course_id"`
-	BundleID string `json:"bundle_id"`
+	CourseID       string `json:"course_id"`
+	BundleID       string `json:"bundle_id"`
+	WhatsAppNumber string `json:"whatsapp_number"`
 }
 
 type createPurchaseRequestResponse struct {
@@ -272,6 +278,18 @@ func (h *accessHandlers) listStudentPurchaseRequests(c *gin.Context) {
 	}
 	locale, _ := requestedLocale(c.GetHeader("Accept-Language"))
 	localizePurchaseRequests(requests, locale)
+	// A request still waiting for payment carries its handoff again, so a
+	// Student whose WhatsApp never opened — or who closed it — can return and
+	// continue. It is the same server-built URL the request produced, and it
+	// moves nothing forward: opening it is not payment.
+	for index := range requests {
+		if requests[index].State != access.PurchaseRequestWaitingPayment {
+			continue
+		}
+		if handoff, err := access.WhatsAppHandoffURL(h.salesWhatsAppNumber, requests[index], locale); err == nil {
+			requests[index].WhatsAppURL = handoff
+		}
+	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"purchase_requests": requests})
 }
@@ -318,11 +336,11 @@ func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 	var err error
 	if courseSupplied {
 		request, err = h.repo.CreateStudentPurchaseRequest(c.Request.Context(), access.CreateStudentPurchaseRequestParams{
-			CourseID: body.CourseID, StudentAccountID: studentID, Now: now,
+			CourseID: body.CourseID, StudentAccountID: studentID, WhatsAppNumber: body.WhatsAppNumber, Now: now,
 		})
 	} else {
 		request, err = h.repo.CreateStudentBundlePurchaseRequest(c.Request.Context(), access.CreateStudentBundlePurchaseRequestParams{
-			BundleID: body.BundleID, StudentAccountID: studentID, Now: now,
+			BundleID: body.BundleID, StudentAccountID: studentID, WhatsAppNumber: body.WhatsAppNumber, Now: now,
 		})
 	}
 	if err != nil {
@@ -333,6 +351,13 @@ func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 			writeProblem(c, problem.NotAuthorized())
 		case errors.Is(err, access.ErrCourseAlreadyAccessible):
 			writeProblem(c, problem.PurchaseAccessAlreadyActive())
+		case errors.Is(err, access.ErrPurchaseContactRequired):
+			writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+				Code: "WHATSAPP_NUMBER_REQUIRED", Detail: "Add your WhatsApp number so the Gradex team can reach you about this request.",
+				Location: problem.LocationBody, Parameter: "whatsapp_number",
+			}))
+		case errors.Is(err, identity.ErrInvalidWhatsAppNumber):
+			writeProblem(c, invalidWhatsAppNumberProblem())
 		default:
 			writeProblem(c, problem.Internal(""))
 		}
@@ -380,8 +405,11 @@ func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 		State:           string(request.State),
 		// A repeated confirmation reuses the live request rather than creating
 		// a second one, and the browser is told which happened so it can say
-		// "your existing request" instead of implying a new sale.
-		Reused: !request.RequestedAt.Equal(now),
+		// "your existing request" instead of implying a new sale. This is the
+		// insert's own answer: comparing requested_at with the handler clock
+		// reported every new request as reused, because PostgreSQL stores
+		// microseconds and the clock carries nanoseconds.
+		Reused: !request.Created,
 	})
 }
 
@@ -397,6 +425,13 @@ func (h *accessHandlers) listAdminPurchaseRequests(c *gin.Context) {
 	filter := access.ListPurchaseRequestsFilter{Query: c.Query("q"), Limit: limit, Offset: (page - 1) * limit}
 	if state := access.PurchaseRequestState(c.Query("state")); state.Valid() {
 		filter.State = &state
+	}
+	switch contact := c.Query("contact"); contact {
+	case "", access.PurchaseContactAvailable, access.PurchaseContactMissing:
+		filter.Contact = contact
+	default:
+		writeProblem(c, problem.ValidationFailed())
+		return
 	}
 	requests, total, err := h.repo.ListPurchaseRequests(c.Request.Context(), filter)
 	if err != nil {

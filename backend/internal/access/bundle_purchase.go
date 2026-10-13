@@ -42,7 +42,7 @@ func (r *Repository) CreateStudentBundlePurchaseRequest(
 		return PurchaseRequest{}, fmt.Errorf("beginning bundle purchase transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	email, normalizedEmail, err := lockPurchaseRequesterTx(ctx, tx, params.StudentAccountID)
+	requester, err := lockPurchaseRequesterTx(ctx, tx, params.StudentAccountID)
 	if err != nil {
 		return PurchaseRequest{}, err
 	}
@@ -79,6 +79,12 @@ func (r *Repository) CreateStudentBundlePurchaseRequest(
 	if offer != nil {
 		effective = *offer
 	}
+	// Resolved after the Bundle is known to be purchasable, so a refused
+	// Bundle never saves a number as a side effect.
+	contact, err := resolvePurchaseContactTx(ctx, tx, params.StudentAccountID, requester, params.WhatsAppNumber, now)
+	if err != nil {
+		return PurchaseRequest{}, err
+	}
 
 	var request PurchaseRequest
 	var created bool
@@ -88,31 +94,33 @@ func (r *Repository) CreateStudentBundlePurchaseRequest(
 			email, normalized_email, requester_account_id,
 			course_title_ar, course_title_en, bundle_title_ar, bundle_title_en, bundle_revision,
 			price_minor_units, regular_price_minor_units, currency, state,
-			requested_at, created_at, updated_at
+			requested_at, created_at, updated_at, contact_phone
 		) VALUES (
 			$1::uuid, 'GRX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)),
 			NULL, $2::uuid, 'BUNDLE', $3, $4, $5::uuid,
-			NULL, NULL, $6, $7, $8, $9, $10, 'KWD', 'WAITING_PAYMENT', $11, $11, $11
+			NULL, NULL, $6, $7, $8, $9, $10, 'KWD', 'WAITING_PAYMENT', $11, $11, $11, $12
 		)
 		ON CONFLICT (bundle_id, requester_account_id)
 			WHERE target_kind='BUNDLE' AND requester_account_id IS NOT NULL AND state='WAITING_PAYMENT'
-		DO UPDATE SET updated_at=purchase_requests.updated_at
+		DO UPDATE SET updated_at=purchase_requests.updated_at,
+		              contact_phone=COALESCE(
+		                  purchase_requests.contact_phone, EXCLUDED.contact_phone)
 		RETURNING (xmax=0), id::text, reference_code, COALESCE(course_id::text, ''), email, normalized_email,
 		          price_minor_units, currency, state, invitation_id::text,
 		          requested_at, payment_confirmed_at, invitation_created_at,
 		          access_granted_at, cancelled_at, COALESCE(course_title_ar, ''), COALESCE(course_title_en, ''),
 		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
 		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
-		          bundle_title_ar, bundle_title_en, requester_account_id::text
-	`, uuid.NewString(), params.BundleID, email, normalizedEmail, params.StudentAccountID,
-		titleAr, titleEn, bundleRevision, effective, regular, now).Scan(
+		          bundle_title_ar, bundle_title_en, requester_account_id::text, contact_phone
+	`, uuid.NewString(), params.BundleID, requester.email, requester.normalizedEmail, params.StudentAccountID,
+		titleAr, titleEn, bundleRevision, effective, regular, now, contact).Scan(
 		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
 		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
-		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID, &request.ContactWhatsAppNumber,
 	)
 	if err != nil {
 		return PurchaseRequest{}, fmt.Errorf("creating bundle purchase request: %w", err)
@@ -158,6 +166,7 @@ func (r *Repository) CreateStudentBundlePurchaseRequest(
 	if err := tx.Commit(ctx); err != nil {
 		return PurchaseRequest{}, fmt.Errorf("committing bundle purchase request: %w", err)
 	}
+	request.Created = created
 	return request, nil
 }
 
