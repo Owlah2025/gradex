@@ -69,7 +69,7 @@ render literally.
 | Go format/vet | `gofmt -l .`; `go vet ./...`; `go vet -tags=integration ./...` | clean |
 | Go unit (race) | `go test -race ./...` | pass |
 | Go integration — new | `go test -tags=integration ./internal/httpapi -run WhatsAppContact`; `./internal/db -run StudentContactPhone` | pass |
-| Go integration — full | `go test -tags=integration -p 1 -count=1 ./...` (+ `-timeout 60m` for `./internal/httpapi`, which needs 622 s and exceeds Go's 10 m default) | all 36 packages pass |
+| Go integration — full | `go test -tags=integration -p 1 -count=1 ./...` (+ `-timeout 60m` for `./internal/httpapi`, which needs 622 s and exceeds Go's 10 m default) | all 37 packages pass |
 | Frontend typecheck/lint | `npx tsc --noEmit`; `npm run lint` | clean |
 | Frontend unit | `npm test` | 954/954 pass |
 | Production build | `npm run build` | success |
