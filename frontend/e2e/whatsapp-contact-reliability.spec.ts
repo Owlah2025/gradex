@@ -51,6 +51,13 @@ async function stubWhatsApp(context: BrowserContext) {
   );
 }
 
+/** Visual evidence, only when a run asks for it. Never affects the assertions. */
+async function capture(page: Page, name: string) {
+  const directory = process.env.GRADEX_E2E_CONTACT_EVIDENCE_DIR;
+  if (!directory) return;
+  await page.screenshot({ path: `${directory}/${name}.png`, fullPage: false });
+}
+
 async function expectNoHorizontalScroll(page: Page) {
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1))
@@ -81,6 +88,7 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     await expect(prompt).toContainText("Complete Your Contact Information");
     await expect(prompt).toContainText("Add your WhatsApp number so the GradeX team can contact you");
     await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    await capture(page, "en-01-dashboard-reminder");
 
     // 2. The number is validated before it is saved, then saved inline.
     await page.getByTestId("contact-number-prompt-action").click();
@@ -104,6 +112,8 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     await expect(page.getByTestId("contact-number-status")).toHaveText("Provided");
     await expect(page.getByTestId("contact-number-current")).toHaveText("+965 500 12345");
     await expect(page.getByTestId("contact-number-card")).not.toContainText(/verified/i);
+    await page.getByTestId("contact-number-card").scrollIntoViewIfNeeded();
+    await capture(page, "en-02-profile-provided");
 
     // 4. The request uses the number on file, saves, and shows success without
     //    any automatic window. WhatsApp opens only from the explicit link.
@@ -117,6 +127,8 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     expect(response.reused).toBe(false);
     await expect(page.getByTestId("purchase-handoff")).toContainText("Your course request was submitted successfully.");
     await expect(page.getByTestId("purchase-handoff")).toContainText("Continue to WhatsApp to complete payment.");
+    await page.getByTestId("purchase-handoff").scrollIntoViewIfNeeded();
+    await capture(page, "en-03-request-success");
     const message = new URL(handoffURL).searchParams.get("text") || "";
     expect(message).toContain(response.reference);
     expect(message).toContain("CS101");
@@ -136,6 +148,7 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     await expect(row).toHaveCount(1);
     await expect(row).toContainText(response.reference);
     await expect(page.getByTestId("pending-payment-request-link")).toHaveAttribute("href", response.whatsapp_url);
+    await capture(page, "en-04-access-recovery");
 
     // 7. The Admin finds the Student, sees the number, and can open WhatsApp.
     await installAdminSession(adminContext, "en");
@@ -173,6 +186,8 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     await expect(chat).toHaveAttribute("target", "_blank");
     await expect(chat).toHaveAttribute("rel", "noopener noreferrer");
     await expect(admin.getByTestId("admin-contact-copy")).toBeVisible();
+    await contact.scrollIntoViewIfNeeded();
+    await capture(admin, "en-05-admin-user360-contact");
 
     // The Admin request queue shows the number captured with the request.
     await admin.goto("/en/admin/course-access");
@@ -181,6 +196,8 @@ test("English desktop: reminder, save, request with a popup blocker, recovery, a
     const requestRow = admin.getByTestId(`purchase-request-${response.reference}`);
     await expect(requestRow.getByTestId("admin-request-contact")).toContainText("+965 500 12345");
     await expect(requestRow.getByTestId("admin-request-contact")).toContainText("Given with this request");
+    await requestRow.scrollIntoViewIfNeeded();
+    await capture(admin, "en-06-admin-request-queue");
   } finally {
     await studentContext.close();
     await adminContext.close();
@@ -204,6 +221,7 @@ test("Arabic mobile: RTL reminder, a request refused until a number is given, an
     await expect(prompt).toContainText("يرجى إضافة رقم الواتساب الخاص بك");
     await expect(page.getByTestId("contact-number-prompt-action")).toHaveText("إضافة رقم الواتساب");
     await expectNoHorizontalScroll(page);
+    await capture(page, "ar-01-mobile-dashboard-reminder");
 
     // "Later" hides it for this session without saving anything.
     await page.getByTestId("contact-number-prompt-later").click();
@@ -227,6 +245,8 @@ test("Arabic mobile: RTL reminder, a request refused until a number is given, an
     await page.getByTestId("purchase-request-submit").click();
     await expect(page.getByTestId("purchase-contact-error")).toHaveText("أضف رقم الواتساب للمتابعة.");
     expect(posts).toBe(0);
+    await page.getByTestId("purchase-contact-number").scrollIntoViewIfNeeded();
+    await capture(page, "ar-02-mobile-number-required");
 
     // An Egyptian number, chosen from the country list.
     await page.getByTestId("purchase-contact-region").selectOption("EG");
@@ -234,6 +254,8 @@ test("Arabic mobile: RTL reminder, a request refused until a number is given, an
     expect(posts).toBe(1);
     await expect(page.getByTestId("purchase-handoff")).toContainText("تم إرسال طلب الاشتراك في الكورس بنجاح.");
     await expect(page.getByTestId("purchase-handoff-link")).toContainText("المتابعة إلى واتساب");
+    await page.getByTestId("purchase-handoff").scrollIntoViewIfNeeded();
+    await capture(page, "ar-03-mobile-request-success");
     await expectNoHorizontalScroll(page);
 
     // The number reached the Student's profile, normalized.

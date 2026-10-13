@@ -3474,7 +3474,7 @@ export const en = {
     why: "The GradeX team uses this number only to contact you about your courses, enrollment requests, and payments.",
     countryLabel: "Country code",
     numberLabel: "WhatsApp number",
-    numberPlaceholder: "e.g. 5001 2345",
+    numberPlaceholder: "5001 2345",
     numberHelp: "Choose your country, then type your number. Kuwait (+965) is selected by default.",
     invalid: "Enter a valid mobile number for the selected country.",
     required: "Add your WhatsApp number to continue.",

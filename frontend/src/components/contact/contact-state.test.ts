@@ -83,7 +83,8 @@ test("both languages carry every contact message, translated", () => {
   for (const key of keys) {
     assert.equal(typeof ar.contact[key], "string", `Arabic contact.${key}`);
     assert.ok(ar.contact[key].length > 0, `Arabic contact.${key} is empty`);
-    if (key !== "pendingPaymentCount") {
+    // Digits only, identical by design in both languages.
+    if (key !== "pendingPaymentCount" && key !== "numberPlaceholder") {
       assert.notEqual(ar.contact[key], en.contact[key], `Arabic contact.${key} is untranslated`);
     }
   }

@@ -71,7 +71,7 @@ export function PurchaseHandoff({
         </div>
       </div>
 
-      <Button asChild size="lg" className="mt-5 w-full sm:w-auto">
+      <Button asChild size="lg" className="mt-5 h-auto min-h-12 w-full whitespace-normal py-3 text-center">
         <a href={whatsappURL} target="_blank" rel="noopener noreferrer" data-testid={`${testID}-link`}>
           <MessageCircle aria-hidden className="size-5" />
           {labels.continueWhatsApp}

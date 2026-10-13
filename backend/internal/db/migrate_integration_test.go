@@ -798,9 +798,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("catalogue search analytics schema = %d, want one past course announcements %d",
 			CatalogSearchAnalyticsSchemaVersion, CourseAnnouncementsSchemaVersion)
 	}
-	if MaxSchemaVersion != DurableMultipartSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want durable multipart schema %d",
-			MaxSchemaVersion, DurableMultipartSchemaVersion)
+	if StudentWhatsAppContactSchemaVersion != DurableMultipartSchemaVersion+1 {
+		t.Fatalf("student contact schema = %d, want one past durable multipart %d",
+			StudentWhatsAppContactSchemaVersion, DurableMultipartSchemaVersion)
+	}
+	if MaxSchemaVersion != StudentWhatsAppContactSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want student contact schema %d",
+			MaxSchemaVersion, StudentWhatsAppContactSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

@@ -69,17 +69,20 @@ render literally.
 | Go format/vet | `gofmt -l .`; `go vet ./...`; `go vet -tags=integration ./...` | clean |
 | Go unit (race) | `go test -race ./...` | pass |
 | Go integration — new | `go test -tags=integration ./internal/httpapi -run WhatsAppContact`; `./internal/db -run StudentContactPhone` | pass |
-| Go integration — full | see "Full suites" below | see below |
+| Go integration — full | `go test -tags=integration -p 1 -count=1 ./...` (+ `-timeout 60m` for `./internal/httpapi`, which needs 622 s and exceeds Go's 10 m default) | all 36 packages pass |
 | Frontend typecheck/lint | `npx tsc --noEmit`; `npm run lint` | clean |
-| Frontend unit | `npm test` | 954/954 pass before the final test additions; see below |
-| E2E — D-117 journeys | `npx playwright test e2e/whatsapp-contact-reliability.spec.ts` | 2/2 pass |
-| E2E — purchase regressions | `manual-purchase-flow`, `student-acquisition-journey`, `bundles-offers-v1`, `uxd-course-detail` | 54/54 pass after one fixture step was added |
+| Frontend unit | `npm test` | 954/954 pass |
+| Production build | `npm run build` | success |
+| E2E — D-117 journeys | `npx playwright test e2e/whatsapp-contact-reliability.spec.ts` | 2/2 pass (EN desktop with scripted popups disabled; AR RTL mobile 390×844) |
+| E2E — canonical | `node scripts/e2e-canonical.mjs` | **643 passed, 0 failed, 0 flaky, 3 skipped** (production lane 4; development lane 639 in 4 shards, 642/642 listed tests reported) |
 | Docs/expose guards | `scripts/docs-guard.sh`; `scripts/expose-guard.sh` | ok |
 
-### Full suites
+The final two UI commits (handoff button containment, digits-only placeholder) were re-verified with
+the D-117, Bundle and Course-detail specs (49/49) and the unit suite; the canonical lane ran on the
+preceding commit.
 
-Recorded in the final report for this candidate (canonical E2E lane, full backend integration suite,
-production `next build`).
+Infrastructure used: disposable local containers for PostgreSQL 16, Redis 7, Mailpit and MinIO on
+loopback. No external service was contacted; `wa.me` was stubbed in every browser run.
 
 ## Deployment plan (not executed)
 
