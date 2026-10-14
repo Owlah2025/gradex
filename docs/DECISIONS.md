@@ -4622,18 +4622,18 @@ Historical invitation-backed access remains supported. Existing `course_access_i
 
 **Unchanged:** Purchase, Bundle, confirmation, cancellation, entitlement and enrollment semantics; authorization of every existing route; the sales number configuration (`SALES_WHATSAPP_NUMBER`). No new environment variable.
 
-## D-118 — One operator-run, bilingual email asks every registered Student to add a WhatsApp number
+## D-118 — One operator-run, urgent Arabic email asks every registered Student to add a WhatsApp number
 
 **Date:** 2026-10-14
 
-**Status:** Implemented candidate. Requires independent review, a production release, and a separate explicit Product Owner approval before any email is sent.
+**Status:** Implemented candidate. Requires independent review, a production release, and a separate explicit Product Owner approval before any Student is emailed. A single test copy to an operator-chosen address is permitted on request.
 
-**Decision:** At the Product Owner's request, every ACTIVE Student with a verified email receives one email — Arabic first, English second, each with its own button — asking them to add or confirm the WhatsApp number introduced by [D-117](#d-117--every-purchase-request-carries-a-reachable-student-whatsapp-number-and-the-handoff-is-an-explicit-link). This amends D-117's "no email is sent" for this one campaign; it does not add any recurring or automatic email.
+**Decision:** At the Product Owner's request, every ACTIVE Student with a verified email receives one short Arabic email, marked «مطلوب» and sent high-priority (`Importance: high`, `X-Priority: 1`), asking them to add their WhatsApp number ([D-117](#d-117--every-purchase-request-carries-a-reachable-student-whatsapp-number-and-the-handoff-is-an-explicit-link)). Subject «مطلوب: أضف رقم الواتساب الخاص بك في GradeX»; body «لتواصل أفضل، يرجى إضافة رقم الواتساب الخاص بك إلى حسابك في GradeX.»; one large button «أضف رقم الواتساب الآن». Arabic for every Student regardless of Account language, with no explanation of the reason, by Product Owner decision. This amends D-117's "no email is sent" for this one campaign; it adds no recurring or automatic email.
 
-**Delivery:** The existing transactional pipeline end to end — outbox event `identity.contact_reminder_requested`, template `student-contact-reminder-v1`, worker dispatcher, Resend, retries, and the Admin email delivery log. Recipient addresses travel only in the encrypted protected payload. No tracking pixel, no marketing content, no unsubscribe-dependent list.
+**Delivery:** The existing transactional pipeline end to end — outbox event `identity.contact_reminder_requested`, template `student-contact-reminder-v1`, worker dispatcher, Resend, retries, and the Admin email delivery log. Recipient addresses travel only in the encrypted protected payload. The only extra headers Gradex can send are that fixed priority set. No tracking pixel and no marketing content.
 
-**Trigger:** Never a request path or a schedule. An operator runs `gradex-contact-reminder -campaign <name>` inside the API container — a dry run that only counts — and then `-send`. One audit row (`CONTACT_REMINDER_EMAIL_QUEUED`, module `NOTIFICATIONS`, actor `SYSTEM`) per Student per campaign makes re-runs send nothing twice; an advisory lock serialises concurrent runs. The command never reads or writes Student profile data beyond selecting recipients.
+**Trigger:** Never a request path or a schedule. An operator runs `gradex-contact-reminder -campaign <name>` inside the API container — a dry run that only counts — and then `-send`. One audit row (`CONTACT_REMINDER_EMAIL_QUEUED`, module `NOTIFICATIONS`, actor `SYSTEM`) per Student per campaign makes re-runs send nothing twice; an advisory lock serialises concurrent runs. `-test-to <address>` renders the same message and hands it to the configured provider for that one address, writing nothing.
 
-**Recipients:** `role = STUDENT`, `status = ACTIVE`, `email_verified_at IS NOT NULL`, with or without a number already (the message says a Student who already added one can review it or ignore the email). Unverified, suspended and staff accounts are excluded.
+**Recipients:** `role = STUDENT`, `status = ACTIVE`, `email_verified_at IS NOT NULL`, with or without a number already (the message tells a Student who already added one to ignore it). Unverified, suspended and staff accounts are excluded.
 
-**Landing:** Each button opens `/{ar|en}/learn/profile?focus=contact`, which carries no credential. A signed-out Student is sent through `/login?returnTo=…` and returned with the query intact; the profile then scrolls to the WhatsApp card and focuses the number field.
+**Landing:** The button opens `/ar/learn/profile?focus=contact`, which carries no credential. A signed-out Student is sent through `/login?returnTo=…` and returned with the query intact; the profile then scrolls to the WhatsApp card and focuses the number field.

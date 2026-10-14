@@ -72,7 +72,8 @@ func TestPreviewRendersEverySupportedContractInBothLocales(t *testing.T) {
 				t.Fatalf("%s/%s plaintext unexpectedly contains an action URL", contract, locale)
 			}
 			wantDirection := `dir="ltr"`
-			if locale == "ar" {
+			// D-118: the contact reminder is Arabic for every Student.
+			if locale == "ar" || contract == email.TemplateContactReminder {
 				wantDirection = `dir="rtl"`
 			}
 			if !strings.Contains(html, wantDirection) {

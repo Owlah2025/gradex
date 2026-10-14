@@ -179,6 +179,13 @@ func writeMailpitHeaders(buffer *bytes.Buffer, message Message, idempotencyKey, 
 			return err
 		}
 	}
+	for _, name := range []string{"Importance", "X-Priority", "Priority"} {
+		if value, ok := priorityHeaders(message)[name]; ok {
+			if _, err := fmt.Fprintf(buffer, "%s: %s\r\n", name, value); err != nil {
+				return err
+			}
+		}
+	}
 	_, err := fmt.Fprintf(buffer, "Subject: %s\r\nMIME-Version: 1.0\r\nMessage-ID: <%s@mailpit.local>\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n", mime.QEncoding.Encode("UTF-8", message.Subject), mailpitProviderID(idempotencyKey), boundary)
 	return err
 }

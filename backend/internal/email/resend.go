@@ -88,13 +88,14 @@ func (s *ResendSender) Send(ctx context.Context, message Message, idempotencyKey
 
 func (s *ResendSender) request(ctx context.Context, message Message, idempotencyKey string) (*http.Request, error) {
 	payload := struct {
-		From    string   `json:"from"`
-		To      []string `json:"to"`
-		Subject string   `json:"subject"`
-		HTML    string   `json:"html"`
-		Text    string   `json:"text"`
-		ReplyTo string   `json:"reply_to,omitempty"`
-	}{message.From, []string{message.Recipient}, message.Subject, message.HTML, message.Text, message.ReplyTo}
+		From    string            `json:"from"`
+		To      []string          `json:"to"`
+		Subject string            `json:"subject"`
+		HTML    string            `json:"html"`
+		Text    string            `json:"text"`
+		ReplyTo string            `json:"reply_to,omitempty"`
+		Headers map[string]string `json:"headers,omitempty"`
+	}{message.From, []string{message.Recipient}, message.Subject, message.HTML, message.Text, message.ReplyTo, priorityHeaders(message)}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, permanent("invalid_message", "encoding_failed")

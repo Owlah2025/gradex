@@ -95,12 +95,12 @@ func QueueContactReminders(
 	}
 
 	type recipient struct {
-		id, email, locale string
-		hasNumber         bool
-		reminded          bool
+		id, email string
+		hasNumber bool
+		reminded  bool
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT a.id::text, a.email, a.locale, a.contact_phone IS NOT NULL,
+		SELECT a.id::text, a.email, a.contact_phone IS NOT NULL,
 		       EXISTS (
 		         SELECT 1 FROM audit_events ae
 		          WHERE ae.action = $1 AND ae.target_type = 'ACCOUNT' AND ae.target_id = a.id::text
@@ -116,7 +116,7 @@ func QueueContactReminders(
 	recipients := make([]recipient, 0)
 	for rows.Next() {
 		var item recipient
-		if err := rows.Scan(&item.id, &item.email, &item.locale, &item.hasNumber, &item.reminded); err != nil {
+		if err := rows.Scan(&item.id, &item.email, &item.hasNumber, &item.reminded); err != nil {
 			rows.Close()
 			return ContactReminderResult{}, fmt.Errorf("scanning contact reminder recipient: %w", err)
 		}
@@ -141,10 +141,8 @@ func QueueContactReminders(
 		if !request.Send {
 			continue
 		}
-		locale := item.locale
-		if locale != string(LocaleArabic) && locale != string(LocaleEnglish) {
-			locale = string(LocaleArabic)
-		}
+		// D-118: Arabic for every Student, whatever the Account's language.
+		locale := string(LocaleArabic)
 		if _, err := writer.Append(ctx, tx, outbox.Event{
 			ID:                uuid.NewString(),
 			Type:              ContactReminderEventType,

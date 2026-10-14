@@ -43,6 +43,18 @@ type Message struct {
 	Subject   string
 	Text      string
 	HTML      string
+	// HighPriority marks the message as important in mail clients
+	// (Importance: high, X-Priority: 1). Only the D-118 reminder sets it.
+	HighPriority bool
+}
+
+// priorityHeaders are the only extra headers Gradex ever sends. A fixed set
+// rather than a free-form map, so no caller can inject an arbitrary header.
+func priorityHeaders(message Message) map[string]string {
+	if !message.HighPriority {
+		return nil
+	}
+	return map[string]string{"Importance": "high", "X-Priority": "1 (Highest)", "Priority": "urgent"}
 }
 
 type SendResult struct {

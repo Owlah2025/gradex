@@ -12,7 +12,7 @@ import (
 )
 
 // D-118: a reminder queued by the operator command is discovered by the
-// ordinary dispatcher and delivered once as the bilingual message.
+// ordinary dispatcher and delivered once, Arabic and high priority.
 func TestDispatcherDeliversQueuedContactReminder(t *testing.T) {
 	pool := freshEmailDatabase(t)
 	ctx := context.Background()
@@ -44,10 +44,9 @@ func TestDispatcherDeliversQueuedContactReminder(t *testing.T) {
 		t.Fatalf("delivered %d messages", len(messages))
 	}
 	message := messages[0].Message
-	if message.Recipient != "Reminder@Example.com" ||
-		!strings.Contains(message.Subject, "أضف رقم الواتساب") || !strings.Contains(message.Subject, "Add your WhatsApp number") ||
-		!strings.Contains(message.HTML, "https://gradex.example/ar/learn/profile?focus=contact") ||
-		!strings.Contains(message.HTML, "https://gradex.example/en/learn/profile?focus=contact") {
+	if message.Recipient != "Reminder@Example.com" || !message.HighPriority ||
+		!strings.Contains(message.Subject, "مطلوب") ||
+		!strings.Contains(message.HTML, "https://gradex.example/ar/learn/profile?focus=contact") {
 		t.Fatalf("delivered message = %+v", message.Subject)
 	}
 	var status, template string

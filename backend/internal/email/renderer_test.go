@@ -72,11 +72,16 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 						t.Errorf("%s is empty", name)
 					}
 				}
-				wantDir := "ltr"
+				wantDir, wantLang := "ltr", locale
 				if locale == "ar" {
 					wantDir = "rtl"
 				}
-				if !strings.Contains(message.HTML, `dir="`+wantDir+`"`) || !strings.Contains(message.HTML, `lang="`+locale+`"`) {
+				// D-118: the contact reminder is Arabic for every Student, by
+				// Product Owner decision, whatever the Account's language.
+				if tc.template == TemplateContactReminder {
+					wantDir, wantLang = "rtl", "ar"
+				}
+				if !strings.Contains(message.HTML, `dir="`+wantDir+`"`) || !strings.Contains(message.HTML, `lang="`+wantLang+`"`) {
 					t.Errorf("HTML lacks %s direction/locale", locale)
 				}
 				lower := strings.ToLower(message.HTML + message.Text)
@@ -220,10 +225,9 @@ func TestVerificationCodeMessageRefusesToRenderWithoutACode(t *testing.T) {
 	}
 }
 
-// D-118: one message in both languages, Arabic first, each half with its own
-// direction and its own button into its own language, and nothing a forwarded
-// copy could use.
-func TestContactReminderIsBilingualAndCarriesNoCredential(t *testing.T) {
+// D-118: one short, Arabic-only, high-priority message whose button opens the
+// Student's profile at the WhatsApp field, with nothing a forwarded copy could use.
+func TestContactReminderIsArabicUrgentAndCarriesNoCredential(t *testing.T) {
 	renderer, err := NewRenderer(RendererOptions{PublicOrigin: "https://gradex.example", FromAddress: "notify@gradex.example", FromName: "Gradex"})
 	if err != nil {
 		t.Fatal(err)
@@ -237,31 +241,29 @@ func TestContactReminderIsBilingualAndCarriesNoCredential(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if message.Subject != "أضف رقم الواتساب الخاص بك في GradeX | Add your WhatsApp number on GradeX" {
-			t.Fatalf("subject = %q", message.Subject)
+		if message.Subject != "مطلوب: أضف رقم الواتساب الخاص بك في GradeX" || !message.HighPriority {
+			t.Fatalf("subject = %q high priority = %v", message.Subject, message.HighPriority)
 		}
-		arabicURL := "https://gradex.example/ar/learn/profile?focus=contact"
-		englishURL := "https://gradex.example/en/learn/profile?focus=contact"
-		for _, want := range []string{
-			`lang="ar" dir="rtl"`, `lang="en" dir="ltr"`,
-			`href="` + arabicURL + `"`, `href="` + englishURL + `"`,
-			"أكمل بيانات التواصل الخاصة بك", "Complete your contact information",
-			"إضافة رقم الواتساب", "Add WhatsApp number",
-		} {
+		actionURL := "https://gradex.example/ar/learn/profile?focus=contact"
+		for _, want := range []string{`lang="ar" dir="rtl"`, `href="` + actionURL + `"`, "مطلوب", "أضف رقم الواتساب الخاص بك", "أضف رقم الواتساب الآن", "font-size:34px"} {
 			if !strings.Contains(message.HTML, want) {
 				t.Errorf("%s HTML lacks %q", locale, want)
 			}
 		}
-		if strings.Index(message.HTML, "أكمل بيانات التواصل") > strings.Index(message.HTML, "Complete your contact information") {
-			t.Error("Arabic does not come first")
+		if !strings.Contains(message.Text, actionURL) {
+			t.Error("plain text lacks the button URL")
 		}
-		if !strings.Contains(message.Text, arabicURL) || !strings.Contains(message.Text, englishURL) {
-			t.Error("plain text lacks a button URL")
-		}
-		for _, forbidden := range []string{"token", "verified", "موثّق"} {
-			if strings.Contains(strings.ToLower(message.HTML+message.Text), forbidden) {
+		for _, forbidden := range []string{"token", "WhatsApp number", "/en/", "verified", "Complete your"} {
+			if strings.Contains(message.HTML+message.Text, forbidden) {
 				t.Errorf("message contains %q", forbidden)
 			}
 		}
+		headers := priorityHeaders(message)
+		if headers["Importance"] != "high" || headers["X-Priority"] != "1 (Highest)" || len(headers) != 3 {
+			t.Errorf("priority headers = %v", headers)
+		}
+	}
+	if priorityHeaders(Message{}) != nil {
+		t.Error("an ordinary message carries priority headers")
 	}
 }
