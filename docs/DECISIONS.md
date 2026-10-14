@@ -4602,7 +4602,7 @@ Historical invitation-backed access remains supported. Existing `course_access_i
 
 **Date:** 2026-10-13
 
-**Status:** Implemented candidate on branch `feature/whatsapp-contact-reliability-20261013`. Independent review required. Not deployed; no production deployment is authorized by this decision.
+**Status:** Deployed to production on 2026-10-14 as `e54b4473cdcc46fe066819d928dcf8d6ca8f899e` (schema 58) with explicit Product Owner approval, after an independent `agy` review (APPROVE, no findings) — see the [release record](launch/evidence/2026-10-14-production-release-e54b447.md).
 
 **Problem:** A purchase request was persisted, the WhatsApp handoff did not reach WhatsApp, and the Admin had no way to contact the Student, because Gradex never stored a phone number — the only path to the Student was the Student messaging WhatsApp. The D-114 handoff opened a blank window inside the click and pointed it at `wa.me` after the request resolved; when the browser, an in-app webview, or mobile app-switching defeated that window, the Student saw no confirmation, no reference, and no way back to the conversation.
 
