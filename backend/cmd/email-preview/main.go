@@ -42,6 +42,7 @@ var supportedContracts = []string{
 	email.TemplateAccessRevoked,
 	email.TemplateDeviceTrustOTP,
 	email.TemplateVerifyEmail,
+	email.TemplateContactReminder,
 }
 
 func main() {
@@ -188,6 +189,8 @@ func renderFixture(renderer *email.Renderer, contract, locale string, purchaseBa
 	case email.TemplateVerifyEmail:
 		request.Event.Type = "identity.email_verification_requested"
 		request.Payload.VerificationToken = "preview-verification-link-token"
+	case email.TemplateContactReminder:
+		request.Event.Type = email.ContactReminderEvent
 	default:
 		return email.Message{}, fmt.Errorf("unsupported preview contract %q", contract)
 	}

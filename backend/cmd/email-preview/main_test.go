@@ -39,8 +39,8 @@ func TestPreviewRendersEverySupportedContractInBothLocales(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(supportedContracts) != 13 {
-		t.Fatalf("supported preview contract count = %d, want 13", len(supportedContracts))
+	if len(supportedContracts) != 14 {
+		t.Fatalf("supported preview contract count = %d, want 14", len(supportedContracts))
 	}
 	for _, contract := range supportedContracts {
 		for _, locale := range []string{"en", "ar"} {

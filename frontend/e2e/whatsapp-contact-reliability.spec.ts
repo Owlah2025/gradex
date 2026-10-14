@@ -279,3 +279,37 @@ test("Arabic mobile: RTL reminder, a request refused until a number is given, an
     await context.close();
   }
 });
+
+test("D-118 email link: a signed-out Student signs in and lands on the WhatsApp field", async ({ browser }) => {
+  const email = "contact-reminder-link@example.test";
+  const context = await browser.newContext({ locale: "en-US", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    await context.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
+    const page = await context.newPage();
+    await registerAndVerifyStudent(page, { email, password: PASSWORD, displayName: "Reminder Link" });
+    await page.waitForURL((url) => /\/(en|ar)\/learn\/dashboard$/.test(url.pathname));
+    // Signed out, the way a Student opens their mailbox on another device.
+    await context.clearCookies();
+
+    // The button in the email.
+    await page.goto("/en/learn/profile?focus=contact");
+    await page.waitForURL((url) => url.pathname === "/login");
+    expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/en/learn/profile?focus=contact");
+
+    await page.locator("#email").fill(email);
+    await page.locator("#password").fill(PASSWORD);
+    await page.locator('form button[type="submit"]').click();
+    await page.waitForURL((url) => url.pathname === "/en/learn/profile" && url.searchParams.get("focus") === "contact");
+
+    const card = page.getByTestId("contact-number-card");
+    await expect(card).toHaveAttribute("data-focused", "true");
+    await expect(page.getByTestId("profile-contact-number")).toBeFocused();
+    await expect(page.getByTestId("profile-contact-number")).toBeInViewport();
+    await capture(page, "en-07-email-link-landing");
+    await page.getByTestId("profile-contact-number").fill("5001 2345");
+    await page.getByTestId("profile-contact-save").click();
+    await expect(page.getByTestId("contact-number-status")).toHaveText("Provided");
+  } finally {
+    await context.close();
+  }
+});

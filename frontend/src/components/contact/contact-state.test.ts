@@ -123,3 +123,18 @@ test("the reminder appears where a signed-in Student lands", () => {
   assert.match(readSource("app/[locale]/access/page.tsx"), /<ContactNumberPrompt/);
   assert.match(readSource("components/learning/my-profile.tsx"), /<ContactNumberCard/);
 });
+
+test("D-118: the reminder email link survives sign-in and lands on the number field", () => {
+  const profile = readSource("components/learning/my-profile.tsx");
+  // A signed-out visitor is sent through sign-in with the exact path and query.
+  assert.match(profile, /cause\.problem\.status === 401/);
+  assert.match(profile, /withReturnTo\("\/login", window\.location\.pathname \+ window\.location\.search\)/);
+  const card = readSource("components/contact/contact-number-card.tsx");
+  assert.match(card, /get\("focus"\)/);
+  assert.match(card, /focus !== "contact"/);
+  assert.match(card, /getElementById\("profile-contact-number"\)/);
+  assert.match(card, /scrollIntoView/);
+  // Both languages name the new message in the Admin delivery log.
+  assert.equal(typeof en.adminUserDetail.emailKinds["student-contact-reminder-v1"], "string");
+  assert.notEqual(ar.adminUserDetail.emailKinds["student-contact-reminder-v1"], en.adminUserDetail.emailKinds["student-contact-reminder-v1"]);
+});

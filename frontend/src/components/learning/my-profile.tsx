@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMyProfile, updateMyProfile, type MyProfile } from "@/lib/api/account-profile";
+import { ProblemError } from "@/lib/api/problem";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ErrorState } from "@/components/common/error-state";
@@ -40,7 +42,15 @@ export function MyProfile() {
         setNextLocale(next.locale);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : copy.loadFailed);
+        if (cancelled) return;
+        // A signed-out visitor — typically following an email link — is sent
+        // through sign-in and brought straight back here, query included,
+        // instead of being shown a profile that "could not be loaded".
+        if (cause instanceof ProblemError && cause.problem.status === 401) {
+          router.replace(withReturnTo("/login", window.location.pathname + window.location.search));
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : copy.loadFailed);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -48,7 +58,7 @@ export function MyProfile() {
     return () => {
       cancelled = true;
     };
-  }, [copy.loadFailed, locale]);
+  }, [copy.loadFailed, locale, router]);
 
   const save = async () => {
     const csrf = currentCSRFToken();

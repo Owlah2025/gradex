@@ -4621,3 +4621,19 @@ Historical invitation-backed access remains supported. Existing `course_access_i
 **Schema:** Migration 0058 is expand-only: `accounts.contact_phone`, `accounts.contact_phone_updated_at`, `purchase_requests.contact_phone`, E.164 / Student-only / coherence CHECKs, and the snapshot-immutability trigger. Columns are named for the stored fact (a mobile contact number) rather than the channel; this keeps the D-046 community-surface detectors, which forbid community-link vocabulary in migrations and the learning surface, intact and unweakened. The API floor and ceiling become 58, so rollback is the established database-restore path, not an app swap. The down migration refuses while any number or snapshot exists.
 
 **Unchanged:** Purchase, Bundle, confirmation, cancellation, entitlement and enrollment semantics; authorization of every existing route; the sales number configuration (`SALES_WHATSAPP_NUMBER`). No new environment variable.
+
+## D-118 — One operator-run, bilingual email asks every registered Student to add a WhatsApp number
+
+**Date:** 2026-10-14
+
+**Status:** Implemented candidate. Requires independent review, a production release, and a separate explicit Product Owner approval before any email is sent.
+
+**Decision:** At the Product Owner's request, every ACTIVE Student with a verified email receives one email — Arabic first, English second, each with its own button — asking them to add or confirm the WhatsApp number introduced by [D-117](#d-117--every-purchase-request-carries-a-reachable-student-whatsapp-number-and-the-handoff-is-an-explicit-link). This amends D-117's "no email is sent" for this one campaign; it does not add any recurring or automatic email.
+
+**Delivery:** The existing transactional pipeline end to end — outbox event `identity.contact_reminder_requested`, template `student-contact-reminder-v1`, worker dispatcher, Resend, retries, and the Admin email delivery log. Recipient addresses travel only in the encrypted protected payload. No tracking pixel, no marketing content, no unsubscribe-dependent list.
+
+**Trigger:** Never a request path or a schedule. An operator runs `gradex-contact-reminder -campaign <name>` inside the API container — a dry run that only counts — and then `-send`. One audit row (`CONTACT_REMINDER_EMAIL_QUEUED`, module `NOTIFICATIONS`, actor `SYSTEM`) per Student per campaign makes re-runs send nothing twice; an advisory lock serialises concurrent runs. The command never reads or writes Student profile data beyond selecting recipients.
+
+**Recipients:** `role = STUDENT`, `status = ACTIVE`, `email_verified_at IS NOT NULL`, with or without a number already (the message says a Student who already added one can review it or ignore the email). Unverified, suspended and staff accounts are excluded.
+
+**Landing:** Each button opens `/{ar|en}/learn/profile?focus=contact`, which carries no credential. A signed-out Student is sent through `/login?returnTo=…` and returned with the query intact; the profile then scrolls to the WhatsApp card and focuses the number field.

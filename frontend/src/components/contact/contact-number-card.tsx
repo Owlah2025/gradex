@@ -35,8 +35,39 @@ export function ContactNumberCard({
     if (!number) setEditing(true);
   }, [number]);
 
+  // `?focus=contact` is where the D-118 reminder email lands: bring the card
+  // into view and put the cursor in the number field (or on "Change" when a
+  // number is already saved), once, after the profile has rendered.
+  const [highlighted, setHighlighted] = React.useState(false);
+  React.useEffect(() => {
+    let focus: string | null = null;
+    try {
+      focus = new URLSearchParams(window.location.search).get("focus");
+    } catch {
+      focus = null;
+    }
+    if (focus !== "contact") return;
+    setHighlighted(true);
+    const frame = window.requestAnimationFrame(() => {
+      const card = document.getElementById("contact");
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const target = document.getElementById("profile-contact-number") ?? document.querySelector<HTMLElement>('[data-testid="contact-number-change"]');
+      target?.focus({ preventScroll: true });
+    });
+    const timer = window.setTimeout(() => setHighlighted(false), 4000);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
-    <Card id="contact" className="scroll-mt-24" data-testid="contact-number-card">
+    <Card
+      id="contact"
+      className={`scroll-mt-24 transition-shadow ${highlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}`}
+      data-testid="contact-number-card"
+      data-focused={highlighted ? "true" : undefined}
+    >
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle>{labels.sectionTitle}</CardTitle>

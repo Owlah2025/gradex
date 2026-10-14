@@ -130,6 +130,7 @@ func contextLabelFor(locale, templateContract string) string {
 		TemplateInviteCancelled:  {"COURSE ACCESS", "الوصول إلى الدورة"},
 		TemplateAccessAdjusted:   {"COURSE ACCESS", "الوصول إلى الدورة"},
 		TemplateAccessRevoked:    {"COURSE ACCESS", "الوصول إلى الدورة"},
+		TemplateContactReminder:  {"CONTACT INFORMATION", "بيانات التواصل"},
 	}
 	label := labels[templateContract]
 	if locale == "ar" {
@@ -167,4 +168,104 @@ func accentColorFor(templateContract string) string {
 	default:
 		return "#ff7e4d"
 	}
+}
+
+// bilingualMessageTemplate shares the transactional shell above: same header,
+// colours, button and footer. The two language blocks each set their own
+// direction, so neither half is laid out against its own script.
+var bilingualMessageTemplate = template.Must(template.New("bilingual").Parse(`<!doctype html>
+<html lang="{{.Locale}}" dir="{{.Direction}}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>{{.Arabic.Title}} | {{.English.Title}}</title>
+    <style>
+      @media screen and (max-width: 620px) {
+        .email-gutter { padding: 20px 10px !important; }
+        .email-content { padding: 28px 22px !important; }
+        .email-heading { font-size: 24px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f3f7fb;color:#0d1b2a;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+    <div style="display:none!important;max-height:0;max-width:0;overflow:hidden;opacity:0;color:transparent;font-size:1px;line-height:1px;">
+      {{.Preheader}}
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f7fb" style="width:100%;border-collapse:collapse;background:#f3f7fb;">
+      <tr>
+        <td class="email-gutter" align="center" style="padding:36px 12px;">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;border-collapse:separate;background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td align="center" bgcolor="#0d1b2a" style="padding:24px 24px 20px;background:#0d1b2a;">
+                <img src="{{.LogoURL}}" alt="GradeX" width="180" height="84" style="display:block;width:180px;height:84px;max-width:100%;border:0;outline:none;text-decoration:none;color:#ffffff;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;font-size:18px;">
+              </td>
+            </tr>
+            <tr>
+              <td height="3" bgcolor="#ff7e4d" style="height:3px;line-height:3px;font-size:1px;background:#ff7e4d;">&nbsp;</td>
+            </tr>
+            {{range .Blocks}}
+            <tr>
+              <td class="email-content" lang="{{.Lang}}" dir="{{.Direction}}" align="{{.Align}}" bgcolor="#ffffff" style="padding:36px 42px 28px;background:#ffffff;direction:{{.Direction}};text-align:{{.Align}};{{if .Divider}}border-top:6px solid #f3f7fb;{{end}}">
+                <p style="margin:0 0 12px;color:#ff7e4d;font-family:Tahoma,Arial,'Segoe UI',sans-serif;font-size:12px;font-weight:bold;letter-spacing:1.6px;line-height:1.4;text-transform:uppercase;">{{.Context}}</p>
+                <h1 class="email-heading" style="margin:0 0 18px;color:#0d1b2a;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;font-size:27px;font-weight:700;line-height:1.3;">{{.Copy.Title}}</h1>
+                <p style="margin:0;color:#364453;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;font-size:16px;line-height:1.75;">{{.Copy.Body}}</p>
+                <table role="presentation" dir="ltr" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:26px auto 12px;border-collapse:collapse;direction:ltr;">
+                  <tr>
+                    <td align="center" bgcolor="#1e4ed8" style="background:#1e4ed8;border-radius:8px;">
+                      <a href="{{.ActionURL}}" style="display:inline-block;padding:14px 28px;color:#ffffff;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;font-size:16px;font-weight:bold;line-height:1.2;text-decoration:none;">{{.Copy.Action}}</a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0;padding-top:18px;border-top:1px solid #e2e8f0;color:#4c5a6b;font-family:Tahoma,Arial,'Segoe UI',sans-serif;font-size:14px;line-height:1.65;">{{.Copy.Footer}}</p>
+              </td>
+            </tr>
+            {{end}}
+            <tr>
+              <td align="center" bgcolor="#f8fafc" style="padding:18px 24px;background:#f8fafc;color:#64748b;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;font-size:13px;line-height:1.6;text-align:center;"><div lang="ar" dir="rtl" style="direction:rtl;">{{.FooterArabic}}</div><div lang="en" dir="ltr" style="direction:ltr;">{{.FooterEnglish}}</div></td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`))
+
+type bilingualBlock struct {
+	Lang, Direction, Align, Context, ActionURL string
+	Copy                                       localizedTemplate
+	Divider                                    bool
+}
+
+func renderBilingualHTML(locale string, arabic, english localizedTemplate, arabicURL, englishURL, logoURL string) (string, error) {
+	direction := "ltr"
+	if locale == "ar" {
+		direction = "rtl"
+	}
+	data := struct {
+		Locale, Direction           string
+		Arabic, English             localizedTemplate
+		LogoURL, Preheader          string
+		FooterArabic, FooterEnglish string
+		Blocks                      []bilingualBlock
+	}{
+		Arabic:        arabic,
+		Locale:        locale,
+		Direction:     direction,
+		English:       english,
+		LogoURL:       logoURL,
+		Preheader:     "أضف رقم الواتساب حتى يتمكن فريق GradeX من التواصل معك. Add your WhatsApp number so the GradeX team can reach you.",
+		FooterArabic:  footerLabelFor("ar"),
+		FooterEnglish: footerLabelFor("en"),
+		Blocks: []bilingualBlock{
+			{Lang: "ar", Direction: "rtl", Align: "right", Context: contextLabelFor("ar", TemplateContactReminder), ActionURL: arabicURL, Copy: arabic},
+			{Lang: "en", Direction: "ltr", Align: "left", Context: contextLabelFor("en", TemplateContactReminder), ActionURL: englishURL, Copy: english, Divider: true},
+		},
+	}
+	var buffer bytes.Buffer
+	if err := bilingualMessageTemplate.Execute(&buffer, data); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
 }

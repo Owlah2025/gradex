@@ -12,7 +12,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/a
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-worker ./cmd/worker \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-migrate ./cmd/migrate \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-device-cutover ./cmd/device-cutover \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-enhancement-drain ./cmd/enhancement-drain
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-enhancement-drain ./cmd/enhancement-drain \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-contact-reminder ./cmd/contact-reminder
 
 FROM build AS proof-build
 
@@ -66,6 +67,9 @@ COPY --from=build /out/gradex-device-cutover /usr/local/bin/gradex-device-cutove
 # enhancement work survives, and it must be available on the production host at
 # exactly the candidate revision performing the rollback. It writes nothing.
 COPY --from=build /out/gradex-enhancement-drain /usr/local/bin/gradex-enhancement-drain
+# D-118 operator command: queues the one-off WhatsApp contact reminder email.
+# Dry run by default; it writes only outbox and audit rows, never Student data.
+COPY --from=build /out/gradex-contact-reminder /usr/local/bin/gradex-contact-reminder
 COPY --from=build /src/internal/db/migrations ./internal/db/migrations
 
 EXPOSE 8080

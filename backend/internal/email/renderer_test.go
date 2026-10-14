@@ -39,6 +39,7 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 		{"access.invitation_cancelled", TemplateInviteCancelled, false, false},
 		{"access.entitlement_adjusted", TemplateAccessAdjusted, false, false},
 		{"access.entitlement_revoked", TemplateAccessRevoked, false, false},
+		{ContactReminderEvent, TemplateContactReminder, false, false},
 	}
 
 	// The launch-critical inventory is whatever the dispatcher will actually
@@ -216,5 +217,51 @@ func TestVerificationCodeMessageRefusesToRenderWithoutACode(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("rendering a code message with no code must fail")
+	}
+}
+
+// D-118: one message in both languages, Arabic first, each half with its own
+// direction and its own button into its own language, and nothing a forwarded
+// copy could use.
+func TestContactReminderIsBilingualAndCarriesNoCredential(t *testing.T) {
+	renderer, err := NewRenderer(RendererOptions{PublicOrigin: "https://gradex.example", FromAddress: "notify@gradex.example", FromName: "Gradex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"ar", "en"} {
+		message, err := renderer.Render(RenderRequest{
+			Event:    outbox.Event{ID: uuid.NewString(), Type: ContactReminderEvent},
+			Template: TemplateContactReminder, Locale: locale,
+			Payload: DeliveryPayload{Destination: "student@example.com", Locale: locale, TemplateContract: TemplateContactReminder},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if message.Subject != "أضف رقم الواتساب الخاص بك في GradeX | Add your WhatsApp number on GradeX" {
+			t.Fatalf("subject = %q", message.Subject)
+		}
+		arabicURL := "https://gradex.example/ar/learn/profile?focus=contact"
+		englishURL := "https://gradex.example/en/learn/profile?focus=contact"
+		for _, want := range []string{
+			`lang="ar" dir="rtl"`, `lang="en" dir="ltr"`,
+			`href="` + arabicURL + `"`, `href="` + englishURL + `"`,
+			"أكمل بيانات التواصل الخاصة بك", "Complete your contact information",
+			"إضافة رقم الواتساب", "Add WhatsApp number",
+		} {
+			if !strings.Contains(message.HTML, want) {
+				t.Errorf("%s HTML lacks %q", locale, want)
+			}
+		}
+		if strings.Index(message.HTML, "أكمل بيانات التواصل") > strings.Index(message.HTML, "Complete your contact information") {
+			t.Error("Arabic does not come first")
+		}
+		if !strings.Contains(message.Text, arabicURL) || !strings.Contains(message.Text, englishURL) {
+			t.Error("plain text lacks a button URL")
+		}
+		for _, forbidden := range []string{"token", "verified", "موثّق"} {
+			if strings.Contains(strings.ToLower(message.HTML+message.Text), forbidden) {
+				t.Errorf("message contains %q", forbidden)
+			}
+		}
 	}
 }
