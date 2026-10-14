@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -45,7 +46,8 @@ func run(campaign string, send bool) error {
 	}
 	pool, err := db.Connect(ctx, cfg.DatabaseURL().Expose())
 	if err != nil {
-		return fmt.Errorf("connecting to database: %w", err)
+		// Fixed text: a driver error may describe the connection target.
+		return errors.New("could not connect to the database")
 	}
 	defer pool.Close()
 	if err := db.CheckSchemaAtLeast(ctx, pool, db.StudentWhatsAppContactSchemaVersion); err != nil {
@@ -56,7 +58,7 @@ func run(campaign string, send bool) error {
 		admission := cfg.Admission()
 		writer, err = outbox.NewWriter(admission.ProtectedPayloadKeyVersion(), []byte(admission.ProtectedPayloadKey().Expose()))
 		if err != nil {
-			return fmt.Errorf("building outbox writer: %w", err)
+			return errors.New("the protected outbox key is not usable")
 		}
 	}
 	result, err := identity.QueueContactReminders(ctx, pool, writer, identity.ContactReminderRequest{

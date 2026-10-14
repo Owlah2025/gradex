@@ -55,6 +55,11 @@ ALLOWLIST=(
   # passed to Identity as a Secret. Adding a password Expose() to this file
   # would duplicate the plaintext boundary and must be rejected in review.
   "cmd/bootstrap-admin/main.go"
+  # D-118 operator campaign: DATABASE_URL crosses once into db.Connect/pgx,
+  # and the protected outbox key once into outbox.NewWriter (the same pairing
+  # cmd/api uses to append email intents). Output is a JSON of counts only;
+  # errors are wrapped without configuration values. PENDING HUMAN REVIEW.
+  "cmd/contact-reminder/main.go"
   "internal/config/config.go"  # placeholder validation, inside the boundary itself
   # Redis username/password cross directly into go-redis/asynq options. The
   # dedicated boundary check below pins the exact plaintext reads.
