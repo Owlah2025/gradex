@@ -128,3 +128,60 @@ any number or snapshot exists.
   in-app browsers and with popup blockers.
 - During the deploy window, a browser still running the old frontend that submits a request for a Student with
   no number receives a generic failure until reload (the old UI does not know the new requirement).
+
+## 2026-10-14 readiness gates on the final candidate `e54b4473cdcc46fe066819d928dcf8d6ca8f899e`
+
+Status: **ALL READINESS GATES PASSED — NOT DEPLOYED.** Awaiting explicit Product Owner deployment approval.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Independent review | `agy` `gemini-3.8-flash-high`, range `a38dbd8..e54b447` — [report](2026-10-14-d117-agy-review-e54b447.md) | **VERDICT: APPROVE**, 0 findings (Critical/High/Medium/Low 0/0/0/0) |
+| Hosted CI | [run 38502585963](https://github.com/Owlah2025/gradex/actions/runs/38502585963), head `e54b447` | success, 6/6 jobs (Backend, Frontend, Migrations, Admission Integration, Guards, S5 T075) |
+| Canonical E2E | `node scripts/e2e-canonical.mjs` at `e54b447` | **643 passed, 0 failed, 0 flaky, 3 skipped** (production 4; development 639 over 4 shards, 642/642 reported) |
+| Backend unit | `go test -race -count=1 ./...` | 33/33 packages ok; gofmt and vet (incl. integration tag) clean |
+| Backend integration | `go test -tags=integration -p 1 -count=1 -timeout 60m ./...` | 37/37 packages ok |
+| Frontend | `tsc --noEmit`, `npm run lint`, `npm test` | clean; 954/954 |
+| Release artifact | `release.sh build` + `export` from the clean tree at `e54b447` | `images.tar.gz` / `deploy-bundle.tar.gz` checksums OK; all three images labelled `e54b447`; image `gradex-migrate max-version` 58, `schema-range` 58 58; 0058 SQL in image byte-identical to the rehearsed files; `deploy/` unchanged since `a38dbd8` |
+
+### Migration rehearsal on restored production (2026-10-14 02:47Z)
+
+Isolated `gradex-restore-verify` container on the host, restored from offsite snapshot
+`3c4bba699ee72f6505af4006d5a531595a00b25598b2d31a16824e876064965f` (restic check: no errors;
+`verify-restore` passed). Migrator: the exact `e54b447` `cmd/migrate` built with the Dockerfile's flags,
+run in the production backend image with `--network container:gradex-restore-verify`. No release images
+were loaded onto the host; the live database received read-only count queries only.
+
+Counts legend: students | accounts | courses | enrollments | entitlements | purchase_requests | waiting_payment | bundle_items | progress | media_versions
+
+| Step | Result |
+|---|---|
+| Production live (read-only) | `57\|false`, `33\|39\|11\|32\|31\|32\|0\|0\|144\|181` |
+| Restored copy before | `57\|false`, identical counts |
+| `migrate up` 57 → 58 | `58\|false` in < 1 s; counts unchanged |
+| Objects | `accounts.contact_phone`, `accounts.contact_phone_updated_at`, `purchase_requests.contact_phone`; 0 numbers; 0 unvalidated constraints; 0 invalid indexes; 0 disabled triggers; snapshot trigger enabled |
+| Rerun `up` | no change, `58\|false`, counts unchanged |
+| `down 1` with a (simulated) provided number | refused by preflight: "cannot roll back 0058: Student contact numbers or request contact snapshots exist"; marker stays `58\|false` |
+| Rollback drill | pre-migration dump → new DB → `57\|false` with identical counts → rename-swap (`57` ↔ `58`), nothing dropped |
+| Reconciliation drill | numbers exported from the post-cutover DB, rolled-back DB re-migrated to 58, numbers re-applied: 1/1 restored, counts unchanged |
+| Production after | `57\|false`, counts unchanged |
+
+### Rollback and backup prerequisites (read-only, 2026-10-14)
+
+`runtime.env` selects `a38dbd8`; `a38dbd8` images (`backend sha256:7c35bbf0…`, `frontend sha256:88d40036…`,
+`proof sha256:25e4156a…`) and `releases/a38dbd8…/{release.env,tooling}` present; `gradex-production-backup`
+last result success, latest offsite snapshot `3c4bba69…` (02:00Z); disk 51 GB free; 6 GB memory available.
+
+### Release kit (not executed)
+
+`/var/tmp/gradex-release-20261014-d117/` on the builder: `01-transfer-and-import.sh` (builder; stages
+without selecting), `02-cutover-e54b447.sh` (host, detached), `03-rollback-e54b447.sh` (host, explicit
+decision only; exports every Student number, every request and Entitlement touched since the recorded cutover
+time before the database swap, so post-cutover sales and grants are reconciled rather than silently lost),
+`04-smoke-checklist.md`, plus the rehearsal script and log.
+
+### Remaining blockers / limits
+
+- **Deployment approval** from the Product Owner (required; not given).
+- Reviewer model differs from the standing `gemini-3.1-pro-high`, which agy no longer offers.
+- Logged-in production smokes still need a human or an approved smoke identity; real in-app browsers
+  (Instagram/TikTok/Snapchat) and real WhatsApp were not exercised.
