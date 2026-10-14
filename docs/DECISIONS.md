@@ -4626,7 +4626,7 @@ Historical invitation-backed access remains supported. Existing `course_access_i
 
 **Date:** 2026-10-14
 
-**Status:** Implemented candidate. Requires independent review, a production release, and a separate explicit Product Owner approval before any Student is emailed. A single test copy to an operator-chosen address is permitted on request.
+**Status:** Deployed as `57ccedda8a3aea8035f410a90afc5e55493b5ea3` and sent on 2026-10-14 with explicit Product Owner approval: 30 Students, 30 accepted by the provider — see the [release record](launch/evidence/2026-10-14-production-release-57ccedd-d118.md).
 
 **Decision:** At the Product Owner's request, every ACTIVE Student with a verified email receives one short Arabic email, marked «مطلوب» and sent high-priority (`Importance: high`, `X-Priority: 1`), asking them to add their WhatsApp number ([D-117](#d-117--every-purchase-request-carries-a-reachable-student-whatsapp-number-and-the-handoff-is-an-explicit-link)). Subject «مطلوب: أضف رقم الواتساب الخاص بك في GradeX»; body «لتواصل أفضل، يرجى إضافة رقم الواتساب الخاص بك إلى حسابك في GradeX.»; one large button «أضف رقم الواتساب الآن». Arabic for every Student regardless of Account language, with no explanation of the reason, by Product Owner decision. This amends D-117's "no email is sent" for this one campaign; it adds no recurring or automatic email.
 
